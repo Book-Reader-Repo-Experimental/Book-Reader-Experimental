@@ -860,51 +860,87 @@ namespace BookViewer
         {
             try
             {
-                if (_fontCache.TryGetValue(directory, out var cached)) return cached;
-
+                if (_fontCache.TryGetValue(directory, out var cached))
+                    return cached;
+        
                 string fontCss = "";
                 string fontCssPath = "";
-
+        
                 var fontCssFiles = Directory.GetFiles(directory, "*_font.css");
                 if (fontCssFiles.Length > 0)
                     fontCssPath = fontCssFiles[0];
                 else
                 {
                     var rootFontCss = Path.Combine(_currentBookPath, "font.css");
-                    if (File.Exists(rootFontCss)) fontCssPath = rootFontCss;
+                    if (File.Exists(rootFontCss))
+                        fontCssPath = rootFontCss;
                 }
-
+        
                 if (!string.IsNullOrEmpty(fontCssPath) && File.Exists(fontCssPath))
                 {
                     fontCss = await File.ReadAllTextAsync(fontCssPath);
-
+        
                     string fontsFolder = Path.Combine(_currentBookPath, "FONTS");
                     if (!Directory.Exists(fontsFolder))
                         fontsFolder = Path.Combine(_currentBookPath, "fonts");
-
-                    var fontFaceMatches = Regex.Matches(fontCss, @"@font-face\s*\{([^}]*)\}");
+        
+                    // ---- Build case-insensitive font file index ----
+                    Dictionary<string, string> fontFileIndex = null;
+                    if (Directory.Exists(fontsFolder))
+                    {
+                        fontFileIndex = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                        foreach (var f in Directory.GetFiles(fontsFolder, "*.*", SearchOption.AllDirectories))
+                        {
+                            var ext = Path.GetExtension(f).ToLowerInvariant();
+                            if (ext != ".ttf" && ext != ".otf" && ext != ".woff" && ext != ".woff2")
+                                continue;
+        
+                            var justName = Path.GetFileName(f);
+                            var justStem = Path.GetFileNameWithoutExtension(f);
+                            var noSpace = justStem.Replace(" ", "").Replace("-", "").Replace("_", "");
+        
+                            if (!fontFileIndex.ContainsKey(justName)) fontFileIndex[justName] = f;
+                            if (!fontFileIndex.ContainsKey(justStem)) fontFileIndex[justStem] = f;
+                            if (!fontFileIndex.ContainsKey(noSpace)) fontFileIndex[noSpace] = f;
+                        }
+                    }
+        
+                    var fontFaceMatches = Regex.Matches(
+                        fontCss,
+                        @"@font-face\s*\{(?<body>.*?)\}",
+                        RegexOptions.Singleline | RegexOptions.IgnoreCase);
+        
+                    int totalFaces = fontFaceMatches.Count;
+                    int embeddedCount = 0;
+        
                     foreach (Match match in fontFaceMatches)
                     {
                         var fontFaceContent = match.Groups[1].Value;
                         var urlMatches = Regex.Matches(fontFaceContent, @"url\(['""]?([^)'""]+)['""]?\)");
+                        bool faceWasEmbedded = false;
+        
                         foreach (Match urlMatch in urlMatches)
                         {
-                            var fontPath = urlMatch.Groups[1].Value;
-                            fontPath = fontPath.Replace("../FONTS/", "").Replace("../fonts/", "").Replace("./", "");
-
+                            var rawPath = urlMatch.Groups[1].Value;
+                            var cleanPath = rawPath
+                                .Replace("../FONTS/", "")
+                                .Replace("../fonts/", "")
+                                .Replace("./", "")
+                                .Trim();
+        
                             string fullFontPath = null;
-                            if (Directory.Exists(fontsFolder))
+        
+                            if (fontFileIndex != null)
                             {
-                                var exactPath = Path.Combine(fontsFolder, fontPath);
-                                if (File.Exists(exactPath)) fullFontPath = exactPath;
-                                else
-                                {
-                                    var fileNameOnly = Path.GetFileName(fontPath);
-                                    var fileNamePath = Path.Combine(fontsFolder, fileNameOnly);
-                                    if (File.Exists(fileNamePath)) fullFontPath = fileNamePath;
-                                }
+                                var justName = Path.GetFileName(cleanPath);
+                                var justStem = Path.GetFileNameWithoutExtension(cleanPath);
+                                var noSpace = justStem.Replace(" ", "").Replace("-", "").Replace("_", "");
+        
+                                if (fontFileIndex.TryGetValue(justName, out var p1)) fullFontPath = p1;
+                                else if (fontFileIndex.TryGetValue(justStem, out var p2)) fullFontPath = p2;
+                                else if (fontFileIndex.TryGetValue(noSpace, out var p3)) fullFontPath = p3;
                             }
-
+        
                             if (!string.IsNullOrEmpty(fullFontPath) && File.Exists(fullFontPath))
                             {
                                 var fontBytes = File.ReadAllBytes(fullFontPath);
@@ -926,29 +962,68 @@ namespace BookViewer
                                     ".woff2" => "font/woff2",
                                     _ => "font/ttf"
                                 };
-
+        
                                 var dataUri = $"data:{mimeType};base64,{fontBase64}";
-                                fontCss = fontCss.Replace($"url('{urlMatch.Groups[1].Value}')", $"url('{dataUri}')");
-                                fontCss = fontCss.Replace($"url(\"{urlMatch.Groups[1].Value}\")", $"url('{dataUri}')");
-                                fontCss = fontCss.Replace($"url({urlMatch.Groups[1].Value})", $"url('{dataUri}')");
+        
+                                fontCss = fontCss.Replace($"url('{rawPath}')", $"url('{dataUri}')");
+                                fontCss = fontCss.Replace($"url(\"{rawPath}\")", $"url('{dataUri}')");
+                                fontCss = fontCss.Replace($"url({rawPath})", $"url('{dataUri}')");
+        
+                                faceWasEmbedded = true;
+                                Log($"Embedded font: {Path.GetFileName(fullFontPath)} ({fontBytes.Length} bytes)");
+                            }
+                            else
+                            {
+                                Log($"Font file NOT FOUND: '{rawPath}' in {fontsFolder}");
                             }
                         }
+        
+                        if (faceWasEmbedded)
+                        {
+                            embeddedCount++;
+        
+                            // ---- Inject metric overrides + line-height to normalize baseline ----
+                            var originalBlock = match.Value;
+                            var bodyContent = match.Groups["body"].Value;
+        
+                            // Ensure a line-height is present after `font:` shorthand
+                            var normalizedBody = Regex.Replace(
+                                bodyContent,
+                                @"(font\s*:[^;]+;)(?!\s*line-height)",
+                                "$1\n    line-height: 1.5em;",
+                                RegexOptions.IgnoreCase);
+        
+                            // Append metric overrides before the closing brace
+                            normalizedBody = normalizedBody.TrimEnd();
+                            if (!normalizedBody.EndsWith(";"))
+                                normalizedBody += ";";
+        
+                            normalizedBody +=
+                                "\n    ascent-override: 90%;" +
+                                "\n    descent-override: 20%;" +
+                                "\n    line-gap-override: 0%;";
+        
+                            var newBlock = "@font-face {\n" + normalizedBody + "\n}";
+                            fontCss = fontCss.Replace(originalBlock, newBlock);
+                        }
                     }
-
+        
+                    Log($"Font embedding summary: {embeddedCount} of {totalFaces} @font-face rules embedded");
+        
                     _fontCache[directory] = fontCss;
                     return fontCss;
                 }
-
+        
                 fontCss = await GenerateFontCssFromFiles();
                 _fontCache[directory] = fontCss;
                 return fontCss;
             }
-            catch
+            catch (Exception ex)
             {
+                Log($"Error loading fonts: {ex.Message}");
                 return "";
             }
         }
-
         private async Task<string> GenerateFontCssFromFiles()
         {
             try
@@ -1055,125 +1130,107 @@ namespace BookViewer
 
         private string BuildOverlayHtml(string bgImage, string contentHtml, string fileName, string fontCss, string teacherAnswerHtml, string studentAnswerHtml)
         {
-            if (string.IsNullOrEmpty(bgImage)) bgImage = GetPlaceholderImage();
+            if (string.IsNullOrEmpty(bgImage))
+                bgImage = GetPlaceholderImage();
+        
             if (string.IsNullOrEmpty(contentHtml))
                 contentHtml = "<div style='padding:20px;color:#666;font-size:24px;'>Content not available</div>";
-
+        
             double zoom = _currentZoom;
-
+        
             return $@"
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset='UTF-8'>
-    <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes'>
-    <title>{fileName}</title>
-    <style>
-        {fontCss}
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        html, body {{ width: 100%; height: 100%; overflow: auto; background: #E8E8E8; }}
-        body {{ display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; padding: 10px; }}
-        .page-container {{
-            position: relative;
-            width: 1024px; height: 1344px;
-            flex-shrink: 0;
-            background: #ffffff;
-            box-shadow: 0 0 20px rgba(0,0,0,0.15);
-            overflow: hidden;
-            border-radius: 2px;
-            transform: scale({zoom.ToString(System.Globalization.CultureInfo.InvariantCulture)});
-            transform-origin: top center;
-        }}
-        .background-img {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; z-index: 1; }}
-        .content-overlay {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; }}
-        .content-overlay > * {{ position: absolute !important; }}
-    </style>
-</head>
-<body>
-    <div class='page-container'>
-        <img class='background-img' src='{bgImage}' alt='' />
-        <div class='content-overlay'>
-            {contentHtml}
-            {teacherAnswerHtml}
-            {studentAnswerHtml}
-        </div>
-    </div>
-</body>
-</html>";
-        }
-
-        public async Task<string> BuildPageHtmlForRenderAsync(
-            string filePath,
-            bool includeAnswers,
-            bool includeTeacherNotes,
-            bool includeStudentAnswers)
-        {
-            var directory = Path.GetDirectoryName(filePath) ?? "";
-            var fileName = Path.GetFileName(filePath) ?? "";
-
-            string bgImage = GetStepBackgroundImage(filePath);
-            string contentHtml = await ExtractContentFromHtmlFile(filePath, fileName, directory);
-            string fontCss = await GetFontCssWithEmbeddedFonts(directory);
-
-            string teacherHtml = "";
-            string studentHtml = "";
-
-            if (includeAnswers)
-            {
-                if (includeTeacherNotes)
-                {
-                    var redContent = await GetRedAnswerContentAsync(filePath, "teacherNotes");
-                    if (!string.IsNullOrEmpty(redContent))
-                    {
-                        teacherHtml = $@"<div class='highlight-overlay teacher-overlay'>
-<style>.tbnote {{ background: rgba(255,255,0,0.25); border: 3px solid #3498db; border-radius: 4px; padding: 3px; }}</style>
-{redContent}</div>";
-                    }
-                }
-
-                if (includeStudentAnswers)
-                {
-                    var redContent = await GetRedAnswerContentAsync(filePath, "studentAnswers");
-                    if (!string.IsNullOrEmpty(redContent))
-                    {
-                        studentHtml = $@"<div class='highlight-overlay student-overlay'>
-<style>.sa {{ background: rgba(255,255,0,0.25); border: 3px solid #2ecc71; border-radius: 4px; padding: 3px; }}</style>
-{redContent}</div>";
-                    }
-                }
-            }
-
-            return $@"<!DOCTYPE html>
-<html>
-<head>
-<meta charset='UTF-8'>
-<style>
-    {fontCss}
-    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-    html, body {{ width: 1024px; height: 1344px; overflow: hidden; background: #ffffff; }}
-    .page-container {{ position: relative; width: 1024px; height: 1344px; background: #ffffff; overflow: hidden; }}
-    .background-img {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; z-index: 1; }}
-    .content-overlay {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; }}
-    .content-overlay > * {{ position: absolute !important; top: 0; left: 0; }}
-    .base-content {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 5; }}
-    .base-content > * {{ position: absolute !important; }}
-    .highlight-overlay {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 20; pointer-events: none; overflow: visible; }}
-    .highlight-overlay > *, .highlight-overlay > * > * {{ position: absolute !important; }}
-    .teacher-overlay .tbnote, .highlight-overlay .tbnote {{ background: rgba(255,255,0,0.25); border: 3px solid #3498db; border-radius: 4px; padding: 3px; }}
-    .student-overlay .sa, .highlight-overlay .sa {{ background: rgba(255,255,0,0.25); border: 3px solid #2ecc71; border-radius: 4px; padding: 3px; }}
-</style>
-</head>
-<body>
-<div class='page-container'>
-    <img class='background-img' src='{bgImage}' />
-    <div class='content-overlay'>
-        <div class='base-content'>{contentHtml}</div>
-        {teacherHtml}
-        {studentHtml}
-    </div>
-</div>
-</body>
-</html>";
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset='UTF-8'>
+            <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes'>
+            <title>{fileName}</title>
+            <style>
+                {fontCss}
+        
+                * {{
+                    margin: 0;
+                    padding: 0;
+                    box-sizing: border-box;
+                }}
+        
+                html, body {{
+                    width: 100%;
+                    height: 100%;
+                    overflow: auto;
+                    background: #E8E8E8;
+                    -webkit-font-smoothing: antialiased;
+                    -moz-osx-font-smoothing: grayscale;
+                }}
+        
+                body {{
+                    display: flex;
+                    justify-content: center;
+                    align-items: flex-start;
+                    min-height: 100vh;
+                    padding: 0;
+                    margin: 0;
+                }}
+        
+                .page-wrapper {{
+                    display: flex;
+                    justify-content: center;
+                    align-items: flex-start;
+                    padding: 0;
+                    margin: 0;
+                }}
+        
+                .page-container {{
+                    position: relative;
+                    width: 1024px;
+                    height: 1344px;
+                    flex-shrink: 0;
+                    background: #ffffff;
+                    box-shadow: 0 0 20px rgba(0,0,0,0.15);
+                    overflow: hidden;
+                    border-radius: 2px;
+                    transform: scale({zoom.ToString(System.Globalization.CultureInfo.InvariantCulture)});
+                    transform-origin: top center;
+                }}
+        
+                .background-img {{
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    object-fit: contain;
+                    pointer-events: none;
+                    z-index: 1;
+                }}
+        
+                .content-overlay {{
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    z-index: 2;
+                }}
+        
+                .content-overlay > * {{
+                    position: absolute !important;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class='page-wrapper'>
+                <div class='page-container'>
+                    <img class='background-img' src='{bgImage}' alt='' />
+                    <div class='content-overlay'>
+                        {contentHtml}
+                        {teacherAnswerHtml}
+                        {studentAnswerHtml}
+                    </div>
+                </div>
+            </div>
+        </body>
+        </html>";
         }
 
         public void NavigatePrevious()
