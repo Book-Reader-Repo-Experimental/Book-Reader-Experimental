@@ -911,32 +911,11 @@ namespace BookViewer
                                 Log($"Font file NOT FOUND: '{rawPath}' in {fontsFolder}");
                             }
                         }
-
                         if (faceWasEmbedded)
                         {
                             embeddedCount++;
-
-                            // Inject metric overrides + ensure line-height after `font:` shorthand
-                            var originalBlock = match.Value;
-                            var bodyContent = match.Groups["body"].Value;
-
-                            var normalizedBody = Regex.Replace(
-                                bodyContent,
-                                @"(font\s*:[^;]+;)(?!\s*line-height)",
-                                "$1\n    line-height: 1.5em;",
-                                RegexOptions.IgnoreCase);
-
-                            normalizedBody = normalizedBody.TrimEnd();
-                            if (!normalizedBody.EndsWith(";"))
-                                normalizedBody += ";";
-
-                            normalizedBody +=
-                                "\n    ascent-override: 90%;" +
-                                "\n    descent-override: 20%;" +
-                                "\n    line-gap-override: 0%;";
-
-                            var newBlock = "@font-face {\n" + normalizedBody + "\n}";
-                            fontCss = fontCss.Replace(originalBlock, newBlock);
+                            // No metric overrides. Let the browser use the font's own metrics.
+                            // The CSS file already declares line-height per rule.
                         }
                     }
 
