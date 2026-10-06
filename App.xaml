@@ -6,17 +6,17 @@
         <ResourceDictionary>
 
             <!-- ============ COLORS ============ -->
-            <Color x:Key="Primary">#007AFF</Color>
-            <Color x:Key="PrimaryDark">#0A84FF</Color>
+            <Color x:Key="Accent">#0A84FF</Color>
+            <Color x:Key="AccentDark">#409CFF</Color>
 
             <Color x:Key="Surface">#FFFFFF</Color>
             <Color x:Key="SurfaceDark">#1C1C1E</Color>
 
-            <Color x:Key="Background">#F2F2F7</Color>
-            <Color x:Key="BackgroundDark">#000000</Color>
+            <Color x:Key="Elevated">#F7F7F9</Color>
+            <Color x:Key="ElevatedDark">#2C2C2E</Color>
 
-            <Color x:Key="Separator">#E5E5EA</Color>
-            <Color x:Key="SeparatorDark">#38383A</Color>
+            <Color x:Key="Canvas">#F2F2F7</Color>
+            <Color x:Key="CanvasDark">#000000</Color>
 
             <Color x:Key="TextPrimary">#000000</Color>
             <Color x:Key="TextPrimaryDark">#FFFFFF</Color>
@@ -24,54 +24,20 @@
             <Color x:Key="TextSecondary">#8E8E93</Color>
             <Color x:Key="TextSecondaryDark">#98989D</Color>
 
-            <Color x:Key="Accent">#34C759</Color>
-            <Color x:Key="Danger">#FF3B30</Color>
+            <Color x:Key="Success">#34C759</Color>
+            <Color x:Key="Danger">#FF453A</Color>
 
-            <!-- ============ BUTTON STYLES ============ -->
-
-            <Style x:Key="TextButton" TargetType="Button">
-                <Setter Property="BackgroundColor" Value="Transparent"/>
-                <Setter Property="TextColor"
-                        Value="{AppThemeBinding Light={StaticResource Primary}, Dark={StaticResource PrimaryDark}}"/>
-                <Setter Property="FontSize" Value="15"/>
-                <Setter Property="Padding" Value="12,8"/>
-                <Setter Property="MinimumHeightRequest" Value="44"/>
-                <Setter Property="MinimumWidthRequest" Value="44"/>
-                <Setter Property="CornerRadius" Value="8"/>
-            </Style>
-
-            <Style x:Key="FilledButton" TargetType="Button">
-                <Setter Property="BackgroundColor"
-                        Value="{AppThemeBinding Light={StaticResource Primary}, Dark={StaticResource PrimaryDark}}"/>
-                <Setter Property="TextColor" Value="White"/>
-                <Setter Property="FontSize" Value="15"/>
+            <!-- ============ TYPOGRAPHY ============ -->
+            <!-- iOS Large Title -->
+            <Style x:Key="LargeTitle" TargetType="Label">
+                <Setter Property="FontSize" Value="30"/>
                 <Setter Property="FontAttributes" Value="Bold"/>
-                <Setter Property="Padding" Value="16,10"/>
-                <Setter Property="MinimumHeightRequest" Value="44"/>
-                <Setter Property="CornerRadius" Value="10"/>
-            </Style>
-
-            <Style x:Key="IconButton" TargetType="Button">
-                <Setter Property="BackgroundColor" Value="Transparent"/>
-                <Setter Property="TextColor"
-                        Value="{AppThemeBinding Light={StaticResource Primary}, Dark={StaticResource PrimaryDark}}"/>
-                <Setter Property="FontSize" Value="18"/>
-                <Setter Property="Padding" Value="6"/>
-                <Setter Property="MinimumHeightRequest" Value="44"/>
-                <Setter Property="MinimumWidthRequest" Value="44"/>
-                <Setter Property="CornerRadius" Value="8"/>
-            </Style>
-
-            <Style x:Key="ToggleButton" TargetType="Button" BasedOn="{StaticResource TextButton}">
-                <Setter Property="BackgroundColor"
-                        Value="{AppThemeBinding Light=#EFEFF0, Dark=#2C2C2E}"/>
                 <Setter Property="TextColor"
                         Value="{AppThemeBinding Light={StaticResource TextPrimary}, Dark={StaticResource TextPrimaryDark}}"/>
             </Style>
 
-            <!-- ============ LABEL STYLES ============ -->
-
-            <Style x:Key="TitleLabel" TargetType="Label">
+            <!-- Navigation title -->
+            <Style x:Key="NavTitle" TargetType="Label">
                 <Setter Property="FontSize" Value="17"/>
                 <Setter Property="FontAttributes" Value="Bold"/>
                 <Setter Property="TextColor"
@@ -79,23 +45,79 @@
                 <Setter Property="VerticalTextAlignment" Value="Center"/>
             </Style>
 
-            <Style x:Key="LargeTitleLabel" TargetType="Label">
-                <Setter Property="FontSize" Value="28"/>
-                <Setter Property="FontAttributes" Value="Bold"/>
-                <Setter Property="TextColor"
-                        Value="{AppThemeBinding Light={StaticResource TextPrimary}, Dark={StaticResource TextPrimaryDark}}"/>
-            </Style>
-
-            <Style x:Key="BodyLabel" TargetType="Label">
+            <!-- Body -->
+            <Style x:Key="Body" TargetType="Label">
                 <Setter Property="FontSize" Value="15"/>
                 <Setter Property="TextColor"
                         Value="{AppThemeBinding Light={StaticResource TextPrimary}, Dark={StaticResource TextPrimaryDark}}"/>
             </Style>
 
-            <Style x:Key="CaptionLabel" TargetType="Label">
+            <!-- Caption / metadata -->
+            <Style x:Key="Caption" TargetType="Label">
                 <Setter Property="FontSize" Value="12"/>
                 <Setter Property="TextColor"
                         Value="{AppThemeBinding Light={StaticResource TextSecondary}, Dark={StaticResource TextSecondaryDark}}"/>
+            </Style>
+
+            <!-- Section header (uppercase, iOS grouped list style) -->
+            <Style x:Key="SectionHeader" TargetType="Label">
+                <Setter Property="FontSize" Value="12"/>
+                <Setter Property="FontAttributes" Value="Bold"/>
+                <Setter Property="TextColor"
+                        Value="{AppThemeBinding Light={StaticResource TextSecondary}, Dark={StaticResource TextSecondaryDark}}"/>
+                <Setter Property="Margin" Value="20,20,20,6"/>
+            </Style>
+
+            <!-- ============ BUTTONS ============ -->
+
+            <!-- Text button (accent tint, no bg) -->
+            <Style x:Key="TextButton" TargetType="Button">
+                <Setter Property="BackgroundColor" Value="Transparent"/>
+                <Setter Property="TextColor"
+                        Value="{AppThemeBinding Light={StaticResource Accent}, Dark={StaticResource AccentDark}}"/>
+                <Setter Property="FontSize" Value="15"/>
+                <Setter Property="Padding" Value="10,6"/>
+                <Setter Property="MinimumHeightRequest" Value="36"/>
+                <Setter Property="MinimumWidthRequest" Value="36"/>
+                <Setter Property="CornerRadius" Value="8"/>
+            </Style>
+
+            <!-- Icon button (compact, tinted) -->
+            <Style x:Key="IconButton" TargetType="Button">
+                <Setter Property="BackgroundColor" Value="Transparent"/>
+                <Setter Property="TextColor"
+                        Value="{AppThemeBinding Light={StaticResource Accent}, Dark={StaticResource AccentDark}}"/>
+                <Setter Property="FontSize" Value="18"/>
+                <Setter Property="Padding" Value="0"/>
+                <Setter Property="MinimumHeightRequest" Value="36"/>
+                <Setter Property="MinimumWidthRequest" Value="36"/>
+                <Setter Property="WidthRequest" Value="36"/>
+                <Setter Property="HeightRequest" Value="36"/>
+                <Setter Property="CornerRadius" Value="8"/>
+            </Style>
+
+            <!-- Pill chip (segmented control / filter chip) -->
+            <Style x:Key="Chip" TargetType="Button">
+                <Setter Property="BackgroundColor"
+                        Value="{AppThemeBinding Light={StaticResource Elevated}, Dark={StaticResource ElevatedDark}}"/>
+                <Setter Property="TextColor"
+                        Value="{AppThemeBinding Light={StaticResource TextPrimary}, Dark={StaticResource TextPrimaryDark}}"/>
+                <Setter Property="FontSize" Value="13"/>
+                <Setter Property="Padding" Value="14,6"/>
+                <Setter Property="MinimumHeightRequest" Value="32"/>
+                <Setter Property="CornerRadius" Value="16"/>
+            </Style>
+
+            <!-- Primary filled (rare — only for main CTA) -->
+            <Style x:Key="PrimaryButton" TargetType="Button">
+                <Setter Property="BackgroundColor"
+                        Value="{AppThemeBinding Light={StaticResource Accent}, Dark={StaticResource AccentDark}}"/>
+                <Setter Property="TextColor" Value="White"/>
+                <Setter Property="FontSize" Value="15"/>
+                <Setter Property="FontAttributes" Value="Bold"/>
+                <Setter Property="Padding" Value="20,12"/>
+                <Setter Property="MinimumHeightRequest" Value="44"/>
+                <Setter Property="CornerRadius" Value="22"/>
             </Style>
 
         </ResourceDictionary>
