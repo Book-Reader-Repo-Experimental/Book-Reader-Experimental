@@ -177,24 +177,40 @@ namespace BookViewer.Views
         {
             ContentsView.IsVisible = true;
             ResourcesView.IsVisible = false;
-
-            ContentsTab.BackgroundColor = Color.FromArgb("#E0E0E0");
-            ContentsTab.TextColor = Colors.Black;
-
+        
+            ContentsTab.BackgroundColor = Application.Current?.RequestedTheme == AppTheme.Dark
+                ? Color.FromArgb("#3A3A3C")
+                : Colors.White;
+            ContentsTab.TextColor = Application.Current?.RequestedTheme == AppTheme.Dark
+                ? Colors.White
+                : Colors.Black;
+            ContentsTab.FontAttributes = FontAttributes.Bold;
+        
             ResourcesTab.BackgroundColor = Colors.Transparent;
-            ResourcesTab.TextColor = Color.FromArgb("#666666");
+            ResourcesTab.TextColor = Application.Current?.RequestedTheme == AppTheme.Dark
+                ? Color.FromArgb("#98989D")
+                : Color.FromArgb("#8E8E93");
+            ResourcesTab.FontAttributes = FontAttributes.None;
         }
-
+        
         private void OnResourcesTabClicked(object sender, EventArgs e)
         {
             ContentsView.IsVisible = false;
             ResourcesView.IsVisible = true;
-
+        
             ContentsTab.BackgroundColor = Colors.Transparent;
-            ContentsTab.TextColor = Color.FromArgb("#666666");
-
-            ResourcesTab.BackgroundColor = Color.FromArgb("#E0E0E0");
-            ResourcesTab.TextColor = Colors.Black;
+            ContentsTab.TextColor = Application.Current?.RequestedTheme == AppTheme.Dark
+                ? Color.FromArgb("#98989D")
+                : Color.FromArgb("#8E8E93");
+            ContentsTab.FontAttributes = FontAttributes.None;
+        
+            ResourcesTab.BackgroundColor = Application.Current?.RequestedTheme == AppTheme.Dark
+                ? Color.FromArgb("#3A3A3C")
+                : Colors.White;
+            ResourcesTab.TextColor = Application.Current?.RequestedTheme == AppTheme.Dark
+                ? Colors.White
+                : Colors.Black;
+            ResourcesTab.FontAttributes = FontAttributes.Bold;
         }
 
         private async void OnBackClicked(object sender, EventArgs e)
