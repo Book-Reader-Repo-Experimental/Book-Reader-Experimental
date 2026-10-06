@@ -12,24 +12,19 @@
               Padding="8,8"
               ColumnDefinitions="Auto,*,Auto">
 
-            <Button x:Name="BackButton"
-                    Grid.Column="0"
-                    Text="‹ Back"
+            <Button Grid.Column="0"
+                    Text="‹"
                     Clicked="OnBackTapped"
-                    Style="{StaticResource TextButton}"
-                    FontSize="15"
-                    Padding="6,0"
-                    MinimumHeightRequest="40"
-                    MaximumWidthRequest="{OnIdiom Phone=180, Tablet=280, Default=220}"
-                    LineBreakMode="TailTruncation"
-                    HorizontalOptions="Start"
-                    VerticalOptions="Center"/>
+                    Style="{StaticResource IconButton}"
+                    FontSize="24"
+                    Margin="4,0,0,0"/>
 
             <Label x:Name="TitleLabel"
                    Grid.Column="1"
-                   Text="Contents"
+                   Text=""
                    Style="{StaticResource NavTitle}"
-                   HorizontalTextAlignment="Center"/>
+                   HorizontalTextAlignment="Center"
+                   LineBreakMode="TailTruncation"/>
 
             <BoxView Grid.Column="2" WidthRequest="40"/>
         </Grid>
@@ -38,8 +33,8 @@
         <ScrollView Grid.Row="1">
             <VerticalStackLayout Padding="0,8,0,24">
 
-                <Label x:Name="BookTitleLabel"
-                       Text=""
+                <Label x:Name="SectionHeaderLabel"
+                       Text="Contents"
                        Style="{StaticResource SectionHeader}"/>
 
                 <CollectionView x:Name="UnitsCollection"
