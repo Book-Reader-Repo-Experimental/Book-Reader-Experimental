@@ -2,84 +2,76 @@
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              x:Class="BookViewer.Views.PageGridView"
-             BackgroundColor="{AppThemeBinding Light={StaticResource Background}, Dark={StaticResource BackgroundDark}}">
+             BackgroundColor="{AppThemeBinding Light={StaticResource Canvas}, Dark={StaticResource CanvasDark}}">
 
     <Grid RowDefinitions="Auto,*,Auto">
 
-        <!-- ================= TOP BAR ================= -->
+        <!-- ================= NAV BAR ================= -->
         <Grid Grid.Row="0"
               BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}"
-              Padding="8,6"
+              Padding="8,8"
               ColumnDefinitions="Auto,*,Auto">
 
             <Button Grid.Column="0"
-                    Text="‹ Back"
+                    Text="‹"
                     Clicked="OnCloseClicked"
-                    Style="{StaticResource TextButton}"
-                    FontSize="17"
-                    VerticalOptions="Center"/>
+                    Style="{StaticResource IconButton}"
+                    FontSize="24"
+                    Margin="4,0,0,0"/>
 
             <Label Grid.Column="1"
                    Text="Pages"
-                   Style="{StaticResource TitleLabel}"
+                   Style="{StaticResource NavTitle}"
                    HorizontalTextAlignment="Center"/>
 
-            <Label Grid.Column="2" Text="" WidthRequest="60"/>
+            <BoxView Grid.Column="2" WidthRequest="36"/>
         </Grid>
 
-        <BoxView Grid.Row="0"
-                 HeightRequest="0.5"
-                 Color="{AppThemeBinding Light={StaticResource Separator}, Dark={StaticResource SeparatorDark}}"
-                 VerticalOptions="End"/>
-
         <!-- ================= PAGE GRID ================= -->
-        <ScrollView Grid.Row="1">
-            <CollectionView x:Name="PagesCollection"
-                            Margin="12"
-                            SelectionMode="None">
-                <CollectionView.ItemsLayout>
-                    <GridItemsLayout Orientation="Vertical"
-                                     Span="{OnIdiom Phone=2, Tablet=4, Default=5}"
-                                     HorizontalItemSpacing="12"
-                                     VerticalItemSpacing="12"/>
-                </CollectionView.ItemsLayout>
+        <CollectionView x:Name="PagesCollection"
+                        Grid.Row="1"
+                        Margin="10"
+                        SelectionMode="None">
+            <CollectionView.ItemsLayout>
+                <GridItemsLayout Orientation="Vertical"
+                                 Span="{OnIdiom Phone=2, Tablet=4, Default=5}"
+                                 HorizontalItemSpacing="10"
+                                 VerticalItemSpacing="10"/>
+            </CollectionView.ItemsLayout>
 
-                <CollectionView.ItemTemplate>
-                    <DataTemplate>
-                        <VerticalStackLayout Spacing="4">
-                            <VerticalStackLayout.GestureRecognizers>
-                                <TapGestureRecognizer Tapped="OnPageTapped"/>
-                            </VerticalStackLayout.GestureRecognizers>
+            <CollectionView.ItemTemplate>
+                <DataTemplate>
+                    <VerticalStackLayout Spacing="4">
+                        <VerticalStackLayout.GestureRecognizers>
+                            <TapGestureRecognizer Tapped="OnPageTapped"/>
+                        </VerticalStackLayout.GestureRecognizers>
 
-                            <Border Padding="0"
-                                    StrokeThickness="0"
-                                    StrokeShape="RoundRectangle 8"
-                                    BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}"
-                                    HeightRequest="290">
-                                <Border.Shadow>
-                                    <Shadow Brush="Black" Opacity="0.10" Radius="6" Offset="0,2"/>
-                                </Border.Shadow>
-                                <Image Source="{Binding ThumbnailSource}"
-                                       Aspect="AspectFill"/>
-                            </Border>
+                        <Frame Padding="0"
+                               CornerRadius="6"
+                               HasShadow="False"
+                               BackgroundColor="{AppThemeBinding Light={StaticResource Elevated}, Dark={StaticResource ElevatedDark}}"
+                               HeightRequest="270"
+                               IsClippedToBounds="True">
+                            <Image Source="{Binding ThumbnailSource}"
+                                   Aspect="AspectFill"/>
+                        </Frame>
 
-                            <Label Text="{Binding PageNumber}"
-                                   Style="{StaticResource CaptionLabel}"
-                                   FontSize="12"
-                                   HorizontalTextAlignment="Center"/>
-                        </VerticalStackLayout>
-                    </DataTemplate>
-                </CollectionView.ItemTemplate>
-            </CollectionView>
-        </ScrollView>
+                        <Label Text="{Binding PageNumber}"
+                               Style="{StaticResource Caption}"
+                               FontSize="11"
+                               HorizontalTextAlignment="Center"/>
+                    </VerticalStackLayout>
+                </DataTemplate>
+            </CollectionView.ItemTemplate>
+        </CollectionView>
 
-        <!-- ================= STATUS BAR ================= -->
+        <!-- ================= STATUS ================= -->
         <Grid Grid.Row="2"
               BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}"
-              Padding="16,6">
+              Padding="20,8">
             <Label x:Name="StatusText"
                    Text=""
-                   Style="{StaticResource CaptionLabel}"
+                   Style="{StaticResource Caption}"
                    LineBreakMode="TailTruncation"/>
         </Grid>
     </Grid>
