@@ -2,136 +2,146 @@
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              x:Class="BookViewer.Views.LibraryPage"
-             BackgroundColor="#FFFFFF">
-    <Grid RowDefinitions="Auto,Auto,*,Auto">
+             BackgroundColor="{AppThemeBinding Light={StaticResource Background}, Dark={StaticResource BackgroundDark}}">
 
-        <!-- Top bar -->
-        <Grid Grid.Row="0" BackgroundColor="#8BC34A" Padding="16,8"
-              ColumnDefinitions="Auto,*,Auto,Auto,Auto"
-              ColumnSpacing="8">
+    <Grid RowDefinitions="Auto,Auto,*,Auto"
+          Padding="{OnPlatform iOS='0,0,0,16', Android='0', WinUI='0'}">
 
-            <Label Grid.Column="1"
-                   Text="Book Viewer"
-                   TextColor="White"
-                   FontSize="18"
-                   FontAttributes="Bold"
+        <!-- ================= TOP BAR ================= -->
+        <Grid Grid.Row="0"
+              BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}"
+              Padding="16,10"
+              ColumnDefinitions="*,Auto,Auto,Auto"
+              ColumnSpacing="4">
+
+            <Label Grid.Column="0"
+                   Text="Library"
+                   Style="{StaticResource LargeTitleLabel}"
                    VerticalOptions="Center"/>
 
-            <Button Grid.Column="2"
-                    Text=" ↻ Reload"
+            <Button Grid.Column="1"
+                    Text="↻"
                     Clicked="OnRefreshClicked"
-                    BackgroundColor="Transparent"
-                    TextColor="White"
-                    FontSize="18"
-                    Padding="10,6"
-                    FontAttributes="Bold"
+                    Style="{StaticResource IconButton}"
+                    FontSize="20"
+                    VerticalOptions="Center"/>
+
+            <Button Grid.Column="2"
+                    Text="⇩"
+                    Clicked="OnBatchDownloadClicked"
+                    Style="{StaticResource IconButton}"
+                    FontSize="20"
                     VerticalOptions="Center"/>
 
             <Button Grid.Column="3"
-                    Text="⇓ Batch Download"
-                    Clicked="OnBatchDownloadClicked"
-                    BackgroundColor="Transparent"
-                    TextColor="White"
-                    FontSize="14"
-                    Padding="10,6"
-                    FontAttributes="Bold"
-                    VerticalOptions="Center"/>
-
-            <Button Grid.Column="4"
-                    Text=" ⬇︎ Download"
+                    Text="＋"
                     Clicked="OnDownloadClicked"
-                    BackgroundColor="Transparent"
-                    TextColor="White"
-                    FontSize="18"
-                    Padding="10,6"
+                    Style="{StaticResource IconButton}"
+                    FontSize="22"
                     FontAttributes="Bold"
                     VerticalOptions="Center"/>
         </Grid>
 
-        <!-- Search bar -->
-        <Grid Grid.Row="1" BackgroundColor="#F5F5F5" Padding="16,6"
-              ColumnDefinitions="*,Auto">
-            <Entry x:Name="SearchEntry"
-                   Grid.Column="0"
-                   Placeholder="Search by title or ID..."
-                   TextColor="#333"
-                   PlaceholderColor="#999"
-                   BackgroundColor="White"
-                   FontSize="14"
-                   TextChanged="OnSearchTextChanged"/>
-            <Button Grid.Column="1"
-                    Text="✕"
-                    Clicked="OnClearSearchClicked"
-                    BackgroundColor="Transparent"
-                    TextColor="#666"
-                    FontSize="16"
-                    Padding="12,6"
-                    VerticalOptions="Center"/>
-        </Grid>
+        <BoxView Grid.Row="0"
+                 HeightRequest="0.5"
+                 Color="{AppThemeBinding Light={StaticResource Separator}, Dark={StaticResource SeparatorDark}}"
+                 VerticalOptions="End"/>
 
-        <!-- Book grid -->
+        <!-- ================= SEARCH BAR ================= -->
+        <Border Grid.Row="1"
+                StrokeThickness="0"
+                StrokeShape="RoundRectangle 10"
+                BackgroundColor="{AppThemeBinding Light=#EFEFF0, Dark=#1C1C1E}"
+                Margin="16,8"
+                Padding="10,0">
+            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="6">
+                <Label Grid.Column="0"
+                       Text="🔍"
+                       FontSize="15"
+                       VerticalOptions="Center"
+                       Opacity="0.6"/>
+                <Entry x:Name="SearchEntry"
+                       Grid.Column="1"
+                       Placeholder="Search"
+                       BackgroundColor="Transparent"
+                       FontSize="16"
+                       TextColor="{AppThemeBinding Light={StaticResource TextPrimary}, Dark={StaticResource TextPrimaryDark}}"
+                       PlaceholderColor="{AppThemeBinding Light={StaticResource TextSecondary}, Dark={StaticResource TextSecondaryDark}}"
+                       TextChanged="OnSearchTextChanged"/>
+                <Button Grid.Column="2"
+                        Text="✕"
+                        Clicked="OnClearSearchClicked"
+                        Style="{StaticResource IconButton}"
+                        FontSize="14"
+                        WidthRequest="32"
+                        HeightRequest="32"
+                        MinimumWidthRequest="32"
+                        MinimumHeightRequest="32"
+                        Opacity="0.7"/>
+            </Grid>
+        </Border>
+
+        <!-- ================= BOOK GRID ================= -->
         <ScrollView Grid.Row="2">
-          <CollectionView x:Name="BooksCollection"
-                          Margin="24"
-                          SelectionMode="None">
-              <CollectionView.ItemsLayout>
-                  <GridItemsLayout Orientation="Vertical"
-                                   Span="4"
-                                   HorizontalItemSpacing="24"
-                                   VerticalItemSpacing="24"/>
-              </CollectionView.ItemsLayout>
-          
-              <CollectionView.ItemTemplate>
-                  <DataTemplate>
-                      <VerticalStackLayout WidthRequest="160"
-                                           Spacing="10"
-                                           Padding="8"
-                                           BackgroundColor="Transparent">
-                          <VerticalStackLayout.GestureRecognizers>
-                              <TapGestureRecognizer Tapped="OnBookTapped"/>
-                          </VerticalStackLayout.GestureRecognizers>
-          
-                          <Frame Padding="0"
-                                 CornerRadius="0"
-                                 WidthRequest="160"
-                                 HeightRequest="200"
-                                 HorizontalOptions="Center"
-                                 BackgroundColor="Transparent"
-                                 HasShadow="False"
-                                 IsClippedToBounds="True"
-                                 InputTransparent="True">
-                              <Image Source="{Binding CoverImageSource}"
-                                     Aspect="AspectFill"
-                                     WidthRequest="160"
-                                     HeightRequest="200"
-                                     InputTransparent="True"/>
-                          </Frame>
-          
-                          <Label Text="{Binding DisplayName}"
-                                 FontSize="12"
-                                 TextColor="#333"
-                                 HorizontalTextAlignment="Center"
-                                 LineBreakMode="TailTruncation"
-                                 MaxLines="2"
-                                 InputTransparent="True"/>
+            <CollectionView x:Name="BooksCollection"
+                            Margin="16,4,16,16"
+                            SelectionMode="None">
+                <CollectionView.ItemsLayout>
+                    <GridItemsLayout Orientation="Vertical"
+                                     Span="{OnIdiom Phone=2, Tablet=4, Desktop=6}"
+                                     HorizontalItemSpacing="16"
+                                     VerticalItemSpacing="20"/>
+                </CollectionView.ItemsLayout>
 
-                          <Label Text="{Binding BookIdLabel}"
-                                 FontSize="10"
-                                 TextColor="#999"
-                                 HorizontalTextAlignment="Center"
-                                 InputTransparent="True"/>
-                      </VerticalStackLayout>
-                  </DataTemplate>
-              </CollectionView.ItemTemplate>
-          </CollectionView>
+                <CollectionView.ItemTemplate>
+                    <DataTemplate>
+                        <VerticalStackLayout Spacing="8" Padding="4">
+                            <VerticalStackLayout.GestureRecognizers>
+                                <TapGestureRecognizer Tapped="OnBookTapped"/>
+                            </VerticalStackLayout.GestureRecognizers>
+
+                            <Border Padding="0"
+                                    StrokeThickness="0"
+                                    StrokeShape="RoundRectangle 8"
+                                    BackgroundColor="{AppThemeBinding Light=#EFEFF0, Dark=#2C2C2E}"
+                                    HorizontalOptions="Fill"
+                                    HeightRequest="200"
+                                    IsClippedToBounds="True"
+                                    InputTransparent="True">
+                                <Border.Shadow>
+                                    <Shadow Brush="Black" Opacity="0.08" Radius="6" Offset="0,2"/>
+                                </Border.Shadow>
+                                <Image Source="{Binding CoverImageSource}"
+                                       Aspect="AspectFill"
+                                       InputTransparent="True"/>
+                            </Border>
+
+                            <Label Text="{Binding DisplayName}"
+                                   Style="{StaticResource BodyLabel}"
+                                   FontSize="13"
+                                   HorizontalTextAlignment="Center"
+                                   LineBreakMode="TailTruncation"
+                                   MaxLines="2"
+                                   InputTransparent="True"/>
+
+                            <Label Text="{Binding BookIdLabel}"
+                                   Style="{StaticResource CaptionLabel}"
+                                   FontSize="11"
+                                   HorizontalTextAlignment="Center"
+                                   InputTransparent="True"/>
+                        </VerticalStackLayout>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
         </ScrollView>
 
-        <!-- Status bar -->
-        <Grid Grid.Row="3" BackgroundColor="#F5F5F5" Padding="12,6">
+        <!-- ================= STATUS BAR ================= -->
+        <Grid Grid.Row="3"
+              BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}"
+              Padding="16,6">
             <Label x:Name="StatusLabel"
                    Text=""
-                   TextColor="#666"
-                   FontSize="11"
+                   Style="{StaticResource CaptionLabel}"
                    LineBreakMode="TailTruncation"/>
         </Grid>
     </Grid>
