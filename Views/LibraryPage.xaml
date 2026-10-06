@@ -100,21 +100,27 @@
                                 <TapGestureRecognizer Tapped="OnBookTapped"/>
                             </VerticalStackLayout.GestureRecognizers>
 
-                            <Border Padding="0"
-                                    StrokeThickness="0"
-                                    StrokeShape="RoundRectangle 8"
-                                    BackgroundColor="{AppThemeBinding Light=#EFEFF0, Dark=#2C2C2E}"
-                                    HorizontalOptions="Fill"
-                                    HeightRequest="200"
-                                    IsClippedToBounds="True"
-                                    InputTransparent="True">
-                                <Border.Shadow>
-                                    <Shadow Brush="Black" Opacity="0.08" Radius="6" Offset="0,2"/>
-                                </Border.Shadow>
-                                <Image Source="{Binding CoverImageSource}"
-                                       Aspect="AspectFill"
-                                       InputTransparent="True"/>
-                            </Border>
+                            <!-- Grid clips the image to the Border's rounded shape -->
+                            <Grid HeightRequest="200"
+                                  IsClippedToBounds="True"
+                                  InputTransparent="True">
+                                <Grid.Clip>
+                                    <RoundRectangleGeometry CornerRadius="8"
+                                                            Rect="0,0,1000,1000"/>
+                                </Grid.Clip>
+
+                                <Border Padding="0"
+                                        StrokeThickness="0"
+                                        StrokeShape="RoundRectangle 8"
+                                        BackgroundColor="{AppThemeBinding Light=#EFEFF0, Dark=#2C2C2E}">
+                                    <Border.Shadow>
+                                        <Shadow Brush="Black" Opacity="0.08" Radius="6" Offset="0,2"/>
+                                    </Border.Shadow>
+                                    <Image Source="{Binding CoverImageSource}"
+                                           Aspect="AspectFill"
+                                           InputTransparent="True"/>
+                                </Border>
+                            </Grid>
 
                             <Label Text="{Binding DisplayName}"
                                    Style="{StaticResource BodyLabel}"
