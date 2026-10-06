@@ -2,47 +2,47 @@
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              x:Class="BookViewer.Views.PageGridView"
-             BackgroundColor="#FFFFFF">
+             BackgroundColor="{AppThemeBinding Light={StaticResource Background}, Dark={StaticResource BackgroundDark}}">
 
-    <Grid RowDefinitions="Auto,*,Auto">
+    <Grid RowDefinitions="Auto,*,Auto"
+          Padding="{OnPlatform iOS='0,0,0,16', Android='0', WinUI='0'}">
 
-        <!-- Top bar (green) -->
-        <Grid Grid.Row="0" BackgroundColor="#009688" Padding="12,10"
+        <!-- ================= TOP BAR ================= -->
+        <Grid Grid.Row="0"
+              BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}"
+              Padding="8,6"
               ColumnDefinitions="Auto,*,Auto">
 
             <Button Grid.Column="0"
-                    Text="◀ Back"
+                    Text="‹ Back"
                     Clicked="OnCloseClicked"
-                    BackgroundColor="Transparent"
-                    TextColor="White"
-                    FontSize="14"
-                    Padding="8,4"
-                    FontAttributes="Bold"
+                    Style="{StaticResource TextButton}"
+                    FontSize="17"
                     VerticalOptions="Center"/>
 
             <Label Grid.Column="1"
                    Text="Pages"
-                   TextColor="White"
-                   FontSize="16"
-                   FontAttributes="Bold"
-                   HorizontalTextAlignment="Center"
-                   VerticalOptions="Center"/>
+                   Style="{StaticResource TitleLabel}"
+                   HorizontalTextAlignment="Center"/>
 
-            <Label Grid.Column="2"
-                   Text=""
-                   WidthRequest="40"/>
+            <Label Grid.Column="2" Text="" WidthRequest="60"/>
         </Grid>
 
-        <!-- Page grid -->
+        <BoxView Grid.Row="0"
+                 HeightRequest="0.5"
+                 Color="{AppThemeBinding Light={StaticResource Separator}, Dark={StaticResource SeparatorDark}}"
+                 VerticalOptions="End"/>
+
+        <!-- ================= PAGE GRID ================= -->
         <ScrollView Grid.Row="1">
             <CollectionView x:Name="PagesCollection"
                             Margin="12"
                             SelectionMode="None">
                 <CollectionView.ItemsLayout>
                     <GridItemsLayout Orientation="Vertical"
-                                     Span="4"
-                                     HorizontalItemSpacing="10"
-                                     VerticalItemSpacing="10"/>
+                                     Span="{OnIdiom Phone=2, Tablet=4, Desktop=5}"
+                                     HorizontalItemSpacing="12"
+                                     VerticalItemSpacing="12"/>
                 </CollectionView.ItemsLayout>
 
                 <CollectionView.ItemTemplate>
@@ -52,20 +52,22 @@
                                 <TapGestureRecognizer Tapped="OnPageTapped"/>
                             </VerticalStackLayout.GestureRecognizers>
 
-                            <Frame Padding="0"
-                                   CornerRadius="4"
-                                   HasShadow="False"
-                                   BackgroundColor="#F5F5F5"
-                                   IsClippedToBounds="True"
-                                   WidthRequest="220"
-                                   HeightRequest="290">
+                            <Border Padding="0"
+                                    StrokeThickness="0"
+                                    StrokeShape="RoundRectangle 8"
+                                    BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}"
+                                    HeightRequest="290"
+                                    IsClippedToBounds="True">
+                                <Border.Shadow>
+                                    <Shadow Brush="Black" Opacity="0.08" Radius="6" Offset="0,2"/>
+                                </Border.Shadow>
                                 <Image Source="{Binding ThumbnailSource}"
                                        Aspect="AspectFill"/>
-                            </Frame>
+                            </Border>
 
                             <Label Text="{Binding PageNumber}"
+                                   Style="{StaticResource CaptionLabel}"
                                    FontSize="12"
-                                   TextColor="#666"
                                    HorizontalTextAlignment="Center"/>
                         </VerticalStackLayout>
                     </DataTemplate>
@@ -73,12 +75,13 @@
             </CollectionView>
         </ScrollView>
 
-        <!-- Status bar -->
-        <Grid Grid.Row="2" BackgroundColor="#F5F5F5" Padding="12,6">
+        <!-- ================= STATUS BAR ================= -->
+        <Grid Grid.Row="2"
+              BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}"
+              Padding="16,6">
             <Label x:Name="StatusText"
                    Text=""
-                   TextColor="#666"
-                   FontSize="11"
+                   Style="{StaticResource CaptionLabel}"
                    LineBreakMode="TailTruncation"/>
         </Grid>
     </Grid>
