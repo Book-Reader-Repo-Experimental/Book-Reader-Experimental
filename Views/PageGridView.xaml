@@ -4,8 +4,7 @@
              x:Class="BookViewer.Views.PageGridView"
              BackgroundColor="{AppThemeBinding Light={StaticResource Background}, Dark={StaticResource BackgroundDark}}">
 
-    <Grid RowDefinitions="Auto,*,Auto"
-          Padding="{OnPlatform iOS='0,0,0,16', Android='0', WinUI='0'}">
+    <Grid RowDefinitions="Auto,*,Auto">
 
         <!-- ================= TOP BAR ================= -->
         <Grid Grid.Row="0"
@@ -40,7 +39,7 @@
                             SelectionMode="None">
                 <CollectionView.ItemsLayout>
                     <GridItemsLayout Orientation="Vertical"
-                                     Span="{OnIdiom Phone=2, Tablet=4, Desktop=5}"
+                                     Span="{OnIdiom Phone=2, Tablet=4, Default=5}"
                                      HorizontalItemSpacing="12"
                                      VerticalItemSpacing="12"/>
                 </CollectionView.ItemsLayout>
@@ -52,24 +51,17 @@
                                 <TapGestureRecognizer Tapped="OnPageTapped"/>
                             </VerticalStackLayout.GestureRecognizers>
 
-                            <Grid HeightRequest="290"
-                                  IsClippedToBounds="True">
-                                <Grid.Clip>
-                                    <RoundRectangleGeometry CornerRadius="8"
-                                                            Rect="0,0,1000,1000"/>
-                                </Grid.Clip>
-
-                                <Border Padding="0"
-                                        StrokeThickness="0"
-                                        StrokeShape="RoundRectangle 8"
-                                        BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}">
-                                    <Border.Shadow>
-                                        <Shadow Brush="Black" Opacity="0.08" Radius="6" Offset="0,2"/>
-                                    </Border.Shadow>
-                                    <Image Source="{Binding ThumbnailSource}"
-                                           Aspect="AspectFill"/>
-                                </Border>
-                            </Grid>
+                            <Border Padding="0"
+                                    StrokeThickness="0"
+                                    StrokeShape="RoundRectangle 8"
+                                    BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}"
+                                    HeightRequest="290">
+                                <Border.Shadow>
+                                    <Shadow Brush="Black" Opacity="0.10" Radius="6" Offset="0,2"/>
+                                </Border.Shadow>
+                                <Image Source="{Binding ThumbnailSource}"
+                                       Aspect="AspectFill"/>
+                            </Border>
 
                             <Label Text="{Binding PageNumber}"
                                    Style="{StaticResource CaptionLabel}"
