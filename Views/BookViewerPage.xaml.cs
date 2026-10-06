@@ -122,13 +122,15 @@ public partial class BookViewerPage : ContentPage
             Dispatcher.Dispatch(() =>
             {
                 bool dark = Application.Current?.RequestedTheme == AppTheme.Dark;
-                SideBySideButton.Text = enabled ? "2" : "1";
+        
+                SideBySideButton.Text = enabled ? "▮▮ 2 Pages" : "▯ 1 Page";
                 SideBySideButton.BackgroundColor = enabled
                     ? Color.FromArgb("#0A84FF")
                     : (dark ? Color.FromArgb("#2C2C2E") : Color.FromArgb("#F7F7F9"));
                 SideBySideButton.TextColor = enabled
                     ? Colors.White
                     : (dark ? Colors.White : Colors.Black);
+        
                 StatusLabel.Text = enabled ? "Two-page spread" : "Single page";
                 UpdateDisplay();
             });
@@ -569,16 +571,16 @@ public partial class BookViewerPage : ContentPage
             UpdateViewModeButton();
         }
     }
+    
     private void UpdateViewModeButton()
     {
-        string text = _currentViewMode switch
+        ViewModeButton.Text = _currentViewMode switch
         {
-            "content" => "◉",
-            "teacher" => "✎",
-            "student" => "✓",
-            _ => "◉"
+            "content" => "◉ Content",
+            "teacher" => "✎ Teacher",
+            "student" => "✓ Student",
+            _ => "◉ Content"
         };
-        ViewModeButton.Text = text;
     }
 
     private void OnViewModeClicked(object sender, EventArgs e)
@@ -637,7 +639,7 @@ public partial class BookViewerPage : ContentPage
         bool active = _currentViewMode == "teacher";
         bool dark = Application.Current?.RequestedTheme == AppTheme.Dark;
     
-        TeacherNotesButton.Text = active ? "✓" : "✎";
+        TeacherNotesButton.Text = active ? "✎ Hide Notes" : "✎ Notes";
         TeacherNotesButton.BackgroundColor = active
             ? Color.FromArgb("#34C759")
             : (dark ? Color.FromArgb("#2C2C2E") : Color.FromArgb("#F7F7F9"));
@@ -645,7 +647,7 @@ public partial class BookViewerPage : ContentPage
             ? Colors.White
             : (dark ? Colors.White : Colors.Black);
     }
-    
+        
     private void UpdateStudentButton()
     {
         if (StudentAnswersButton == null) return;
@@ -653,7 +655,7 @@ public partial class BookViewerPage : ContentPage
         bool active = _currentViewMode == "student";
         bool dark = Application.Current?.RequestedTheme == AppTheme.Dark;
     
-        StudentAnswersButton.Text = active ? "✓" : "✓";
+        StudentAnswersButton.Text = active ? "✓ Hide Answers" : "✓ Answers";
         StudentAnswersButton.BackgroundColor = active
             ? Color.FromArgb("#34C759")
             : (dark ? Color.FromArgb("#2C2C2E") : Color.FromArgb("#F7F7F9"));
