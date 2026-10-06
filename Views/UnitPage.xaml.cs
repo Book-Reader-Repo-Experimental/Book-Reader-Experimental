@@ -172,24 +172,20 @@ namespace BookViewer.Views
                 _ => "•"
             };
         }
-
+        
         private void OnContentsTabClicked(object sender, EventArgs e)
         {
             ContentsView.IsVisible = true;
             ResourcesView.IsVisible = false;
         
-            ContentsTab.BackgroundColor = Application.Current?.RequestedTheme == AppTheme.Dark
-                ? Color.FromArgb("#3A3A3C")
-                : Colors.White;
-            ContentsTab.TextColor = Application.Current?.RequestedTheme == AppTheme.Dark
-                ? Colors.White
-                : Colors.Black;
+            bool dark = Application.Current?.RequestedTheme == AppTheme.Dark;
+        
+            ContentsTab.BackgroundColor = dark ? Color.FromArgb("#48484A") : Colors.White;
+            ContentsTab.TextColor = dark ? Colors.White : Colors.Black;
             ContentsTab.FontAttributes = FontAttributes.Bold;
         
             ResourcesTab.BackgroundColor = Colors.Transparent;
-            ResourcesTab.TextColor = Application.Current?.RequestedTheme == AppTheme.Dark
-                ? Color.FromArgb("#98989D")
-                : Color.FromArgb("#8E8E93");
+            ResourcesTab.TextColor = dark ? Color.FromArgb("#98989D") : Color.FromArgb("#8E8E93");
             ResourcesTab.FontAttributes = FontAttributes.None;
         }
         
@@ -198,18 +194,14 @@ namespace BookViewer.Views
             ContentsView.IsVisible = false;
             ResourcesView.IsVisible = true;
         
+            bool dark = Application.Current?.RequestedTheme == AppTheme.Dark;
+        
             ContentsTab.BackgroundColor = Colors.Transparent;
-            ContentsTab.TextColor = Application.Current?.RequestedTheme == AppTheme.Dark
-                ? Color.FromArgb("#98989D")
-                : Color.FromArgb("#8E8E93");
+            ContentsTab.TextColor = dark ? Color.FromArgb("#98989D") : Color.FromArgb("#8E8E93");
             ContentsTab.FontAttributes = FontAttributes.None;
         
-            ResourcesTab.BackgroundColor = Application.Current?.RequestedTheme == AppTheme.Dark
-                ? Color.FromArgb("#3A3A3C")
-                : Colors.White;
-            ResourcesTab.TextColor = Application.Current?.RequestedTheme == AppTheme.Dark
-                ? Colors.White
-                : Colors.Black;
+            ResourcesTab.BackgroundColor = dark ? Color.FromArgb("#48484A") : Colors.White;
+            ResourcesTab.TextColor = dark ? Colors.White : Colors.Black;
             ResourcesTab.FontAttributes = FontAttributes.Bold;
         }
 
