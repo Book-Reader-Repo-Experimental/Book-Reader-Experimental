@@ -2,84 +2,78 @@
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              x:Class="BookViewer.Views.UnitPage"
-             BackgroundColor="{AppThemeBinding Light={StaticResource Background}, Dark={StaticResource BackgroundDark}}">
+             BackgroundColor="{AppThemeBinding Light={StaticResource Canvas}, Dark={StaticResource CanvasDark}}">
 
     <Grid RowDefinitions="Auto,Auto,Auto,*">
 
-        <!-- ================= TOP BAR ================= -->
+        <!-- ================= NAV BAR ================= -->
         <Grid Grid.Row="0"
               BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}"
-              Padding="8,6"
-              ColumnDefinitions="Auto,*">
+              Padding="8,8"
+              ColumnDefinitions="Auto,*,Auto">
 
             <Button Grid.Column="0"
-                    Text="‹ Back"
+                    Text="‹"
                     Clicked="OnBackClicked"
-                    Style="{StaticResource TextButton}"
-                    FontSize="17"
-                    VerticalOptions="Center"/>
+                    Style="{StaticResource IconButton}"
+                    FontSize="24"
+                    Margin="4,0,0,0"/>
 
             <Label Grid.Column="1"
                    x:Name="UnitTitleLabel"
                    Text=""
-                   Style="{StaticResource TitleLabel}"
-                   VerticalOptions="Center"
+                   Style="{StaticResource NavTitle}"
+                   HorizontalTextAlignment="Center"
                    LineBreakMode="TailTruncation"/>
-        </Grid>
 
-        <BoxView Grid.Row="0"
-                 HeightRequest="0.5"
-                 Color="{AppThemeBinding Light={StaticResource Separator}, Dark={StaticResource SeparatorDark}}"
-                 VerticalOptions="End"/>
+            <BoxView Grid.Column="2" WidthRequest="36"/>
+        </Grid>
 
         <!-- ================= BANNER ================= -->
         <Image x:Name="UnitBannerImage"
                Grid.Row="1"
                Aspect="AspectFill"
-               HeightRequest="160"
+               HeightRequest="180"
                HorizontalOptions="Fill"
                IsVisible="False"/>
 
-        <!-- ================= SEGMENTED TABS ================= -->
+        <!-- ================= SEGMENTED CONTROL ================= -->
         <Grid Grid.Row="2"
               BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}"
               Padding="16,8">
 
-            <Border StrokeThickness="0"
-                    StrokeShape="RoundRectangle 10"
-                    BackgroundColor="{AppThemeBinding Light=#EFEFF0, Dark=#2C2C2E}"
-                    HeightRequest="36"
-                    HorizontalOptions="Fill">
+            <Frame CornerRadius="9"
+                   HasShadow="False"
+                   BackgroundColor="{AppThemeBinding Light={StaticResource Elevated}, Dark={StaticResource ElevatedDark}}"
+                   Padding="2"
+                   HeightRequest="36">
                 <Grid ColumnDefinitions="*,*">
                     <Button x:Name="ContentsTab"
                             Grid.Column="0"
                             Text="Contents"
                             Clicked="OnContentsTabClicked"
-                            BackgroundColor="Transparent"
+                            BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark=#48484A}"
                             TextColor="{AppThemeBinding Light={StaticResource TextPrimary}, Dark={StaticResource TextPrimaryDark}}"
-                            FontSize="14"
+                            FontSize="13"
                             FontAttributes="Bold"
                             Padding="0"
-                            CornerRadius="8"
-                            Margin="2"/>
+                            CornerRadius="7"/>
                     <Button x:Name="ResourcesTab"
                             Grid.Column="1"
                             Text="Resources"
                             Clicked="OnResourcesTabClicked"
                             BackgroundColor="Transparent"
                             TextColor="{AppThemeBinding Light={StaticResource TextSecondary}, Dark={StaticResource TextSecondaryDark}}"
-                            FontSize="14"
+                            FontSize="13"
                             Padding="0"
-                            CornerRadius="8"
-                            Margin="2"/>
+                            CornerRadius="7"/>
                 </Grid>
-            </Border>
+            </Frame>
         </Grid>
 
         <!-- ================= CONTENT ================= -->
         <Grid Grid.Row="3">
 
-            <!-- Contents view -->
             <ScrollView x:Name="ContentsView" IsVisible="True">
                 <CollectionView x:Name="SectionsCollection"
                                 SelectionMode="None">
@@ -87,35 +81,28 @@
                         <DataTemplate>
                             <Grid Padding="20,16"
                                   BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}"
-                                  ColumnDefinitions="*,Auto">
+                                  ColumnDefinitions="*,Auto,12">
                                 <Grid.GestureRecognizers>
                                     <TapGestureRecognizer Tapped="OnSectionTapped"/>
                                 </Grid.GestureRecognizers>
 
                                 <Label Grid.Column="0"
                                        Text="{Binding Name}"
-                                       Style="{StaticResource BodyLabel}"
+                                       Style="{StaticResource Body}"
                                        FontSize="15"
                                        VerticalTextAlignment="Center"/>
 
                                 <Label Grid.Column="1"
                                        Text="{Binding PageStart}"
-                                       Style="{StaticResource CaptionLabel}"
+                                       Style="{StaticResource Caption}"
                                        FontSize="14"
                                        VerticalTextAlignment="Center"/>
-
-                                <BoxView Grid.ColumnSpan="2"
-                                         HeightRequest="0.5"
-                                         Color="{AppThemeBinding Light={StaticResource Separator}, Dark={StaticResource SeparatorDark}}"
-                                         VerticalOptions="End"
-                                         Margin="-20,0,0,0"/>
                             </Grid>
                         </DataTemplate>
                     </CollectionView.ItemTemplate>
                 </CollectionView>
             </ScrollView>
 
-            <!-- Resources view -->
             <ScrollView x:Name="ResourcesView" IsVisible="False">
                 <CollectionView x:Name="ResourcesCollection"
                                 SelectionMode="None">
@@ -123,7 +110,7 @@
                         <DataTemplate>
                             <Grid Padding="20,14"
                                   BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}"
-                                  ColumnDefinitions="40,*,Auto">
+                                  ColumnDefinitions="36,*,Auto">
                                 <Grid.GestureRecognizers>
                                     <TapGestureRecognizer Tapped="OnResourceTapped"/>
                                 </Grid.GestureRecognizers>
@@ -131,27 +118,20 @@
                                 <Label Grid.Column="0"
                                        Text="{Binding TypeIcon}"
                                        FontSize="16"
-                                       TextColor="{AppThemeBinding Light={StaticResource Primary}, Dark={StaticResource PrimaryDark}}"
+                                       TextColor="{AppThemeBinding Light={StaticResource Accent}, Dark={StaticResource AccentDark}}"
                                        VerticalTextAlignment="Center"/>
 
                                 <Label Grid.Column="1"
                                        Text="{Binding Description}"
-                                       Style="{StaticResource BodyLabel}"
-                                       FontSize="14"
-                                       VerticalTextAlignment="Center"
-                                       Margin="4,0,0,0"/>
+                                       Style="{StaticResource Body}"
+                                       FontSize="15"
+                                       VerticalTextAlignment="Center"/>
 
                                 <Label Grid.Column="2"
                                        Text="{Binding PageNumber}"
-                                       Style="{StaticResource CaptionLabel}"
+                                       Style="{StaticResource Caption}"
                                        FontSize="13"
                                        VerticalTextAlignment="Center"/>
-
-                                <BoxView Grid.ColumnSpan="3"
-                                         HeightRequest="0.5"
-                                         Color="{AppThemeBinding Light={StaticResource Separator}, Dark={StaticResource SeparatorDark}}"
-                                         VerticalOptions="End"
-                                         Margin="-20,0,0,0"/>
                             </Grid>
                         </DataTemplate>
                     </CollectionView.ItemTemplate>
