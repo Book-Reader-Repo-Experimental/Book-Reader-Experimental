@@ -16,12 +16,28 @@ namespace BookViewer.Views
             _bookFolder = bookFolder;
             _bookData = bookData;
 
-            TitleLabel.Text = "Back";
+            TitleLabel.Text = "Contents";
             BookTitleLabel.Text = bookData.Title;
+
+            UpdateBackButtonText(bookData.Title);
 
             var units = new List<UnitData>(bookData.Units);
             UnitsCollection.ItemsSource = units;
         }
+
+        private void UpdateBackButtonText(string bookTitle)
+        {
+            if (BackButton == null) return;
+
+            var label = string.IsNullOrWhiteSpace(bookTitle) ? "Back" : bookTitle.Trim();
+
+            const int maxLen = 20;
+            if (label.Length > maxLen)
+                label = label.Substring(0, maxLen - 1).TrimEnd() + "…";
+
+            BackButton.Text = "‹ " + label;
+        }
+
         private async void OnBackTapped(object sender, System.EventArgs e)
         {
             await Navigation.PopAsync();
