@@ -4,8 +4,7 @@
              x:Class="BookViewer.Views.TocPage"
              BackgroundColor="{AppThemeBinding Light={StaticResource Background}, Dark={StaticResource BackgroundDark}}">
 
-    <Grid RowDefinitions="Auto,*"
-          Padding="{OnPlatform iOS='0,0,0,16', Android='0', WinUI='0'}">
+    <Grid RowDefinitions="Auto,*">
 
         <!-- ================= TOP BAR ================= -->
         <Grid Grid.Row="0"
@@ -44,44 +43,39 @@
                        Padding="20,14"
                        BackgroundColor="{AppThemeBinding Light={StaticResource Background}, Dark={StaticResource BackgroundDark}}"/>
 
-                <Border StrokeThickness="0"
-                        StrokeShape="RoundRectangle 0"
-                        BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}"
-                        Margin="0">
-                    <CollectionView x:Name="UnitsCollection"
-                                    SelectionMode="None">
-                        <CollectionView.ItemTemplate>
-                            <DataTemplate>
-                                <Grid Padding="20,18"
-                                      BackgroundColor="Transparent"
-                                      ColumnDefinitions="*,Auto">
-                                    <Grid.GestureRecognizers>
-                                        <TapGestureRecognizer Tapped="OnUnitTapped"/>
-                                    </Grid.GestureRecognizers>
+                <CollectionView x:Name="UnitsCollection"
+                                SelectionMode="None">
+                    <CollectionView.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Padding="20,18"
+                                  BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}"
+                                  ColumnDefinitions="*,Auto">
+                                <Grid.GestureRecognizers>
+                                    <TapGestureRecognizer Tapped="OnUnitTapped"/>
+                                </Grid.GestureRecognizers>
 
-                                    <Label Grid.Column="0"
-                                           Text="{Binding Title}"
-                                           Style="{StaticResource BodyLabel}"
-                                           FontSize="16"
-                                           VerticalTextAlignment="Center"/>
+                                <Label Grid.Column="0"
+                                       Text="{Binding Title}"
+                                       Style="{StaticResource BodyLabel}"
+                                       FontSize="16"
+                                       VerticalTextAlignment="Center"/>
 
-                                    <Label Grid.Column="1"
-                                           Text="›"
-                                           Style="{StaticResource CaptionLabel}"
-                                           FontSize="18"
-                                           VerticalTextAlignment="Center"
-                                           Margin="8,0,0,0"/>
+                                <Label Grid.Column="1"
+                                       Text="›"
+                                       Style="{StaticResource CaptionLabel}"
+                                       FontSize="18"
+                                       VerticalTextAlignment="Center"
+                                       Margin="8,0,0,0"/>
 
-                                    <BoxView Grid.ColumnSpan="2"
-                                             HeightRequest="0.5"
-                                             Color="{AppThemeBinding Light={StaticResource Separator}, Dark={StaticResource SeparatorDark}}"
-                                             VerticalOptions="End"
-                                             Margin="-20,0,0,0"/>
-                                </Grid>
-                            </DataTemplate>
-                        </CollectionView.ItemTemplate>
-                    </CollectionView>
-                </Border>
+                                <BoxView Grid.ColumnSpan="2"
+                                         HeightRequest="0.5"
+                                         Color="{AppThemeBinding Light={StaticResource Separator}, Dark={StaticResource SeparatorDark}}"
+                                         VerticalOptions="End"
+                                         Margin="-20,0,0,0"/>
+                            </Grid>
+                        </DataTemplate>
+                    </CollectionView.ItemTemplate>
+                </CollectionView>
             </VerticalStackLayout>
         </ScrollView>
     </Grid>
