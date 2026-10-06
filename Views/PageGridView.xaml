@@ -52,18 +52,24 @@
                                 <TapGestureRecognizer Tapped="OnPageTapped"/>
                             </VerticalStackLayout.GestureRecognizers>
 
-                            <Border Padding="0"
-                                    StrokeThickness="0"
-                                    StrokeShape="RoundRectangle 8"
-                                    BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}"
-                                    HeightRequest="290"
-                                    IsClippedToBounds="True">
-                                <Border.Shadow>
-                                    <Shadow Brush="Black" Opacity="0.08" Radius="6" Offset="0,2"/>
-                                </Border.Shadow>
-                                <Image Source="{Binding ThumbnailSource}"
-                                       Aspect="AspectFill"/>
-                            </Border>
+                            <Grid HeightRequest="290"
+                                  IsClippedToBounds="True">
+                                <Grid.Clip>
+                                    <RoundRectangleGeometry CornerRadius="8"
+                                                            Rect="0,0,1000,1000"/>
+                                </Grid.Clip>
+
+                                <Border Padding="0"
+                                        StrokeThickness="0"
+                                        StrokeShape="RoundRectangle 8"
+                                        BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}">
+                                    <Border.Shadow>
+                                        <Shadow Brush="Black" Opacity="0.08" Radius="6" Offset="0,2"/>
+                                    </Border.Shadow>
+                                    <Image Source="{Binding ThumbnailSource}"
+                                           Aspect="AspectFill"/>
+                                </Border>
+                            </Grid>
 
                             <Label Text="{Binding PageNumber}"
                                    Style="{StaticResource CaptionLabel}"
