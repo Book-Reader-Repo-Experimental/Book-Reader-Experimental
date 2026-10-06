@@ -4,8 +4,7 @@
              x:Class="BookViewer.Views.BookViewerPage"
              BackgroundColor="{AppThemeBinding Light={StaticResource Background}, Dark={StaticResource BackgroundDark}}">
 
-    <Grid RowDefinitions="Auto,Auto,*,Auto"
-          Padding="{OnPlatform iOS='0,0,0,16', Android='0', WinUI='0'}">
+    <Grid RowDefinitions="Auto,Auto,*,Auto">
 
         <!-- ================= TOP BAR ================= -->
         <Grid Grid.Row="0"
@@ -43,8 +42,7 @@
                     BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}">
             <HorizontalStackLayout Padding="10,6" Spacing="6">
 
-                <Button x:Name="PrevButton"
-                        Text="‹ Prev"
+                <Button x:Name="PrevButton" Text="‹ Prev"
                         Clicked="OnPrevClicked"
                         Style="{StaticResource TextButton}"
                         IsEnabled="False"/>
@@ -56,55 +54,47 @@
                        HorizontalTextAlignment="Center"
                        VerticalTextAlignment="Center"/>
 
-                <Button x:Name="NextButton"
-                        Text="Next ›"
+                <Button x:Name="NextButton" Text="Next ›"
                         Clicked="OnNextClicked"
                         Style="{StaticResource TextButton}"
                         IsEnabled="False"/>
 
-                <Button x:Name="GridButton"
-                        Text="Grid"
+                <Button x:Name="GridButton" Text="Grid"
                         Clicked="OnGridClicked"
                         Style="{StaticResource TextButton}"
                         IsEnabled="False"/>
 
-                <Button x:Name="TeacherNotesButton"
-                        Text="Notes"
+                <Button x:Name="TeacherNotesButton" Text="Notes"
                         Clicked="OnTeacherNotesClicked"
                         Style="{StaticResource ToggleButton}"
                         IsEnabled="False"/>
 
-                <Button x:Name="StudentAnswersButton"
-                        Text="Answers"
+                <Button x:Name="StudentAnswersButton" Text="Answers"
                         Clicked="OnStudentAnswersClicked"
                         Style="{StaticResource ToggleButton}"
                         IsEnabled="False"/>
 
-                <Button x:Name="DecryptButton"
-                        Text="Decrypt"
+                <Button x:Name="DecryptButton" Text="Decrypt"
                         Clicked="OnDecryptClicked"
                         Style="{StaticResource TextButton}"
                         IsEnabled="False"/>
 
-                <Button x:Name="SideBySideButton"
-                        Text="1 Page"
+                <Button x:Name="SideBySideButton" Text="1 Page"
                         Clicked="OnSideBySideClicked"
                         Style="{StaticResource ToggleButton}"
                         IsEnabled="False"/>
 
-                <Button x:Name="ViewModeButton"
-                        Text="View"
+                <Button x:Name="ViewModeButton" Text="View"
                         Clicked="OnViewModeClicked"
                         Style="{StaticResource ToggleButton}"
                         IsEnabled="False"/>
 
-                <Button x:Name="ExportPdfButton"
-                        Text="PDF"
+                <Button x:Name="ExportPdfButton" Text="PDF"
                         Clicked="OnExportPdfClicked"
                         Style="{StaticResource TextButton}"
                         IsEnabled="False"/>
 
-                <!-- Segmented zoom control -->
+                <!-- Zoom segmented control -->
                 <Border StrokeThickness="0"
                         StrokeShape="RoundRectangle 10"
                         BackgroundColor="{AppThemeBinding Light=#EFEFF0, Dark=#2C2C2E}"
@@ -157,20 +147,10 @@
                 <ColumnDefinition x:Name="RightColumn" Width="0"/>
             </Grid.ColumnDefinitions>
 
-            <WebView x:Name="ContentWebView"
-                     Grid.Column="0"/>
-
-            <WebView x:Name="NextPageWebView"
-                     Grid.Column="1"
-                     IsVisible="False"/>
-
-            <WebView x:Name="TeacherWebView"
-                     Grid.Column="1"
-                     IsVisible="False"/>
-
-            <WebView x:Name="StudentWebView"
-                     Grid.Column="1"
-                     IsVisible="False"/>
+            <WebView x:Name="ContentWebView" Grid.Column="0"/>
+            <WebView x:Name="NextPageWebView" Grid.Column="1" IsVisible="False"/>
+            <WebView x:Name="TeacherWebView" Grid.Column="1" IsVisible="False"/>
+            <WebView x:Name="StudentWebView" Grid.Column="1" IsVisible="False"/>
         </Grid>
 
         <!-- ================= STATUS BAR ================= -->
