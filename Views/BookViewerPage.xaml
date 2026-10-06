@@ -2,194 +2,184 @@
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              x:Class="BookViewer.Views.BookViewerPage"
-             BackgroundColor="#FFFFFF">
+             BackgroundColor="{AppThemeBinding Light={StaticResource Background}, Dark={StaticResource BackgroundDark}}">
 
-    <Grid RowDefinitions="Auto,Auto,*,Auto">
+    <Grid RowDefinitions="Auto,Auto,*,Auto"
+          Padding="{OnPlatform iOS='0,0,0,16', Android='0', WinUI='0'}">
 
-        <!-- Top bar (green) -->
-        <Grid Grid.Row="0" BackgroundColor="#FF5722" Padding="12,10"
+        <!-- ================= TOP BAR ================= -->
+        <Grid Grid.Row="0"
+              BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}"
+              Padding="8,6"
               ColumnDefinitions="Auto,*,Auto">
 
             <Button Grid.Column="0"
-                    Text="◀ Back"
+                    x:Name="BackButton"
+                    Text="‹ Back"
                     Clicked="OnBackClicked"
-                    BackgroundColor="Transparent"
-                    TextColor="White"
-                    FontSize="14"
-                    Padding="8,4"
-                    FontAttributes="Bold"
+                    Style="{StaticResource TextButton}"
+                    FontSize="17"
                     VerticalOptions="Center"/>
 
             <Label x:Name="BookTitleLabel"
                    Grid.Column="1"
                    Text=""
-                   TextColor="White"
-                   FontSize="16"
-                   FontAttributes="Bold"
+                   Style="{StaticResource TitleLabel}"
                    HorizontalTextAlignment="Center"
-                   VerticalOptions="Center"
                    LineBreakMode="TailTruncation"/>
 
-            <Label Grid.Column="2"
-                   Text=""
-                   WidthRequest="40"/>
+            <Label Grid.Column="2" Text="" WidthRequest="60"/>
         </Grid>
 
-        <!-- Toolbar (light gray, scrollable) -->
+        <BoxView Grid.Row="0"
+                 HeightRequest="0.5"
+                 Color="{AppThemeBinding Light={StaticResource Separator}, Dark={StaticResource SeparatorDark}}"
+                 VerticalOptions="End"/>
+
+        <!-- ================= TOOLBAR ================= -->
         <ScrollView Grid.Row="1"
                     Orientation="Horizontal"
                     HorizontalScrollBarVisibility="Never"
-                    BackgroundColor="#F5F5F5">
-            <HorizontalStackLayout Padding="8,6" Spacing="6">
-        
+                    BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}">
+            <HorizontalStackLayout Padding="10,6" Spacing="6">
+
                 <Button x:Name="PrevButton"
-                        Text="Prev"
+                        Text="‹ Prev"
                         Clicked="OnPrevClicked"
-                        BackgroundColor="#E0E0E0"
-                        TextColor="#333"
-                        FontSize="13"
-                        Padding="12,6"
+                        Style="{StaticResource TextButton}"
                         IsEnabled="False"/>
-        
+
                 <Label x:Name="PageInfoLabel"
                        Text="0 / 0"
-                       TextColor="#666"
-                       FontSize="13"
-                       VerticalOptions="Center"
+                       Style="{StaticResource CaptionLabel}"
                        WidthRequest="60"
-                       HorizontalTextAlignment="Center"/>
-        
+                       HorizontalTextAlignment="Center"
+                       VerticalTextAlignment="Center"/>
+
                 <Button x:Name="NextButton"
-                        Text="Next"
+                        Text="Next ›"
                         Clicked="OnNextClicked"
-                        BackgroundColor="#E0E0E0"
-                        TextColor="#333"
-                        FontSize="13"
-                        Padding="12,6"
+                        Style="{StaticResource TextButton}"
                         IsEnabled="False"/>
-        
+
                 <Button x:Name="GridButton"
                         Text="Grid"
                         Clicked="OnGridClicked"
-                        BackgroundColor="#E0E0E0"
-                        TextColor="#333"
-                        FontSize="13"
-                        Padding="12,6"
+                        Style="{StaticResource TextButton}"
                         IsEnabled="False"/>
-        
+
                 <Button x:Name="TeacherNotesButton"
                         Text="Notes"
                         Clicked="OnTeacherNotesClicked"
-                        BackgroundColor="#E0E0E0"
-                        TextColor="#333"
-                        FontSize="13"
-                        Padding="12,6"
+                        Style="{StaticResource ToggleButton}"
                         IsEnabled="False"/>
-        
+
                 <Button x:Name="StudentAnswersButton"
                         Text="Answers"
                         Clicked="OnStudentAnswersClicked"
-                        BackgroundColor="#E0E0E0"
-                        TextColor="#333"
-                        FontSize="13"
-                        Padding="12,6"
+                        Style="{StaticResource ToggleButton}"
                         IsEnabled="False"/>
-        
+
                 <Button x:Name="DecryptButton"
                         Text="Decrypt"
                         Clicked="OnDecryptClicked"
-                        BackgroundColor="#E0E0E0"
-                        TextColor="#333"
-                        FontSize="13"
-                        Padding="12,6"
+                        Style="{StaticResource TextButton}"
                         IsEnabled="False"/>
-        
+
                 <Button x:Name="SideBySideButton"
                         Text="1 Page"
                         Clicked="OnSideBySideClicked"
-                        BackgroundColor="#E0E0E0"
-                        TextColor="#333"
-                        FontSize="13"
-                        Padding="12,6"
+                        Style="{StaticResource ToggleButton}"
                         IsEnabled="False"/>
-        
+
                 <Button x:Name="ViewModeButton"
                         Text="View"
                         Clicked="OnViewModeClicked"
-                        BackgroundColor="#E0E0E0"
-                        TextColor="#333"
-                        FontSize="13"
-                        Padding="12,6"
+                        Style="{StaticResource ToggleButton}"
                         IsEnabled="False"/>
-        
+
                 <Button x:Name="ExportPdfButton"
                         Text="PDF"
                         Clicked="OnExportPdfClicked"
-                        BackgroundColor="#E0E0E0"
-                        TextColor="#333"
-                        FontSize="13"
-                        Padding="12,6"
+                        Style="{StaticResource TextButton}"
                         IsEnabled="False"/>
-        
-                <Button x:Name="ZoomOutButton"
-                        Text="-"
-                        Clicked="OnZoomOutClicked"
-                        BackgroundColor="#E0E0E0"
-                        TextColor="#333"
-                        FontSize="13"
-                        Padding="12,6"/>
-        
-                <Label x:Name="ZoomLabel"
-                       Text="1.0x"
-                       TextColor="#666"
-                       FontSize="13"
-                       VerticalOptions="Center"
-                       WidthRequest="45"
-                       HorizontalTextAlignment="Center"/>
-        
-                <Button x:Name="ZoomInButton"
-                        Text="+"
-                        Clicked="OnZoomInClicked"
-                        BackgroundColor="#E0E0E0"
-                        TextColor="#333"
-                        FontSize="13"
-                        Padding="12,6"/>
+
+                <!-- Segmented zoom control -->
+                <Border StrokeThickness="0"
+                        StrokeShape="RoundRectangle 10"
+                        BackgroundColor="{AppThemeBinding Light=#EFEFF0, Dark=#2C2C2E}"
+                        Padding="0"
+                        HeightRequest="36"
+                        VerticalOptions="Center">
+                    <HorizontalStackLayout Spacing="0">
+                        <Button x:Name="ZoomOutButton"
+                                Text="−"
+                                Clicked="OnZoomOutClicked"
+                                BackgroundColor="Transparent"
+                                TextColor="{AppThemeBinding Light={StaticResource TextPrimary}, Dark={StaticResource TextPrimaryDark}}"
+                                FontSize="18"
+                                WidthRequest="40"
+                                HeightRequest="36"
+                                Padding="0"
+                                CornerRadius="10"/>
+                        <Label x:Name="ZoomLabel"
+                               Text="1.0x"
+                               Style="{StaticResource CaptionLabel}"
+                               WidthRequest="48"
+                               HorizontalTextAlignment="Center"
+                               VerticalTextAlignment="Center"/>
+                        <Button x:Name="ZoomInButton"
+                                Text="+"
+                                Clicked="OnZoomInClicked"
+                                BackgroundColor="Transparent"
+                                TextColor="{AppThemeBinding Light={StaticResource TextPrimary}, Dark={StaticResource TextPrimaryDark}}"
+                                FontSize="18"
+                                WidthRequest="40"
+                                HeightRequest="36"
+                                Padding="0"
+                                CornerRadius="10"/>
+                    </HorizontalStackLayout>
+                </Border>
+
             </HorizontalStackLayout>
         </ScrollView>
 
-        <!-- Content area -->
-        <Grid Grid.Row="2" BackgroundColor="#E8E8E8">
+        <BoxView Grid.Row="1"
+                 HeightRequest="0.5"
+                 Color="{AppThemeBinding Light={StaticResource Separator}, Dark={StaticResource SeparatorDark}}"
+                 VerticalOptions="End"/>
+
+        <!-- ================= CONTENT ================= -->
+        <Grid Grid.Row="2"
+              BackgroundColor="{AppThemeBinding Light={StaticResource Background}, Dark={StaticResource BackgroundDark}}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition x:Name="LeftColumn" Width="*"/>
                 <ColumnDefinition x:Name="RightColumn" Width="0"/>
             </Grid.ColumnDefinitions>
 
             <WebView x:Name="ContentWebView"
-                     Grid.Column="0"
-                     BackgroundColor="#E8E8E8"/>
+                     Grid.Column="0"/>
 
             <WebView x:Name="NextPageWebView"
                      Grid.Column="1"
-                     BackgroundColor="#E8E8E8"
                      IsVisible="False"/>
 
             <WebView x:Name="TeacherWebView"
                      Grid.Column="1"
-                     BackgroundColor="Transparent"
                      IsVisible="False"/>
 
             <WebView x:Name="StudentWebView"
                      Grid.Column="1"
-                     BackgroundColor="Transparent"
                      IsVisible="False"/>
         </Grid>
 
-        <!-- Status bar -->
-        <Grid Grid.Row="3" BackgroundColor="#F5F5F5" Padding="12,6">
+        <!-- ================= STATUS BAR ================= -->
+        <Grid Grid.Row="3"
+              BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}"
+              Padding="16,6">
             <Label x:Name="StatusLabel"
                    Text=""
-                   TextColor="#666"
-                   FontSize="11"
+                   Style="{StaticResource CaptionLabel}"
                    LineBreakMode="TailTruncation"/>
         </Grid>
     </Grid>
