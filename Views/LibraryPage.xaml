@@ -4,8 +4,7 @@
              x:Class="BookViewer.Views.LibraryPage"
              BackgroundColor="{AppThemeBinding Light={StaticResource Background}, Dark={StaticResource BackgroundDark}}">
 
-    <Grid RowDefinitions="Auto,Auto,*,Auto"
-          Padding="{OnPlatform iOS='0,0,0,16', Android='0', WinUI='0'}">
+    <Grid RowDefinitions="Auto,Auto,*,Auto">
 
         <!-- ================= TOP BAR ================= -->
         <Grid Grid.Row="0"
@@ -88,7 +87,7 @@
                             SelectionMode="None">
                 <CollectionView.ItemsLayout>
                     <GridItemsLayout Orientation="Vertical"
-                                     Span="{OnIdiom Phone=2, Tablet=4, Desktop=6}"
+                                     Span="{OnIdiom Phone=2, Tablet=4, Default=5}"
                                      HorizontalItemSpacing="16"
                                      VerticalItemSpacing="20"/>
                 </CollectionView.ItemsLayout>
@@ -100,27 +99,20 @@
                                 <TapGestureRecognizer Tapped="OnBookTapped"/>
                             </VerticalStackLayout.GestureRecognizers>
 
-                            <!-- Grid clips the image to the Border's rounded shape -->
-                            <Grid HeightRequest="200"
-                                  IsClippedToBounds="True"
-                                  InputTransparent="True">
-                                <Grid.Clip>
-                                    <RoundRectangleGeometry CornerRadius="8"
-                                                            Rect="0,0,1000,1000"/>
-                                </Grid.Clip>
-
-                                <Border Padding="0"
-                                        StrokeThickness="0"
-                                        StrokeShape="RoundRectangle 8"
-                                        BackgroundColor="{AppThemeBinding Light=#EFEFF0, Dark=#2C2C2E}">
-                                    <Border.Shadow>
-                                        <Shadow Brush="Black" Opacity="0.08" Radius="6" Offset="0,2"/>
-                                    </Border.Shadow>
-                                    <Image Source="{Binding CoverImageSource}"
-                                           Aspect="AspectFill"
-                                           InputTransparent="True"/>
-                                </Border>
-                            </Grid>
+                            <!-- Border with rounded corners; no Grid.Clip needed -->
+                            <Border Padding="0"
+                                    StrokeThickness="0"
+                                    StrokeShape="RoundRectangle 8"
+                                    BackgroundColor="{AppThemeBinding Light=#EFEFF0, Dark=#2C2C2E}"
+                                    HeightRequest="200"
+                                    InputTransparent="True">
+                                <Border.Shadow>
+                                    <Shadow Brush="Black" Opacity="0.10" Radius="6" Offset="0,2"/>
+                                </Border.Shadow>
+                                <Image Source="{Binding CoverImageSource}"
+                                       Aspect="AspectFill"
+                                       InputTransparent="True"/>
+                            </Border>
 
                             <Label Text="{Binding DisplayName}"
                                    Style="{StaticResource BodyLabel}"
