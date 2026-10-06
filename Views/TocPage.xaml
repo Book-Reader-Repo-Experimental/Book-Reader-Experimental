@@ -12,12 +12,18 @@
               Padding="8,8"
               ColumnDefinitions="Auto,*,Auto">
 
-            <Button Grid.Column="0"
-                    Text="‹"
+            <Button x:Name="BackButton"
+                    Grid.Column="0"
+                    Text="‹ Back"
                     Clicked="OnBackTapped"
-                    Style="{StaticResource IconButton}"
-                    FontSize="24"
-                    Margin="4,0,0,0"/>
+                    Style="{StaticResource TextButton}"
+                    FontSize="15"
+                    Padding="6,0"
+                    MinimumHeightRequest="40"
+                    MaximumWidthRequest="{OnIdiom Phone=180, Tablet=280, Default=220}"
+                    LineBreakMode="TailTruncation"
+                    HorizontalOptions="Start"
+                    VerticalOptions="Center"/>
 
             <Label x:Name="TitleLabel"
                    Grid.Column="1"
@@ -25,7 +31,7 @@
                    Style="{StaticResource NavTitle}"
                    HorizontalTextAlignment="Center"/>
 
-            <BoxView Grid.Column="2" WidthRequest="36"/>
+            <BoxView Grid.Column="2" WidthRequest="40"/>
         </Grid>
 
         <!-- ================= CONTENT ================= -->
