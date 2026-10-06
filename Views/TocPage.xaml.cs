@@ -22,7 +22,6 @@ namespace BookViewer.Views
             var units = new List<UnitData>(bookData.Units);
             UnitsCollection.ItemsSource = units;
         }
-
         private async void OnBackTapped(object sender, System.EventArgs e)
         {
             await Navigation.PopAsync();
