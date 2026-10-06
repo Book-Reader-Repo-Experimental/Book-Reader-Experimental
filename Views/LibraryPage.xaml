@@ -2,144 +2,132 @@
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              x:Class="BookViewer.Views.LibraryPage"
-             BackgroundColor="{AppThemeBinding Light={StaticResource Background}, Dark={StaticResource BackgroundDark}}">
+             BackgroundColor="{AppThemeBinding Light={StaticResource Canvas}, Dark={StaticResource CanvasDark}}">
 
     <Grid RowDefinitions="Auto,Auto,*,Auto">
 
         <!-- ================= TOP BAR ================= -->
+        <!-- Translucent material: solid on Android, tinted on iOS -->
         <Grid Grid.Row="0"
               BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}"
-              Padding="16,10"
+              Padding="20,12"
               ColumnDefinitions="*,Auto,Auto,Auto"
-              ColumnSpacing="4">
+              ColumnSpacing="2">
 
             <Label Grid.Column="0"
                    Text="Library"
-                   Style="{StaticResource LargeTitleLabel}"
+                   Style="{StaticResource LargeTitle}"
                    VerticalOptions="Center"/>
 
             <Button Grid.Column="1"
                     Text="↻"
                     Clicked="OnRefreshClicked"
-                    Style="{StaticResource IconButton}"
-                    FontSize="20"
-                    VerticalOptions="Center"/>
+                    Style="{StaticResource IconButton}"/>
 
             <Button Grid.Column="2"
                     Text="⇩"
                     Clicked="OnBatchDownloadClicked"
-                    Style="{StaticResource IconButton}"
-                    FontSize="20"
-                    VerticalOptions="Center"/>
+                    Style="{StaticResource IconButton}"/>
 
             <Button Grid.Column="3"
                     Text="＋"
                     Clicked="OnDownloadClicked"
                     Style="{StaticResource IconButton}"
-                    FontSize="22"
-                    FontAttributes="Bold"
-                    VerticalOptions="Center"/>
+                    FontAttributes="Bold"/>
         </Grid>
 
-        <BoxView Grid.Row="0"
-                 HeightRequest="0.5"
-                 Color="{AppThemeBinding Light={StaticResource Separator}, Dark={StaticResource SeparatorDark}}"
-                 VerticalOptions="End"/>
+        <!-- ================= SEARCH ================= -->
+        <Grid Grid.Row="1"
+              BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}"
+              Padding="20,4,20,12"
+              ColumnDefinitions="Auto,*,Auto"
+              ColumnSpacing="6">
 
-        <!-- ================= SEARCH BAR ================= -->
-        <Border Grid.Row="1"
-                StrokeThickness="0"
-                StrokeShape="RoundRectangle 10"
-                BackgroundColor="{AppThemeBinding Light=#EFEFF0, Dark=#1C1C1E}"
-                Margin="16,8"
-                Padding="10,0">
-            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="6">
-                <Label Grid.Column="0"
-                       Text="🔍"
-                       FontSize="15"
-                       VerticalOptions="Center"
-                       Opacity="0.6"/>
-                <Entry x:Name="SearchEntry"
-                       Grid.Column="1"
-                       Placeholder="Search"
-                       BackgroundColor="Transparent"
-                       FontSize="16"
-                       TextColor="{AppThemeBinding Light={StaticResource TextPrimary}, Dark={StaticResource TextPrimaryDark}}"
-                       PlaceholderColor="{AppThemeBinding Light={StaticResource TextSecondary}, Dark={StaticResource TextSecondaryDark}}"
-                       TextChanged="OnSearchTextChanged"/>
-                <Button Grid.Column="2"
-                        Text="✕"
-                        Clicked="OnClearSearchClicked"
-                        Style="{StaticResource IconButton}"
-                        FontSize="14"
-                        WidthRequest="32"
-                        HeightRequest="32"
-                        MinimumWidthRequest="32"
-                        MinimumHeightRequest="32"
-                        Opacity="0.7"/>
-            </Grid>
-        </Border>
+            <Label Grid.Column="0"
+                   Text="🔍"
+                   FontSize="15"
+                   VerticalOptions="Center"
+                   Opacity="0.5"/>
+
+            <Entry x:Name="SearchEntry"
+                   Grid.Column="1"
+                   Placeholder="Search"
+                   BackgroundColor="Transparent"
+                   FontSize="16"
+                   TextColor="{AppThemeBinding Light={StaticResource TextPrimary}, Dark={StaticResource TextPrimaryDark}}"
+                   PlaceholderColor="{AppThemeBinding Light={StaticResource TextSecondary}, Dark={StaticResource TextSecondaryDark}}"
+                   TextChanged="OnSearchTextChanged"/>
+
+            <Button Grid.Column="2"
+                    Text="✕"
+                    Clicked="OnClearSearchClicked"
+                    Style="{StaticResource IconButton}"
+                    FontSize="14"
+                    Opacity="0.5"
+                    WidthRequest="28"
+                    HeightRequest="28"
+                    MinimumWidthRequest="28"
+                    MinimumHeightRequest="28"/>
+        </Grid>
 
         <!-- ================= BOOK GRID ================= -->
-        <ScrollView Grid.Row="2">
-            <CollectionView x:Name="BooksCollection"
-                            Margin="16,4,16,16"
-                            SelectionMode="None">
-                <CollectionView.ItemsLayout>
-                    <GridItemsLayout Orientation="Vertical"
-                                     Span="{OnIdiom Phone=2, Tablet=4, Default=5}"
-                                     HorizontalItemSpacing="16"
-                                     VerticalItemSpacing="20"/>
-                </CollectionView.ItemsLayout>
+        <CollectionView x:Name="BooksCollection"
+                        Grid.Row="2"
+                        Margin="12,8,12,12"
+                        SelectionMode="None">
+            <CollectionView.ItemsLayout>
+                <GridItemsLayout Orientation="Vertical"
+                                 Span="{OnIdiom Phone=2, Tablet=4, Default=5}"
+                                 HorizontalItemSpacing="14"
+                                 VerticalItemSpacing="18"/>
+            </CollectionView.ItemsLayout>
 
-                <CollectionView.ItemTemplate>
-                    <DataTemplate>
-                        <VerticalStackLayout Spacing="8" Padding="4">
-                            <VerticalStackLayout.GestureRecognizers>
-                                <TapGestureRecognizer Tapped="OnBookTapped"/>
-                            </VerticalStackLayout.GestureRecognizers>
+            <CollectionView.ItemTemplate>
+                <DataTemplate>
+                    <VerticalStackLayout Spacing="6" Padding="4">
+                        <VerticalStackLayout.GestureRecognizers>
+                            <TapGestureRecognizer Tapped="OnBookTapped"/>
+                        </VerticalStackLayout.GestureRecognizers>
 
-                            <!-- Border with rounded corners; no Grid.Clip needed -->
-                            <Border Padding="0"
-                                    StrokeThickness="0"
-                                    StrokeShape="RoundRectangle 8"
-                                    BackgroundColor="{AppThemeBinding Light=#EFEFF0, Dark=#2C2C2E}"
-                                    HeightRequest="200"
-                                    InputTransparent="True">
-                                <Border.Shadow>
-                                    <Shadow Brush="Black" Opacity="0.10" Radius="6" Offset="0,2"/>
-                                </Border.Shadow>
-                                <Image Source="{Binding CoverImageSource}"
-                                       Aspect="AspectFill"
-                                       InputTransparent="True"/>
-                            </Border>
-
-                            <Label Text="{Binding DisplayName}"
-                                   Style="{StaticResource BodyLabel}"
-                                   FontSize="13"
-                                   HorizontalTextAlignment="Center"
-                                   LineBreakMode="TailTruncation"
-                                   MaxLines="2"
+                        <!-- No frame — just the image with rounded corners baked into the border-less background -->
+                        <Frame Padding="0"
+                               CornerRadius="6"
+                               HasShadow="False"
+                               BackgroundColor="{AppThemeBinding Light={StaticResource Elevated}, Dark={StaticResource ElevatedDark}}"
+                               HeightRequest="180"
+                               IsClippedToBounds="True"
+                               InputTransparent="True">
+                            <Image Source="{Binding CoverImageSource}"
+                                   Aspect="AspectFill"
                                    InputTransparent="True"/>
+                        </Frame>
 
-                            <Label Text="{Binding BookIdLabel}"
-                                   Style="{StaticResource CaptionLabel}"
-                                   FontSize="11"
-                                   HorizontalTextAlignment="Center"
-                                   InputTransparent="True"/>
-                        </VerticalStackLayout>
-                    </DataTemplate>
-                </CollectionView.ItemTemplate>
-            </CollectionView>
-        </ScrollView>
+                        <Label Text="{Binding DisplayName}"
+                               FontSize="13"
+                               FontAttributes="None"
+                               TextColor="{AppThemeBinding Light={StaticResource TextPrimary}, Dark={StaticResource TextPrimaryDark}}"
+                               HorizontalTextAlignment="Center"
+                               LineBreakMode="TailTruncation"
+                               MaxLines="2"
+                               InputTransparent="True"/>
 
-        <!-- ================= STATUS BAR ================= -->
+                        <Label Text="{Binding BookIdLabel}"
+                               Style="{StaticResource Caption}"
+                               FontSize="11"
+                               HorizontalTextAlignment="Center"
+                               InputTransparent="True"/>
+                    </VerticalStackLayout>
+                </DataTemplate>
+            </CollectionView.ItemTemplate>
+        </CollectionView>
+
+        <!-- ================= STATUS ================= -->
         <Grid Grid.Row="3"
               BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}"
-              Padding="16,6">
+              Padding="20,8">
             <Label x:Name="StatusLabel"
                    Text=""
-                   Style="{StaticResource CaptionLabel}"
+                   Style="{StaticResource Caption}"
                    LineBreakMode="TailTruncation"/>
         </Grid>
     </Grid>
