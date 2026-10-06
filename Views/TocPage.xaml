@@ -2,76 +2,63 @@
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              x:Class="BookViewer.Views.TocPage"
-             BackgroundColor="{AppThemeBinding Light={StaticResource Background}, Dark={StaticResource BackgroundDark}}">
+             BackgroundColor="{AppThemeBinding Light={StaticResource Canvas}, Dark={StaticResource CanvasDark}}">
 
     <Grid RowDefinitions="Auto,*">
 
-        <!-- ================= TOP BAR ================= -->
+        <!-- ================= NAV BAR ================= -->
         <Grid Grid.Row="0"
               BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}"
-              Padding="8,6"
+              Padding="8,8"
               ColumnDefinitions="Auto,*,Auto">
 
             <Button Grid.Column="0"
-                    Text="‹ Back"
+                    Text="‹"
                     Clicked="OnBackTapped"
-                    Style="{StaticResource TextButton}"
-                    FontSize="17"
-                    VerticalOptions="Center"/>
+                    Style="{StaticResource IconButton}"
+                    FontSize="24"
+                    Margin="4,0,0,0"/>
 
             <Label x:Name="TitleLabel"
                    Grid.Column="1"
                    Text="Contents"
-                   Style="{StaticResource TitleLabel}"
+                   Style="{StaticResource NavTitle}"
                    HorizontalTextAlignment="Center"/>
 
-            <Label Grid.Column="2" Text="" WidthRequest="60"/>
+            <BoxView Grid.Column="2" WidthRequest="36"/>
         </Grid>
-
-        <BoxView Grid.Row="0"
-                 HeightRequest="0.5"
-                 Color="{AppThemeBinding Light={StaticResource Separator}, Dark={StaticResource SeparatorDark}}"
-                 VerticalOptions="End"/>
 
         <!-- ================= CONTENT ================= -->
         <ScrollView Grid.Row="1">
-            <VerticalStackLayout>
+            <VerticalStackLayout Padding="0,8,0,24">
 
                 <Label x:Name="BookTitleLabel"
                        Text=""
-                       Style="{StaticResource CaptionLabel}"
-                       Padding="20,14"
-                       BackgroundColor="{AppThemeBinding Light={StaticResource Background}, Dark={StaticResource BackgroundDark}}"/>
+                       Style="{StaticResource SectionHeader}"/>
 
                 <CollectionView x:Name="UnitsCollection"
-                                SelectionMode="None">
+                                SelectionMode="None"
+                                Margin="0">
                     <CollectionView.ItemTemplate>
                         <DataTemplate>
-                            <Grid Padding="20,18"
+                            <Grid Padding="20,16"
                                   BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}"
-                                  ColumnDefinitions="*,Auto">
+                                  ColumnDefinitions="*,Auto,12">
                                 <Grid.GestureRecognizers>
                                     <TapGestureRecognizer Tapped="OnUnitTapped"/>
                                 </Grid.GestureRecognizers>
 
                                 <Label Grid.Column="0"
                                        Text="{Binding Title}"
-                                       Style="{StaticResource BodyLabel}"
+                                       Style="{StaticResource Body}"
                                        FontSize="16"
                                        VerticalTextAlignment="Center"/>
 
                                 <Label Grid.Column="1"
                                        Text="›"
-                                       Style="{StaticResource CaptionLabel}"
                                        FontSize="18"
-                                       VerticalTextAlignment="Center"
-                                       Margin="8,0,0,0"/>
-
-                                <BoxView Grid.ColumnSpan="2"
-                                         HeightRequest="0.5"
-                                         Color="{AppThemeBinding Light={StaticResource Separator}, Dark={StaticResource SeparatorDark}}"
-                                         VerticalOptions="End"
-                                         Margin="-20,0,0,0"/>
+                                       TextColor="{AppThemeBinding Light={StaticResource TextSecondary}, Dark={StaticResource TextSecondaryDark}}"
+                                       VerticalTextAlignment="Center"/>
                             </Grid>
                         </DataTemplate>
                     </CollectionView.ItemTemplate>
