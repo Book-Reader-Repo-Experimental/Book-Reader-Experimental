@@ -14,11 +14,7 @@ namespace BookViewer.Views;
 public partial class BookViewerPage : ContentPage
 {
     private readonly BookService _bookService = new();
-    private bool _showTeacherNotes = false;
-    private bool _showStudentAnswers = false;
     private string _currentContentHtml = "";
-    private string _currentTeacherFragment = "";
-    private string _currentStudentFragment = "";
     private string _currentViewMode = "content";
     private bool _bookLoaded = false;
     private int _startFolio = 1;
@@ -95,10 +91,12 @@ public partial class BookViewerPage : ContentPage
             Dispatcher.Dispatch(() =>
             {
                 _currentContentHtml = content;
-                LoadTeacherView();
-                LoadStudentView();
                 UpdateDisplay();
                 UpdateUI();
+                // Keep the MAUI toolbar buttons in sync with the state that
+                // BookService has (which is what the in-page checkboxes show).
+                UpdateTeacherButton();
+                UpdateStudentButton();
             });
         };
 
@@ -153,8 +151,6 @@ public partial class BookViewerPage : ContentPage
                 GridButton.IsEnabled = true;
 
                 _currentViewMode = "content";
-                _showTeacherNotes = false;
-                _showStudentAnswers = false;
                 UpdateViewModeButton();
                 UpdateTeacherButton();
                 UpdateStudentButton();
@@ -204,70 +200,6 @@ public partial class BookViewerPage : ContentPage
         _targetSectionId = sectionId;
     }
 
-    private async void LoadTeacherView()
-    {
-        try
-        {
-            _currentTeacherFragment = "";
-            if (_bookService.CurrentPageIndex >= 0 && _bookService.CurrentPageIndex < _bookService.PageFiles.Count)
-            {
-                var filePath = _bookService.PageFiles[_bookService.CurrentPageIndex];
-                _currentTeacherFragment = await _bookService.GetRedAnswerContentAsync(filePath, "teacherNotes");
-            }
-        }
-        catch (Exception ex)
-        {
-            Log($"Error loading teacher view: {ex.Message}");
-        }
-    }
-
-    private async void LoadStudentView()
-    {
-        try
-        {
-            _currentStudentFragment = "";
-            if (_bookService.CurrentPageIndex >= 0 && _bookService.CurrentPageIndex < _bookService.PageFiles.Count)
-            {
-                var filePath = _bookService.PageFiles[_bookService.CurrentPageIndex];
-                _currentStudentFragment = await _bookService.GetRedAnswerContentAsync(filePath, "studentAnswers");
-            }
-        }
-        catch (Exception ex)
-        {
-            Log($"Error loading student view: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Replaces the placeholder comment <!--ANSWERS-HERE--> in the content HTML
-    /// with the answer overlay. The placeholder lives inside .content-overlay,
-    /// immediately after .base-content, so the overlay is a sibling of the base
-    /// content and moves with the page.
-    /// </summary>
-    private string InjectAnswerOverlay(string contentHtml, string fragment, string viewType)
-    {
-        if (string.IsNullOrEmpty(fragment))
-            return contentHtml;
-
-        string borderColor = viewType == "teacherNotes" ? "#3498db" : "#2ecc71";
-        string highlightClass = viewType == "teacherNotes" ? "tbnote" : "sa";
-
-        var overlayHtml = $@"<div class='highlight-overlay'>
-<style>.{highlightClass} {{ background: rgba(255,255,0,0.25); border: 3px solid {borderColor}; border-radius: 4px; padding: 3px; }}</style>
-{fragment}
-</div>";
-
-        const string marker = "<!--ANSWERS-HERE-->";
-        int idx = contentHtml.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-        if (idx >= 0)
-        {
-            return contentHtml.Substring(0, idx) + overlayHtml + contentHtml.Substring(idx + marker.Length);
-        }
-
-        // Fallback (content HTML doesn't contain the marker — shouldn't happen)
-        return contentHtml + overlayHtml;
-    }
-
     private void UpdateDisplay()
     {
         bool isTwoPage = _bookService.TwoPageSpread;
@@ -297,21 +229,9 @@ public partial class BookViewerPage : ContentPage
             RightColumn.Width = new GridLength(0);
             NextPageWebView.IsVisible = false;
 
-            string html;
-            if (_currentViewMode == "teacher" && !string.IsNullOrEmpty(_currentTeacherFragment))
-            {
-                html = InjectAnswerOverlay(_currentContentHtml, _currentTeacherFragment, "teacherNotes");
-            }
-            else if (_currentViewMode == "student" && !string.IsNullOrEmpty(_currentStudentFragment))
-            {
-                html = InjectAnswerOverlay(_currentContentHtml, _currentStudentFragment, "studentAnswers");
-            }
-            else
-            {
-                html = _currentContentHtml;
-            }
-
-            ContentWebView.Source = new HtmlWebViewSource { Html = html };
+            // The page itself contains both the base content and the answer
+            // layer with in-page toggle buttons. We just hand it to the WebView.
+            ContentWebView.Source = new HtmlWebViewSource { Html = _currentContentHtml };
             ContentWebView.IsVisible = true;
             TeacherWebView.IsVisible = false;
             StudentWebView.IsVisible = false;
@@ -333,16 +253,28 @@ public partial class BookViewerPage : ContentPage
 
     private void OnViewModeClicked(object sender, EventArgs e)
     {
-        _currentViewMode = _currentViewMode switch
-        {
-            "content" when (!string.IsNullOrEmpty(_currentTeacherFragment)) => "teacher",
-            "teacher" when (!string.IsNullOrEmpty(_currentStudentFragment)) => "student",
-            "student" => "content",
-            "content" => "content",
-            _ => "content"
-        };
+        // Cycle the toolbar view mode, which now just flips the same
+        // BookService toggle state that the in-page buttons flip.
+        bool tn = _bookService.GetToggleState("teacherNotes");
+        bool sa = _bookService.GetToggleState("studentAnswer");
 
-        UpdateDisplay();
+        if (!tn && !sa)
+        {
+            _bookService.SetToggleState("teacherNotes", true);
+            _currentViewMode = "teacher";
+        }
+        else if (tn)
+        {
+            _bookService.SetToggleState("teacherNotes", false);
+            _bookService.SetToggleState("studentAnswer", true);
+            _currentViewMode = "student";
+        }
+        else
+        {
+            _bookService.SetToggleState("studentAnswer", false);
+            _currentViewMode = "content";
+        }
+
         UpdateViewModeButton();
         UpdateTeacherButton();
         UpdateStudentButton();
@@ -350,41 +282,29 @@ public partial class BookViewerPage : ContentPage
 
     private void OnTeacherNotesClicked(object sender, EventArgs e)
     {
-        if (!string.IsNullOrEmpty(_currentTeacherFragment))
-        {
-            _currentViewMode = _currentViewMode == "teacher" ? "content" : "teacher";
-            UpdateDisplay();
-            UpdateViewModeButton();
-            UpdateTeacherButton();
-            UpdateStudentButton();
-        }
-        else
-        {
-            StatusLabel.Text = "No teacher notes available for this page";
-        }
+        bool current = _bookService.GetToggleState("teacherNotes");
+        _bookService.SetToggleState("teacherNotes", !current);
+        _currentViewMode = !current ? "teacher" : "content";
+        UpdateTeacherButton();
+        UpdateStudentButton();
+        UpdateViewModeButton();
     }
 
     private void OnStudentAnswersClicked(object sender, EventArgs e)
     {
-        if (!string.IsNullOrEmpty(_currentStudentFragment))
-        {
-            _currentViewMode = _currentViewMode == "student" ? "content" : "student";
-            UpdateDisplay();
-            UpdateViewModeButton();
-            UpdateTeacherButton();
-            UpdateStudentButton();
-        }
-        else
-        {
-            StatusLabel.Text = "No student answers available for this page";
-        }
+        bool current = _bookService.GetToggleState("studentAnswer");
+        _bookService.SetToggleState("studentAnswer", !current);
+        _currentViewMode = !current ? "student" : "content";
+        UpdateTeacherButton();
+        UpdateStudentButton();
+        UpdateViewModeButton();
     }
 
     private void UpdateTeacherButton()
     {
         if (TeacherNotesButton == null) return;
 
-        bool active = _currentViewMode == "teacher";
+        bool active = _bookService.GetToggleState("teacherNotes");
         bool dark = Application.Current?.RequestedTheme == AppTheme.Dark;
 
         TeacherNotesButton.Text = active ? "✎ Hide Notes" : "✎ Notes";
@@ -400,7 +320,7 @@ public partial class BookViewerPage : ContentPage
     {
         if (StudentAnswersButton == null) return;
 
-        bool active = _currentViewMode == "student";
+        bool active = _bookService.GetToggleState("studentAnswer");
         bool dark = Application.Current?.RequestedTheme == AppTheme.Dark;
 
         StudentAnswersButton.Text = active ? "✓ Hide Answers" : "✓ Answers";
@@ -460,13 +380,13 @@ public partial class BookViewerPage : ContentPage
             pdfService.RenderPageToImageAsync = async (html) =>
             {
             #if IOS
-                return await BookViewer.Platforms.iOS.WebViewCapture.CaptureHtmlAsync(html, 1024, 1309);
+                return await BookViewer.Platforms.iOS.WebViewCapture.CaptureHtmlAsync(html, 1024, 1344);
             #elif MACCATALYST
-                return await BookViewer.Platforms.MacCatalyst.WebViewCapture.CaptureHtmlAsync(html, 1024, 1309);
+                return await BookViewer.Platforms.MacCatalyst.WebViewCapture.CaptureHtmlAsync(html, 1024, 1344);
             #elif ANDROID
-                return await BookViewer.Platforms.Android.WebViewCapture.CaptureHtmlAsync(html, 1024, 1309);
+                return await BookViewer.Platforms.Android.WebViewCapture.CaptureHtmlAsync(html, 1024, 1344);
             #elif WINDOWS
-                return await BookViewer.Platforms.Windows.WebViewCapture.CaptureHtmlAsync(html, 1024, 1309);
+                return await BookViewer.Platforms.Windows.WebViewCapture.CaptureHtmlAsync(html, 1024, 1344);
             #else
                 await Task.CompletedTask;
                 return null;
