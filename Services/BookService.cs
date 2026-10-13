@@ -27,9 +27,9 @@ namespace BookViewer
         private double _currentZoom = 1.0;
         private string _tempFolder = "";
 
-        // Global toggle state — keyed by the group id used in the book, i.e.
-        // "studentAnswer", "teacherNotes", or a specific element name if a
-        // page exposes per-element toggles.
+        // Global toggle state keyed by redanswertype ("studentAnswer",
+        // "teacherNotes", ...). Per-element toggles would key on the
+        // element's name attribute instead; both work with the same CSS.
         private readonly Dictionary<string, bool> _groupToggles = new(StringComparer.Ordinal);
 
         private readonly Dictionary<string, int> _stepFileToIndex = new();
@@ -112,8 +112,6 @@ namespace BookViewer
         public Dictionary<int, string> FolioToStepFile => _folioToStepFile;
         public Dictionary<string, int> StepFileToIndex => _stepFileToIndex;
 
-        // ---- toggle API, unchanged in spirit ----
-
         public bool GetToggleState(string group)
             => _groupToggles.TryGetValue(group ?? "", out var v) && v;
 
@@ -126,7 +124,6 @@ namespace BookViewer
                 _ = LoadPageAsync(_currentPageIndex);
         }
 
-        // Kept for API compatibility with BookViewerPage.xaml.cs.
         public bool ShowTeacherNotes => GetToggleState("teacherNotes");
         public bool ShowStudentAnswers => GetToggleState("studentAnswer");
         public void SetShowTeacherNotes(bool show) => SetToggleState("teacherNotes", show);
@@ -619,7 +616,7 @@ namespace BookViewer
                 if (!IsPureStepsFile(fileName) || !fileName.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
                     return htmlContent;
 
-                // Page size detection
+                // Page size
                 int pageWidth = 1024;
                 int pageHeight = 1344;
 
@@ -635,34 +632,24 @@ namespace BookViewer
                 CurrentPageWidth = pageWidth;
                 CurrentPageHeight = pageHeight;
 
-                // Font CSS
+                // CSS
                 string fontCss = await GetFontCssWithEmbeddedFonts(directory);
-
-                // Original page CSS: steps.css, and steps_N_folio.css if present.
                 string pageCss = await LoadBookCssAsync(directory, stem);
 
-                // Background image, inlined as a data URI.
+                // Background + every <img> in the book's own markup,
+                // resolved against the book root.
                 string bgImage = GetStepBackgroundImage(filePath);
 
-                // 1. Transform raw steps_N.html into the page's box: background,
-                //    ori pane (hidden), base pane (visible text), redAnswer pane
-                //    (hidden), and the icon buttons wrapped in labels.
-                //
-                //    Returns the (body, iconLabels, distinctGroups) triple.
-                var (bodyInner, labelBlock, distinctGroups) = BuildBodyFromSteps(
-                    htmlContent, bgImage, pageWidth, pageHeight);
+                var (bodyInner, distinctGroups) = BuildBodyFromSteps(
+                    htmlContent, bgImage, directory);
 
-                // 2. Merge in the answer elements from steps_N_ori.html, each
-                //    tagged with the group it belongs to. This is where the
-                //    book's .tbred / .tbnote elements come from.
+                // Answers from _ori.html
                 string answerBlock = await LoadAnswersFromOriAsync(directory, stem, distinctGroups);
 
-                // 3. Which checkboxes should start checked?
                 var checkedGroups = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var g in distinctGroups)
                     if (GetToggleState(g)) checkedGroups.Add(g);
 
-                // 4. Assemble.
                 return AssemblePage(
                     fileName,
                     fontCss,
@@ -670,7 +657,6 @@ namespace BookViewer
                     pageWidth,
                     pageHeight,
                     bodyInner,
-                    labelBlock,
                     answerBlock,
                     distinctGroups,
                     checkedGroups);
@@ -683,35 +669,55 @@ namespace BookViewer
         }
 
         /// <summary>
-        /// Walks the raw steps_N.html.
-        ///  - Replaces the background <img class="bgcls" src="..."> with the
-        ///    data-URI-inlined version.
-        ///  - Removes display:none from the <pane> elements (they hold the
-        ///    layers, but the CSS handles visibility — we don't want the
-        ///    book's own display:none to conflict).
-        ///  - For every <img class="redbtn|has2btn|hsgbtn">: wrap in a label
-        ///    and record its checkbox id, its linkname, and its group.
-        /// Returns: (bodyInnerHtml, labelsHtml, distinctGroups).
+        /// Prepares the raw steps_N.html for the WebView:
+        ///  - Inlines the background JPEG as a data URI.
+        ///  - Inlines every other <img src="..."> — including the redbtn,
+        ///    has2btn, hsgbtn icon SVGs from <bookRoot>/images/.
+        ///  - Wraps each icon in a <label> tied to a hidden checkbox.
+        ///  - Removes display:none and inline onclick attributes.
+        ///  - Strips the ?16fszs cache-buster.
         /// </summary>
-        private (string BodyInner, string Labels, HashSet<string> Groups)
-            BuildBodyFromSteps(string rawSteps, string bgImageDataUri, int pageWidth, int pageHeight)
+        private (string BodyInner, HashSet<string> Groups) BuildBodyFromSteps(
+            string rawSteps, string bgImageDataUri, string pageDirectory)
         {
             var groups = new HashSet<string>(StringComparer.Ordinal);
-            var labels = new StringBuilder();
-
             string working = rawSteps;
 
-            // Replace the book's own <img class="bgcls" src="..."> with the
-            // data URI version so we don't hit the filesystem from the WebView.
+            // 1. Replace the book's own background image with the data URI.
             working = Regex.Replace(working,
                 @"(<img\b[^>]*class\s*=\s*[""'][^""']*\bbgcls\b[^""']*[""'][^>]*\bsrc\s*=\s*[""'])([^""']+)([""'])",
                 m => m.Groups[1].Value + bgImageDataUri + m.Groups[3].Value,
                 RegexOptions.IgnoreCase);
 
-            // Wrap every redbtn / has2btn / hsgbtn icon in a label and give it
-            // a checkbox id derived from its linkname (or id if linkname is
-            // absent). Groups are read from redanswertype, defaulting to
-            // "studentAnswer" when the book omits it.
+            // 2. Inline every other <img src="...">. The path is resolved
+            //    against <bookRoot>/images/ first, then against the page's
+            //    own directory, so redlayer.svg at the book root and
+            //    steps_N.jpg inside the section both work.
+            working = Regex.Replace(working,
+                @"(<img\b[^>]*?\bsrc\s*=\s*[""'])([^""']+)([""'][^>]*>)",
+                m =>
+                {
+                    string src = m.Groups[2].Value;
+
+                    // Already a data URI? Leave it.
+                    if (src.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+                        return m.Value;
+
+                    // Strip the ?16fszs cache-buster so the file name matches.
+                    string cleanSrc = Regex.Replace(src, @"\?[^""']*$", "");
+
+                    string resolved = ResolveBookImage(cleanSrc, pageDirectory);
+                    if (string.IsNullOrEmpty(resolved))
+                        return m.Value;   // leave the original path; it will just 404
+
+                    string dataUri = ConvertImageToBase64HighQuality(resolved);
+                    return m.Groups[1].Value + dataUri + m.Groups[3].Value;
+                },
+                RegexOptions.IgnoreCase);
+
+            // 3. Wrap each icon in a label + checkbox. The icon becomes
+            //    the clickable surface; the checkbox carries the group and
+            //    target so the CSS can key on them.
             int anon = 0;
             working = Regex.Replace(working,
                 @"<img\b(?<attrs>[^>]*\bclass\s*=\s*[""'][^""']*\b(?:redbtn|has2btn|hsgbtn)\b[^""']*[""'][^>]*)>",
@@ -719,7 +725,6 @@ namespace BookViewer
                 {
                     var attrs = m.Groups["attrs"].Value;
 
-                    // linkname or name
                     string targetName = Regex.Match(attrs,
                         @"\blinkname\s*=\s*[""'](?<v>[^""']+)[""']",
                         RegexOptions.IgnoreCase).Groups["v"].Value;
@@ -728,31 +733,22 @@ namespace BookViewer
                             @"\bname\s*=\s*[""'](?<v>[^""']+)[""']",
                             RegexOptions.IgnoreCase).Groups["v"].Value;
 
-                    // id, or generate one
                     string idAttr = Regex.Match(attrs,
                         @"\bid\s*=\s*[""'](?<v>[^""']+)[""']",
                         RegexOptions.IgnoreCase).Groups["v"].Value;
                     if (string.IsNullOrEmpty(idAttr))
                         idAttr = "bv-icon-" + (++anon);
 
-                    // group
                     string group = Regex.Match(attrs,
                         @"\bredanswertype\s*=\s*[""'](?<v>[^""']+)[""']",
                         RegexOptions.IgnoreCase).Groups["v"].Value;
                     if (string.IsNullOrEmpty(group))
-                    {
-                        if (Regex.IsMatch(attrs, @"\bclass\s*=\s*[""'][^""']*\bhsgbtn\b", RegexOptions.IgnoreCase))
-                            group = "studentAnswer";
-                        else
-                            group = "studentAnswer";
-                    }
+                        group = "studentAnswer";
                     if (group == "studentAnswers") group = "studentAnswer";
                     groups.Add(group);
 
                     string checkboxId = "bv-cb-" + idAttr;
 
-                    // Emit the checkbox + label + the original <img>, then a
-                    // hidden data-attribute carrying the target name and group.
                     var sb = new StringBuilder();
                     sb.Append("<input type='checkbox' id='").Append(checkboxId)
                       .Append("' class='bv-toggle' data-group='").Append(group)
@@ -766,35 +762,66 @@ namespace BookViewer
                 },
                 RegexOptions.IgnoreCase);
 
-            // Strip display:none from the page fragments. CSS will now be the
-            // only thing deciding what is visible.
+            // 4. Strip display:none and inline onclick.
             working = Regex.Replace(working,
-                @"display\s*:\s*none\s*;?",
-                "",
-                RegexOptions.IgnoreCase);
-
-            // Remove every inline onclick — they reference JS the WebView
-            // doesn't have.
+                @"display\s*:\s*none\s*;?", "", RegexOptions.IgnoreCase);
             working = Regex.Replace(working,
-                @"\s+onclick\s*=\s*[""'][^""']*[""']",
-                "",
-                RegexOptions.IgnoreCase);
+                @"\s+onclick\s*=\s*[""'][^""']*[""']", "", RegexOptions.IgnoreCase);
 
-            // Also strip the url(?16fszs) cache-buster from any remaining
-            // src attributes we didn't inline.
-            working = Regex.Replace(working,
-                @"\?16fszs",
-                "",
-                RegexOptions.IgnoreCase);
+            // 5. Remove any remaining cache-buster on non-img URLs (unlikely
+            //    but harmless).
+            working = Regex.Replace(working, @"\?16fszs", "", RegexOptions.IgnoreCase);
 
-            return (working, labels.ToString(), groups);
+            return (working, groups);
         }
 
         /// <summary>
-        /// Reads steps_N_ori.html, keeping only the .tbred / .tbnote elements.
-        /// For each one, it looks up the group id from the element's `name`
-        /// (falling back to the class), and tags it with data-group so the
-        /// CSS can key on it.
+        /// Resolves a book-relative image path to a real filesystem path.
+        /// Order:
+        ///   1. <bookRoot>/&lt;relativePath&gt;     e.g. images/redlayer.svg
+        ///   2. <bookRoot>/&lt;pageDirName&gt;/&lt;relativePath&gt;  (rare)
+        ///   3. &lt;pageDirectory&gt;/&lt;relativePath&gt;       fallback
+        /// </summary>
+        private string ResolveBookImage(string relativePath, string pageDirectory)
+        {
+            if (string.IsNullOrEmpty(relativePath)) return null;
+
+            string rel = relativePath.Replace('/', Path.DirectorySeparatorChar).TrimStart('\\', '/');
+
+            // 1. Book root.
+            var rootCandidate = Path.Combine(_currentBookPath, rel);
+            if (File.Exists(rootCandidate)) return rootCandidate;
+
+            // 2. Page's parent folder name under book root (e.g. SEC201/images/...).
+            var pageDirName = Path.GetFileName(pageDirectory ?? "");
+            if (!string.IsNullOrEmpty(pageDirName))
+            {
+                var secCandidate = Path.Combine(_currentBookPath, pageDirName, rel);
+                if (File.Exists(secCandidate)) return secCandidate;
+            }
+
+            // 3. Page directory.
+            var pageCandidate = Path.Combine(pageDirectory ?? "", rel);
+            if (File.Exists(pageCandidate)) return pageCandidate;
+
+            // 4. Last-ditch: search the book root for the basename.
+            try
+            {
+                var name = Path.GetFileName(rel);
+                if (!string.IsNullOrEmpty(name))
+                {
+                    var hits = Directory.GetFiles(_currentBookPath, name, SearchOption.AllDirectories);
+                    if (hits.Length > 0) return hits[0];
+                }
+            }
+            catch { }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Reads steps_N_ori.html, keeps .tbred / .tbnote elements, tags
+        /// each with data-group so the CSS can key on it.
         /// </summary>
         private async Task<string> LoadAnswersFromOriAsync(
             string directory, string stem, HashSet<string> groups)
@@ -806,7 +833,6 @@ namespace BookViewer
 
             var sb = new StringBuilder();
 
-            // div.tbred / div.tbnote
             foreach (Match m in Regex.Matches(raw,
                 @"<div\b(?<attrs>[^>]*\bclass\s*=\s*[""'][^""']*(?:tbred|tbnote)[^""']*[""'][^>]*)>(?<body>[\s\S]*?)</div>",
                 RegexOptions.IgnoreCase))
@@ -814,7 +840,6 @@ namespace BookViewer
                 EmitAnswerElement(sb, groups, "div", m.Groups["attrs"].Value, m.Groups["body"].Value);
             }
 
-            // svg.tbred / svg.tbnote
             foreach (Match m in Regex.Matches(raw,
                 @"<svg\b(?<attrs>[^>]*\bclass\s*=\s*[""'][^""']*(?:tbred|tbnote)[^""']*[""'][^>]*)>(?<body>[\s\S]*?)</svg>",
                 RegexOptions.IgnoreCase))
@@ -829,7 +854,6 @@ namespace BookViewer
             StringBuilder sb, HashSet<string> groups,
             string tag, string attrs, string body)
         {
-            // Determine the answer group.
             string group = Regex.Match(attrs,
                 @"\bredanswertype\s*=\s*[""'](?<v>[^""']+)[""']",
                 RegexOptions.IgnoreCase).Groups["v"].Value;
@@ -844,8 +868,6 @@ namespace BookViewer
             if (group == "studentAnswers") group = "studentAnswer";
             groups.Add(group);
 
-            // Also derive a per-element target name so we could support
-            // per-element toggles in the future if desired.
             string targetName = Regex.Match(attrs,
                 @"\bname\s*=\s*[""'](?<v>[^""']+)[""']",
                 RegexOptions.IgnoreCase).Groups["v"].Value;
@@ -854,7 +876,6 @@ namespace BookViewer
                     @"\bid\s*=\s*[""'](?<v>[^""']+)[""']",
                     RegexOptions.IgnoreCase).Groups["v"].Value;
 
-            // Pull left/top/width/height out of the inline style.
             string style = Regex.Match(attrs,
                 @"\bstyle\s*=\s*[""'](?<v>[^""']*)[""']",
                 RegexOptions.IgnoreCase).Groups["v"].Value;
@@ -867,13 +888,10 @@ namespace BookViewer
                     pos.Append(key).Append(':').Append(mm.Groups["v"].Value.Trim()).Append(';');
             }
 
-            // Preserve the tbred/tbnote class and the x1..x9 kerning class.
             string cls = Regex.Match(attrs,
                 @"\bclass\s*=\s*[""'](?<v>[^""']*)[""']",
                 RegexOptions.IgnoreCase).Groups["v"].Value;
 
-            // Clean the body: remove has2/hsg/hastext wrappers and any
-            // remaining display:none.
             string cleanBody = Regex.Replace(body,
                 @"</?has2\b[^>]*>|</?hsg\b[^>]*>|</?hastext\b[^>]*>",
                 "", RegexOptions.IgnoreCase);
@@ -905,13 +923,6 @@ namespace BookViewer
             sb.Append("</div>\n");
         }
 
-        /// <summary>
-        /// Loads the page CSS: the book's own steps.css and steps_N_folio.css.
-        /// Font URLs are left alone since the WebView will resolve relative
-        /// paths against file:/// or against the data URI we install below —
-        /// either way we prefer to inline the fonts via the *_font.css
-        /// embedding step, so this is only the layout CSS.
-        /// </summary>
         private async Task<string> LoadBookCssAsync(string directory, string stem)
         {
             var sb = new StringBuilder();
@@ -934,14 +945,10 @@ namespace BookViewer
             int pageWidth,
             int pageHeight,
             string bodyInner,
-            string labelBlock,
             string answerBlock,
             HashSet<string> distinctGroups,
             HashSet<string> checkedGroups)
         {
-            // Build one "checked" rule per group. The CSS keys on the group
-            // attribute of the checkbox, so any checkbox for that group
-            // reveals every answer element carrying that group.
             var cssByGroup = new StringBuilder();
             foreach (var g in distinctGroups)
             {
@@ -952,17 +959,6 @@ namespace BookViewer
                 cssByGroup.Append(
                     $".bv-toggle[data-group=\"{g}\"]:checked ~ .page-wrapper " +
                     $".bv-icon-label[data-group=\"{g}\"] img {{ opacity:1; }}\n");
-            }
-
-            // Which checkboxes are pre-checked?
-            var checkedIds = new StringBuilder();
-            foreach (var g in checkedGroups)
-            {
-                // The book usually ships one hsgbtn per group, plus per-item
-                // redbtn icons. The "checked" attribute has to be added to the
-                // matching checkbox by id, but we don't know the ids here —
-                // instead, we let the assemble-time regex below set checked
-                // on every checkbox whose data-group is in checkedGroups.
             }
 
             string zoom = _currentZoom.ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -981,7 +977,7 @@ namespace BookViewer
 /* ---- embedded fonts ---- */
 {fontCss}
 
-/* ---- app CSS: layout wrapper only ---- */
+/* ---- app CSS ---- */
 * {{ margin:0; padding:0; box-sizing:border-box; }}
 html, body {{
     width:100%; height:100%; overflow:auto;
@@ -996,7 +992,6 @@ body {{ display:flex; justify-content:center; align-items:flex-start; }}
     align-items:flex-start;
 }}
 
-/* the #rez div is the book's page root; we scale it */
 #rez {{
     position:relative;
     transform: scale({zoom});
@@ -1006,17 +1001,13 @@ body {{ display:flex; justify-content:center; align-items:flex-start; }}
     overflow:hidden;
 }}
 
-/* the book's own visibility rules are stripped from the panes; we install
-   our own here — base pane is always visible, redAnswer pane is a layer
-   we manage separately, and the *Answer overlays come from _ori.html. */
-
-/* hide every answer element by default */
+/* answer items hidden by default */
 .answer-item {{ display:none; }}
 
-/* when a checkbox for group G is checked, reveal all answer items of G */
+/* per-group reveal rules */
 {cssByGroup}
 
-/* the icons used by the book are clickable surfaces */
+/* the checkbox itself is invisible; the label carries the icon */
 .bv-toggle {{ position:absolute; opacity:0; pointer-events:none; }}
 .bv-icon-label {{
     position:absolute;
@@ -1035,8 +1026,6 @@ body {{ display:flex; justify-content:center; align-items:flex-start; }}
 </head>
 <body>
 
-{labelBlock}
-
 <div class='page-wrapper'>
     <div id='rez' style='width:{pageWidth}px;height:{pageHeight}px;'>
         {bodyInner}
@@ -1047,7 +1036,7 @@ body {{ display:flex; justify-content:center; align-items:flex-start; }}
 </body>
 </html>";
 
-            // Now flip on the checked attribute for any checkbox in checkedGroups.
+            // Pre-check the checkboxes for groups that were toggled on.
             foreach (var g in checkedGroups)
             {
                 html = Regex.Replace(
@@ -1308,7 +1297,6 @@ body {{ display:flex; justify-content:center; align-items:flex-start; }}
             OnStatusChanged?.Invoke(this, show ? "Answers shown" : "Answers hidden");
         }
 
-        // PDF render path.
         public async Task<string> BuildPageHtmlForRenderAsync(
             string filePath,
             bool includeAnswers,
@@ -1321,15 +1309,10 @@ body {{ display:flex; justify-content:center; align-items:flex-start; }}
 
             try
             {
-                if (!includeAnswers)
-                {
-                    _groupToggles.Clear();
-                }
-                else
-                {
-                    foreach (var k in _groupToggles.Keys.ToList())
-                        _groupToggles[k] = false;
+                _groupToggles.Clear();
 
+                if (includeAnswers)
+                {
                     if (includeTeacherNotes) _groupToggles["teacherNotes"] = true;
                     if (includeStudentAnswers) _groupToggles["studentAnswer"] = true;
                 }
