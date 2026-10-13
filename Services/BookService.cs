@@ -27,11 +27,10 @@ namespace BookViewer
         private double _currentZoom = 1.0;
         private string _tempFolder = "";
 
-        // Toggle state, mirrored into the rendered HTML as "checked" on the
-        // matching checkbox. BookService does not render its own buttons;
-        // the buttons live inside the page, generated from redAnswer.
-        private bool _showTeacherNotes = false;
-        private bool _showStudentAnswers = false;
+        // Global toggle state — keyed by the group id used in the book, i.e.
+        // "studentAnswer", "teacherNotes", or a specific element name if a
+        // page exposes per-element toggles.
+        private readonly Dictionary<string, bool> _groupToggles = new(StringComparer.Ordinal);
 
         private readonly Dictionary<string, int> _stepFileToIndex = new();
         private readonly Dictionary<int, string> _folioToStepFile = new();
@@ -110,47 +109,26 @@ namespace BookViewer
         public string NextPageHtml => _nextPageHtml;
         public double CurrentZoom => _currentZoom;
 
-        public bool ShowTeacherNotes => _showTeacherNotes;
-        public bool ShowStudentAnswers => _showStudentAnswers;
-
         public Dictionary<int, string> FolioToStepFile => _folioToStepFile;
         public Dictionary<string, int> StepFileToIndex => _stepFileToIndex;
 
-        // Flip the on-page toggle for a given redanswertype. The page's own
-        // checkbox carries that state; we just rebuild the HTML with the
-        // checkbox checked/unchecked. No JS bridge needed.
-        public void SetToggleState(string redAnswerType, bool on)
+        // ---- toggle API, unchanged in spirit ----
+
+        public bool GetToggleState(string group)
+            => _groupToggles.TryGetValue(group ?? "", out var v) && v;
+
+        public void SetToggleState(string group, bool on)
         {
-            switch (redAnswerType)
-            {
-                case "teacherNotes":   _showTeacherNotes   = on; break;
-                case "studentAnswer":
-                case "studentAnswers": _showStudentAnswers = on; break;
-                default:
-                    // Unknown type — remember it anyway so the button reflects
-                    // state even for future answer kinds.
-                    _extraToggles[redAnswerType] = on;
-                    break;
-            }
+            if (string.IsNullOrEmpty(group)) return;
+            _groupToggles[group] = on;
 
             if (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count)
                 _ = LoadPageAsync(_currentPageIndex);
         }
 
-        private readonly Dictionary<string, bool> _extraToggles = new();
-
-        public bool GetToggleState(string redAnswerType)
-        {
-            return redAnswerType switch
-            {
-                "teacherNotes"   => _showTeacherNotes,
-                "studentAnswer"  => _showStudentAnswers,
-                "studentAnswers" => _showStudentAnswers,
-                _                => _extraToggles.TryGetValue(redAnswerType, out var v) && v
-            };
-        }
-
         // Kept for API compatibility with BookViewerPage.xaml.cs.
+        public bool ShowTeacherNotes => GetToggleState("teacherNotes");
+        public bool ShowStudentAnswers => GetToggleState("studentAnswer");
         public void SetShowTeacherNotes(bool show) => SetToggleState("teacherNotes", show);
         public void SetShowStudentAnswers(bool show) => SetToggleState("studentAnswer", show);
 
@@ -627,7 +605,7 @@ namespace BookViewer
         }
 
         // ================================================================
-        // Page building
+        // Rendering
         // ================================================================
 
         private async Task<string> ProcessHtmlContent(string htmlContent, string filePath)
@@ -641,7 +619,7 @@ namespace BookViewer
                 if (!IsPureStepsFile(fileName) || !fileName.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
                     return htmlContent;
 
-                // -- detect page size from the raw steps_N.html --
+                // Page size detection
                 int pageWidth = 1024;
                 int pageHeight = 1344;
 
@@ -652,46 +630,50 @@ namespace BookViewer
                 {
                     if (int.TryParse(rezMatch.Groups[1].Value, out int w)) pageWidth = w;
                     if (int.TryParse(rezMatch.Groups[2].Value, out int h)) pageHeight = h;
-                    Log($"Detected page size from #rez: {pageWidth}x{pageHeight}");
-                }
-                else
-                {
-                    var bgMatch = Regex.Match(htmlContent,
-                        @"class\s*=\s*[""']bgcls[""'][^>]*style\s*=\s*[""'][^""']*width\s*:\s*(\d+)px[^""']*height\s*:\s*(\d+)px",
-                        RegexOptions.IgnoreCase);
-                    if (bgMatch.Success)
-                    {
-                        if (int.TryParse(bgMatch.Groups[1].Value, out int w)) pageWidth = w;
-                        if (int.TryParse(bgMatch.Groups[2].Value, out int h)) pageHeight = h;
-                        Log($"Detected page size from .bgcls: {pageWidth}x{pageHeight}");
-                    }
                 }
 
                 CurrentPageWidth = pageWidth;
                 CurrentPageHeight = pageHeight;
 
-                // -- background image --
-                string bgImage = GetStepBackgroundImage(filePath);
-
-                // -- base text from steps_N_base.html (fallback to _ori.html) --
-                string baseHtml = await LoadBaseTextAsync(directory, stem, htmlContent);
-
-                // -- answers: redAnswer is source of truth, fallback to _ori --
-                var (answerLayer, answerTypes) = await LoadAnswerLayerAsync(directory, stem);
-
-                // -- fonts --
+                // Font CSS
                 string fontCss = await GetFontCssWithEmbeddedFonts(directory);
 
-                // -- assemble --
-                return BuildOverlayHtml(
-                    bgImage,
-                    baseHtml,
-                    answerLayer,
-                    answerTypes,
+                // Original page CSS: steps.css, and steps_N_folio.css if present.
+                string pageCss = await LoadBookCssAsync(directory, stem);
+
+                // Background image, inlined as a data URI.
+                string bgImage = GetStepBackgroundImage(filePath);
+
+                // 1. Transform raw steps_N.html into the page's box: background,
+                //    ori pane (hidden), base pane (visible text), redAnswer pane
+                //    (hidden), and the icon buttons wrapped in labels.
+                //
+                //    Returns the (body, iconLabels, distinctGroups) triple.
+                var (bodyInner, labelBlock, distinctGroups) = BuildBodyFromSteps(
+                    htmlContent, bgImage, pageWidth, pageHeight);
+
+                // 2. Merge in the answer elements from steps_N_ori.html, each
+                //    tagged with the group it belongs to. This is where the
+                //    book's .tbred / .tbnote elements come from.
+                string answerBlock = await LoadAnswersFromOriAsync(directory, stem, distinctGroups);
+
+                // 3. Which checkboxes should start checked?
+                var checkedGroups = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var g in distinctGroups)
+                    if (GetToggleState(g)) checkedGroups.Add(g);
+
+                // 4. Assemble.
+                return AssemblePage(
                     fileName,
                     fontCss,
+                    pageCss,
                     pageWidth,
-                    pageHeight);
+                    pageHeight,
+                    bodyInner,
+                    labelBlock,
+                    answerBlock,
+                    distinctGroups,
+                    checkedGroups);
             }
             catch (Exception ex)
             {
@@ -700,229 +682,382 @@ namespace BookViewer
             }
         }
 
-        private async Task<string> LoadBaseTextAsync(string directory, string stem, string rawStepsHtml)
+        /// <summary>
+        /// Walks the raw steps_N.html.
+        ///  - Replaces the background <img class="bgcls" src="..."> with the
+        ///    data-URI-inlined version.
+        ///  - Removes display:none from the <pane> elements (they hold the
+        ///    layers, but the CSS handles visibility — we don't want the
+        ///    book's own display:none to conflict).
+        ///  - For every <img class="redbtn|has2btn|hsgbtn">: wrap in a label
+        ///    and record its checkbox id, its linkname, and its group.
+        /// Returns: (bodyInnerHtml, labelsHtml, distinctGroups).
+        /// </summary>
+        private (string BodyInner, string Labels, HashSet<string> Groups)
+            BuildBodyFromSteps(string rawSteps, string bgImageDataUri, int pageWidth, int pageHeight)
         {
-            // Preferred source: steps_N_base.html — already correctly positioned.
-            var basePath = Path.Combine(directory, stem + "_base.html");
-            if (File.Exists(basePath))
-                return await File.ReadAllTextAsync(basePath);
+            var groups = new HashSet<string>(StringComparer.Ordinal);
+            var labels = new StringBuilder();
 
-            // Fallback: steps_N_ori.html with all tbred/tbnote stripped out.
-            var oriPath = Path.Combine(directory, stem + "_ori.html");
-            if (File.Exists(oriPath))
-            {
-                var ori = await File.ReadAllTextAsync(oriPath);
-                return StripAnswerElements(ori);
-            }
+            string working = rawSteps;
 
-            // Last resort: use whatever was inside <pane class="base"> in the
-            // raw steps_N.html, or the raw body.
-            var pane = Regex.Match(rawStepsHtml,
-                @"<pane[^>]*class\s*=\s*[""']base[""'][^>]*>(?<c>[\s\S]*?)</pane>",
+            // Replace the book's own <img class="bgcls" src="..."> with the
+            // data URI version so we don't hit the filesystem from the WebView.
+            working = Regex.Replace(working,
+                @"(<img\b[^>]*class\s*=\s*[""'][^""']*\bbgcls\b[^""']*[""'][^>]*\bsrc\s*=\s*[""'])([^""']+)([""'])",
+                m => m.Groups[1].Value + bgImageDataUri + m.Groups[3].Value,
                 RegexOptions.IgnoreCase);
-            if (pane.Success && !string.IsNullOrWhiteSpace(pane.Groups["c"].Value))
-                return pane.Groups["c"].Value;
 
-            return "";
-        }
+            // Wrap every redbtn / has2btn / hsgbtn icon in a label and give it
+            // a checkbox id derived from its linkname (or id if linkname is
+            // absent). Groups are read from redanswertype, defaulting to
+            // "studentAnswer" when the book omits it.
+            int anon = 0;
+            working = Regex.Replace(working,
+                @"<img\b(?<attrs>[^>]*\bclass\s*=\s*[""'][^""']*\b(?:redbtn|has2btn|hsgbtn)\b[^""']*[""'][^>]*)>",
+                m =>
+                {
+                    var attrs = m.Groups["attrs"].Value;
 
-        private string StripAnswerElements(string html)
-        {
-            // Remove <svg class="tbred...">...</svg> and <svg class="tbnote...">...</svg>
-            html = Regex.Replace(html,
-                @"<svg\b[^>]*class\s*=\s*[""'][^""']*(?:tbred|tbnote)[^""']*[""'][^>]*>[\s\S]*?</svg>",
-                "", RegexOptions.IgnoreCase);
+                    // linkname or name
+                    string targetName = Regex.Match(attrs,
+                        @"\blinkname\s*=\s*[""'](?<v>[^""']+)[""']",
+                        RegexOptions.IgnoreCase).Groups["v"].Value;
+                    if (string.IsNullOrEmpty(targetName))
+                        targetName = Regex.Match(attrs,
+                            @"\bname\s*=\s*[""'](?<v>[^""']+)[""']",
+                            RegexOptions.IgnoreCase).Groups["v"].Value;
 
-            // Remove <div class="tbred...">...</div> and <div class="tbnote...">...</div>
-            html = Regex.Replace(html,
-                @"<div\b[^>]*class\s*=\s*[""'][^""']*(?:tbred|tbnote)[^""']*[""'][^>]*>[\s\S]*?</div>",
-                "", RegexOptions.IgnoreCase);
+                    // id, or generate one
+                    string idAttr = Regex.Match(attrs,
+                        @"\bid\s*=\s*[""'](?<v>[^""']+)[""']",
+                        RegexOptions.IgnoreCase).Groups["v"].Value;
+                    if (string.IsNullOrEmpty(idAttr))
+                        idAttr = "bv-icon-" + (++anon);
 
-            return html;
+                    // group
+                    string group = Regex.Match(attrs,
+                        @"\bredanswertype\s*=\s*[""'](?<v>[^""']+)[""']",
+                        RegexOptions.IgnoreCase).Groups["v"].Value;
+                    if (string.IsNullOrEmpty(group))
+                    {
+                        if (Regex.IsMatch(attrs, @"\bclass\s*=\s*[""'][^""']*\bhsgbtn\b", RegexOptions.IgnoreCase))
+                            group = "studentAnswer";
+                        else
+                            group = "studentAnswer";
+                    }
+                    if (group == "studentAnswers") group = "studentAnswer";
+                    groups.Add(group);
+
+                    string checkboxId = "bv-cb-" + idAttr;
+
+                    // Emit the checkbox + label + the original <img>, then a
+                    // hidden data-attribute carrying the target name and group.
+                    var sb = new StringBuilder();
+                    sb.Append("<input type='checkbox' id='").Append(checkboxId)
+                      .Append("' class='bv-toggle' data-group='").Append(group)
+                      .Append("' data-target='").Append(targetName).Append("'>");
+                    sb.Append("<label for='").Append(checkboxId)
+                      .Append("' class='bv-icon-label' data-group='").Append(group)
+                      .Append("' data-target='").Append(targetName).Append("'>");
+                    sb.Append("<img ").Append(attrs).Append(">");
+                    sb.Append("</label>");
+                    return sb.ToString();
+                },
+                RegexOptions.IgnoreCase);
+
+            // Strip display:none from the page fragments. CSS will now be the
+            // only thing deciding what is visible.
+            working = Regex.Replace(working,
+                @"display\s*:\s*none\s*;?",
+                "",
+                RegexOptions.IgnoreCase);
+
+            // Remove every inline onclick — they reference JS the WebView
+            // doesn't have.
+            working = Regex.Replace(working,
+                @"\s+onclick\s*=\s*[""'][^""']*[""']",
+                "",
+                RegexOptions.IgnoreCase);
+
+            // Also strip the url(?16fszs) cache-buster from any remaining
+            // src attributes we didn't inline.
+            working = Regex.Replace(working,
+                @"\?16fszs",
+                "",
+                RegexOptions.IgnoreCase);
+
+            return (working, labels.ToString(), groups);
         }
 
         /// <summary>
-        /// Reads steps_N_redAnswer.html (preferred) or falls back to the
-        /// tbred/tbnote elements in steps_N_ori.html. Returns:
-        ///   - layer HTML: each answer element wrapped in .answer-item
-        ///     with a data-rat attribute equal to its redanswertype.
-        ///   - set of distinct redanswertype values found.
+        /// Reads steps_N_ori.html, keeping only the .tbred / .tbnote elements.
+        /// For each one, it looks up the group id from the element's `name`
+        /// (falling back to the class), and tags it with data-group so the
+        /// CSS can key on it.
         /// </summary>
-        private async Task<(string Layer, HashSet<string> Types)> LoadAnswerLayerAsync(
-            string directory, string stem)
+        private async Task<string> LoadAnswersFromOriAsync(
+            string directory, string stem, HashSet<string> groups)
         {
-            var types = new HashSet<string>(StringComparer.Ordinal);
+            var oriPath = Path.Combine(directory, stem + "_ori.html");
+            if (!File.Exists(oriPath)) return "";
+
+            var raw = await File.ReadAllTextAsync(oriPath);
+
             var sb = new StringBuilder();
 
-            string redAnswerPath = Path.Combine(directory, stem + "_redAnswer.html");
-            if (File.Exists(redAnswerPath))
+            // div.tbred / div.tbnote
+            foreach (Match m in Regex.Matches(raw,
+                @"<div\b(?<attrs>[^>]*\bclass\s*=\s*[""'][^""']*(?:tbred|tbnote)[^""']*[""'][^>]*)>(?<body>[\s\S]*?)</div>",
+                RegexOptions.IgnoreCase))
             {
-                var raw = await File.ReadAllTextAsync(redAnswerPath);
-                AppendAnswerItems(sb, types, raw);
+                EmitAnswerElement(sb, groups, "div", m.Groups["attrs"].Value, m.Groups["body"].Value);
             }
 
-            if (sb.Length == 0)
+            // svg.tbred / svg.tbnote
+            foreach (Match m in Regex.Matches(raw,
+                @"<svg\b(?<attrs>[^>]*\bclass\s*=\s*[""'][^""']*(?:tbred|tbnote)[^""']*[""'][^>]*)>(?<body>[\s\S]*?)</svg>",
+                RegexOptions.IgnoreCase))
             {
-                var oriPath = Path.Combine(directory, stem + "_ori.html");
-                if (File.Exists(oriPath))
-                {
-                    var raw = await File.ReadAllTextAsync(oriPath);
-                    AppendAnswerItems(sb, types, raw);
-                }
+                EmitAnswerElement(sb, groups, "svg", m.Groups["attrs"].Value, m.Groups["body"].Value);
             }
 
-            return (sb.ToString(), types);
+            return sb.ToString();
         }
 
-        /// <summary>
-        /// Walks an HTML fragment and emits one .answer-item per tbred/tbnote
-        /// element. Preserves left/top/width/height from the original style,
-        /// strips display:none and every other inline style, and records the
-        /// redanswertype from the embedded has2/hsg redanswertype attribute.
-        /// </summary>
-        private void AppendAnswerItems(StringBuilder sb, HashSet<string> types, string raw)
+        private void EmitAnswerElement(
+            StringBuilder sb, HashSet<string> groups,
+            string tag, string attrs, string body)
         {
-            // Divs first.
-            var divMatches = Regex.Matches(raw,
-                @"<div\b(?<attrs>[^>]*class\s*=\s*[""'][^""']*(?:tbred|tbnote)[^""']*[""'][^>]*)>(?<body>[\s\S]*?)</div>",
-                RegexOptions.IgnoreCase);
+            // Determine the answer group.
+            string group = Regex.Match(attrs,
+                @"\bredanswertype\s*=\s*[""'](?<v>[^""']+)[""']",
+                RegexOptions.IgnoreCase).Groups["v"].Value;
 
-            foreach (Match m in divMatches)
+            if (string.IsNullOrEmpty(group))
             {
-                var attrs = m.Groups["attrs"].Value;
-                var body = m.Groups["body"].Value;
-                EmitAnswerItem(sb, types, "div", attrs, body);
-            }
-
-            // SVGs (teacher-note strokes in steps_N_ori.html).
-            var svgMatches = Regex.Matches(raw,
-                @"<svg\b(?<attrs>[^>]*class\s*=\s*[""'][^""']*(?:tbred|tbnote)[^""']*[""'][^>]*)>(?<body>[\s\S]*?)</svg>",
-                RegexOptions.IgnoreCase);
-
-            foreach (Match m in svgMatches)
-            {
-                var attrs = m.Groups["attrs"].Value;
-                var body = m.Groups["body"].Value;
-                EmitAnswerItem(sb, types, "svg", attrs, body);
-            }
-        }
-
-        private void EmitAnswerItem(
-            StringBuilder sb, HashSet<string> types, string tag, string attrs, string body)
-        {
-            // Skip empty shells (like <svg class="tbred" ...></svg> with nothing).
-            bool hasBody = !string.IsNullOrWhiteSpace(body);
-            bool hasHas2 = Regex.IsMatch(body, @"<has2\b", RegexOptions.IgnoreCase);
-            bool hasPath = Regex.IsMatch(body, @"<path\b", RegexOptions.IgnoreCase);
-            if (!hasBody && !hasHas2 && !hasPath) return;
-
-            // Detect the redanswertype. Priority:
-            //   1. redanswertype attribute on <has2> inside the body.
-            //   2. redanswertype attribute on the outer element itself.
-            //   3. class name: tbnote → teacherNotes, tbred → studentAnswer.
-            string rat = null;
-
-            var bodyRat = Regex.Match(body,
-                @"redanswertype\s*=\s*[""'](?<t>[^""']+)[""']",
-                RegexOptions.IgnoreCase);
-            if (bodyRat.Success) rat = bodyRat.Groups["t"].Value;
-
-            if (string.IsNullOrEmpty(rat))
-            {
-                var attrRat = Regex.Match(attrs,
-                    @"redanswertype\s*=\s*[""'](?<t>[^""']+)[""']",
-                    RegexOptions.IgnoreCase);
-                if (attrRat.Success) rat = attrRat.Groups["t"].Value;
-            }
-
-            if (string.IsNullOrEmpty(rat))
-            {
-                if (Regex.IsMatch(attrs, @"class\s*=\s*[""'][^""']*\btbnote\b", RegexOptions.IgnoreCase))
-                    rat = "teacherNotes";
+                if (Regex.IsMatch(attrs, @"\bclass\s*=\s*[""'][^""']*\btbnote\b", RegexOptions.IgnoreCase))
+                    group = "teacherNotes";
                 else
-                    rat = "studentAnswer";
+                    group = "studentAnswer";
             }
+            if (group == "studentAnswers") group = "studentAnswer";
+            groups.Add(group);
 
-            // Normalize to a consistent key. Book uses "studentAnswer" (singular).
-            rat = rat == "studentAnswers" ? "studentAnswer" : rat;
+            // Also derive a per-element target name so we could support
+            // per-element toggles in the future if desired.
+            string targetName = Regex.Match(attrs,
+                @"\bname\s*=\s*[""'](?<v>[^""']+)[""']",
+                RegexOptions.IgnoreCase).Groups["v"].Value;
+            if (string.IsNullOrEmpty(targetName))
+                targetName = Regex.Match(attrs,
+                    @"\bid\s*=\s*[""'](?<v>[^""']+)[""']",
+                    RegexOptions.IgnoreCase).Groups["v"].Value;
 
-            types.Add(rat);
-
-            // Extract left/top/width/height from the style attribute.
-            string style = "";
-            var styleMatch = Regex.Match(attrs,
-                @"style\s*=\s*[""'](?<s>[^""']*)[""']",
-                RegexOptions.IgnoreCase);
-            if (styleMatch.Success) style = styleMatch.Groups["s"].Value;
+            // Pull left/top/width/height out of the inline style.
+            string style = Regex.Match(attrs,
+                @"\bstyle\s*=\s*[""'](?<v>[^""']*)[""']",
+                RegexOptions.IgnoreCase).Groups["v"].Value;
 
             var pos = new StringBuilder();
             foreach (var key in new[] { "left", "top", "width", "height" })
             {
-                var mm = Regex.Match(style,
-                    @"\b" + key + @"\s*:\s*(?<v>[^;]+)",
-                    RegexOptions.IgnoreCase);
+                var mm = Regex.Match(style, @"\b" + key + @"\s*:\s*(?<v>[^;]+)", RegexOptions.IgnoreCase);
                 if (mm.Success)
                     pos.Append(key).Append(':').Append(mm.Groups["v"].Value.Trim()).Append(';');
             }
 
-            // Pull the class attribute so tbred/tbnote (and the x1..x9 kerning
-            // modifiers) survive. Drop everything else.
-            string cls = "";
-            var classMatch = Regex.Match(attrs,
-                @"class\s*=\s*[""'](?<c>[^""']*)[""']",
-                RegexOptions.IgnoreCase);
-            if (classMatch.Success) cls = classMatch.Groups["c"].Value;
+            // Preserve the tbred/tbnote class and the x1..x9 kerning class.
+            string cls = Regex.Match(attrs,
+                @"\bclass\s*=\s*[""'](?<v>[^""']*)[""']",
+                RegexOptions.IgnoreCase).Groups["v"].Value;
 
-            // Unwrap has2/hsg/hastext so the browser doesn't balk.
+            // Clean the body: remove has2/hsg/hastext wrappers and any
+            // remaining display:none.
             string cleanBody = Regex.Replace(body,
                 @"</?has2\b[^>]*>|</?hsg\b[^>]*>|</?hastext\b[^>]*>",
                 "", RegexOptions.IgnoreCase);
+            cleanBody = Regex.Replace(cleanBody, @"display\s*:\s*none\s*;?", "", RegexOptions.IgnoreCase);
 
-            // Remove all inline display:none from the body.
-            cleanBody = Regex.Replace(cleanBody,
-                @"display\s*:\s*none\s*;?",
-                "", RegexOptions.IgnoreCase);
+            sb.Append("<div class=\"answer-item\" data-group=\"").Append(group).Append('"');
+            if (!string.IsNullOrEmpty(targetName))
+                sb.Append(" data-target=\"").Append(targetName).Append('"');
+            sb.Append(" style=\"").Append(pos.ToString()).Append("\">");
 
-            // SVGs need stroke/fill to survive. Re-emit them with the class
-            // attribute (which carries the tbred/tbnote marker) and the body.
             if (tag == "svg")
             {
-                // Extract width/height from the attrs — needed for SVG sizing.
-                string svgW = Regex.Match(attrs, @"width\s*=\s*[""'](?<v>[^""']+)[""']",
-                    RegexOptions.IgnoreCase).Groups["v"].Value;
-                string svgH = Regex.Match(attrs, @"height\s*=\s*[""'](?<v>[^""']+)[""']",
-                    RegexOptions.IgnoreCase).Groups["v"].Value;
-
-                sb.Append("<div class=\"answer-item\" data-rat=\"")
-                  .Append(rat)
-                  .Append("\" style=\"")
-                  .Append(pos.ToString())
-                  .Append("\">");
-
-                sb.Append("<svg class=\"").Append(cls).Append("\"");
-                if (!string.IsNullOrEmpty(svgW)) sb.Append(" width=\"").Append(svgW).Append("\"");
-                if (!string.IsNullOrEmpty(svgH)) sb.Append(" height=\"").Append(svgH).Append("\"");
+                string w = Regex.Match(attrs, @"\bwidth\s*=\s*[""'](?<v>[^""']+)[""']", RegexOptions.IgnoreCase).Groups["v"].Value;
+                string h = Regex.Match(attrs, @"\bheight\s*=\s*[""'](?<v>[^""']+)[""']", RegexOptions.IgnoreCase).Groups["v"].Value;
+                sb.Append("<svg class=\"").Append(cls).Append('"');
+                if (!string.IsNullOrEmpty(w)) sb.Append(" width=\"").Append(w).Append('"');
+                if (!string.IsNullOrEmpty(h)) sb.Append(" height=\"").Append(h).Append('"');
                 sb.Append(" xmlns=\"http://www.w3.org/2000/svg\">");
                 sb.Append(cleanBody);
                 sb.Append("</svg>");
-
-                sb.Append("</div>\n");
-                return;
+            }
+            else
+            {
+                sb.Append("<div class=\"").Append(cls).Append("\">");
+                sb.Append(cleanBody);
+                sb.Append("</div>");
             }
 
-            // Div case: emit a nested div with the original class (so kerning
-            // nudges x1..x9 still apply), wrapped in .answer-item.
-            sb.Append("<div class=\"answer-item\" data-rat=\"")
-              .Append(rat)
-              .Append("\" style=\"")
-              .Append(pos.ToString())
-              .Append("\">");
-
-            sb.Append("<div class=\"").Append(cls).Append("\">");
-            sb.Append(cleanBody);
-            sb.Append("</div>");
-
             sb.Append("</div>\n");
+        }
+
+        /// <summary>
+        /// Loads the page CSS: the book's own steps.css and steps_N_folio.css.
+        /// Font URLs are left alone since the WebView will resolve relative
+        /// paths against file:/// or against the data URI we install below —
+        /// either way we prefer to inline the fonts via the *_font.css
+        /// embedding step, so this is only the layout CSS.
+        /// </summary>
+        private async Task<string> LoadBookCssAsync(string directory, string stem)
+        {
+            var sb = new StringBuilder();
+
+            var stepsCss = Path.Combine(directory, "steps.css");
+            if (File.Exists(stepsCss))
+                sb.AppendLine(await File.ReadAllTextAsync(stepsCss));
+
+            var folioCss = Path.Combine(directory, stem + "_folio.css");
+            if (File.Exists(folioCss))
+                sb.AppendLine(await File.ReadAllTextAsync(folioCss));
+
+            return sb.ToString();
+        }
+
+        private string AssemblePage(
+            string fileName,
+            string fontCss,
+            string pageCss,
+            int pageWidth,
+            int pageHeight,
+            string bodyInner,
+            string labelBlock,
+            string answerBlock,
+            HashSet<string> distinctGroups,
+            HashSet<string> checkedGroups)
+        {
+            // Build one "checked" rule per group. The CSS keys on the group
+            // attribute of the checkbox, so any checkbox for that group
+            // reveals every answer element carrying that group.
+            var cssByGroup = new StringBuilder();
+            foreach (var g in distinctGroups)
+            {
+                cssByGroup.Append(
+                    $".bv-toggle[data-group=\"{g}\"]:checked ~ .page-wrapper .answer-layer " +
+                    $".answer-item[data-group=\"{g}\"] {{ display:block; }}\n");
+
+                cssByGroup.Append(
+                    $".bv-toggle[data-group=\"{g}\"]:checked ~ .page-wrapper " +
+                    $".bv-icon-label[data-group=\"{g}\"] img {{ opacity:1; }}\n");
+            }
+
+            // Which checkboxes are pre-checked?
+            var checkedIds = new StringBuilder();
+            foreach (var g in checkedGroups)
+            {
+                // The book usually ships one hsgbtn per group, plus per-item
+                // redbtn icons. The "checked" attribute has to be added to the
+                // matching checkbox by id, but we don't know the ids here —
+                // instead, we let the assemble-time regex below set checked
+                // on every checkbox whose data-group is in checkedGroups.
+            }
+
+            string zoom = _currentZoom.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            string surround = SurroundColor;
+
+            string html = $@"<!DOCTYPE html>
+<html>
+<head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width,initial-scale=1.0,maximum-scale=5.0,user-scalable=yes'>
+<title>{fileName}</title>
+<style>
+/* ---- book CSS ---- */
+{pageCss}
+
+/* ---- embedded fonts ---- */
+{fontCss}
+
+/* ---- app CSS: layout wrapper only ---- */
+* {{ margin:0; padding:0; box-sizing:border-box; }}
+html, body {{
+    width:100%; height:100%; overflow:auto;
+    background:{surround};
+    -webkit-font-smoothing: antialiased;
+}}
+body {{ display:flex; justify-content:center; align-items:flex-start; }}
+
+.page-wrapper {{
+    display:flex;
+    justify-content:center;
+    align-items:flex-start;
+}}
+
+/* the #rez div is the book's page root; we scale it */
+#rez {{
+    position:relative;
+    transform: scale({zoom});
+    transform-origin: top center;
+    background:#fff;
+    box-shadow: 0 0 20px rgba(0,0,0,.15);
+    overflow:hidden;
+}}
+
+/* the book's own visibility rules are stripped from the panes; we install
+   our own here — base pane is always visible, redAnswer pane is a layer
+   we manage separately, and the *Answer overlays come from _ori.html. */
+
+/* hide every answer element by default */
+.answer-item {{ display:none; }}
+
+/* when a checkbox for group G is checked, reveal all answer items of G */
+{cssByGroup}
+
+/* the icons used by the book are clickable surfaces */
+.bv-toggle {{ position:absolute; opacity:0; pointer-events:none; }}
+.bv-icon-label {{
+    position:absolute;
+    cursor:pointer;
+    user-select:none;
+    -webkit-user-select:none;
+    display:inline-block;
+}}
+.bv-icon-label img {{
+    display:block;
+    opacity:.55;
+    transition: opacity .15s;
+}}
+.bv-icon-label:active img {{ opacity:1; }}
+</style>
+</head>
+<body>
+
+{labelBlock}
+
+<div class='page-wrapper'>
+    <div id='rez' style='width:{pageWidth}px;height:{pageHeight}px;'>
+        {bodyInner}
+        <div class='answer-layer'>{answerBlock}</div>
+    </div>
+</div>
+
+</body>
+</html>";
+
+            // Now flip on the checked attribute for any checkbox in checkedGroups.
+            foreach (var g in checkedGroups)
+            {
+                html = Regex.Replace(
+                    html,
+                    @"(<input\b[^>]*class\s*=\s*[""'][^""']*\bbv-toggle\b[^""']*[""'][^>]*data-group\s*=\s*[""']" + Regex.Escape(g) + @"[""'][^>]*?)(\s*/?>)",
+                    "$1 checked$2",
+                    RegexOptions.IgnoreCase);
+            }
+
+            return html;
         }
 
         private async Task<string> GetFontCssWithEmbeddedFonts(string directory)
@@ -978,14 +1113,10 @@ namespace BookViewer
                         @"@font-face\s*\{(?<body>.*?)\}",
                         RegexOptions.Singleline | RegexOptions.IgnoreCase);
 
-                    int totalFaces = fontFaceMatches.Count;
-                    int embeddedCount = 0;
-
                     foreach (Match match in fontFaceMatches)
                     {
                         var fontFaceContent = match.Groups[1].Value;
                         var urlMatches = Regex.Matches(fontFaceContent, @"url\(['""]?([^)'""]+)['""]?\)");
-                        bool faceWasEmbedded = false;
 
                         foreach (Match urlMatch in urlMatches)
                         {
@@ -1028,60 +1159,15 @@ namespace BookViewer
                                 fontCss = fontCss.Replace($"url('{rawPath}')", $"url('{dataUri}')");
                                 fontCss = fontCss.Replace($"url(\"{rawPath}\")", $"url('{dataUri}')");
                                 fontCss = fontCss.Replace($"url({rawPath})", $"url('{dataUri}')");
-
-                                faceWasEmbedded = true;
-                                Log($"Embedded font: {Path.GetFileName(fullFontPath)} ({fontBytes.Length} bytes)");
-                            }
-                            else
-                            {
-                                Log($"Font file NOT FOUND: '{rawPath}' in {fontsFolder}");
                             }
                         }
-                        if (faceWasEmbedded)
-                            embeddedCount++;
                     }
-
-                    Log($"Font embedding summary: {embeddedCount} of {totalFaces} @font-face rules embedded");
-
-                    fontCss += @"
-
-/* ==== CJK metric lock ==== */
-@font-face {
-    font-family: 'CJKLocked';
-    src: local('PingFang TC'), local('PingFang SC'), local('Heiti TC'),
-         local('Microsoft JhengHei'), local('Microsoft YaHei'),
-         local('Noto Sans CJK TC'), local('Noto Sans CJK SC'),
-         local('Noto Serif CJK TC'), local('Noto Serif CJK SC');
-    ascent-override: 100%;
-    descent-override: 0%;
-    line-gap-override: 0%;
-}
-body, .base-content, .base-content > div {
-    font-family: 'CJKLocked', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
-}
-";
 
                     _fontCache[directory] = fontCss;
                     return fontCss;
                 }
 
                 fontCss = await GenerateFontCssFromFiles();
-                fontCss += @"
-
-/* ==== CJK metric lock ==== */
-@font-face {
-    font-family: 'CJKLocked';
-    src: local('PingFang TC'), local('PingFang SC'), local('Heiti TC'),
-         local('Microsoft JhengHei'), local('Microsoft YaHei'),
-         local('Noto Sans CJK TC'), local('Noto Sans CJK SC');
-    ascent-override: 100%;
-    descent-override: 0%;
-    line-gap-override: 0%;
-}
-body, .base-content, .base-content > div {
-    font-family: 'CJKLocked', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
-}
-";
                 _fontCache[directory] = fontCss;
                 return fontCss;
             }
@@ -1139,9 +1225,6 @@ body, .base-content, .base-content > div {
     src: url('{dataUri}') format('{format}');
     font-weight: normal;
     font-style: normal;
-    ascent-override: 100%;
-    descent-override: 0%;
-    line-gap-override: 0%;
 }}";
                     }
                     catch { }
@@ -1209,194 +1292,6 @@ body, .base-content, .base-content > div {
             }
         }
 
-        /// <summary>
-        /// Builds the full HTML for a page. The toggle bar is generated from
-        /// the redanswertype values actually present in the redAnswer file —
-        /// one pill per type, no hardcoded buttons. No JS is emitted.
-        /// </summary>
-        private string BuildOverlayHtml(
-            string bgImage,
-            string contentHtml,
-            string answerLayer,
-            HashSet<string> answerTypes,
-            string fileName,
-            string fontCss,
-            int pageWidth,
-            int pageHeight)
-        {
-            if (string.IsNullOrEmpty(bgImage)) bgImage = GetPlaceholderImage();
-            if (string.IsNullOrEmpty(contentHtml))
-                contentHtml = "<div style='padding:20px;color:#666;font-size:24px;'>Content not available</div>";
-
-            // Build one checkbox + one label per redanswertype.
-            // teacherNotes on the left, studentAnswer on the right; anything
-            // else in between.
-            var ordered = answerTypes
-                .OrderBy(t => t == "teacherNotes" ? 0 : (t == "studentAnswer" ? 2 : 1))
-                .ToList();
-
-            var checkboxHtml = new StringBuilder();
-            var labelHtml = new StringBuilder();
-            var cssRules = new StringBuilder();
-
-            foreach (var t in ordered)
-            {
-                string id = "bv-toggle-" + SanitizeId(t);
-                bool isOn = GetToggleState(t);
-                string checkedAttr = isOn ? " checked" : "";
-                string pillText = t switch
-                {
-                    "teacherNotes" => "✎ Notes",
-                    "studentAnswer" => "✓ Answers",
-                    _ => t
-                };
-
-                checkboxHtml.Append($"<input type='checkbox' id='{id}' class='bv-toggle'{checkedAttr}>\n");
-                labelHtml.Append($"<label for='{id}' class='bv-toggle-label' data-type='{t}'>{pillText}</label>\n");
-
-                cssRules.Append(
-                    $"#bv-toggle-{SanitizeId(t)}:checked ~ .page-wrapper .page-container " +
-                    $".answer-layer .answer-item[data-rat=\"{t}\"] {{ display:block; }}\n");
-                cssRules.Append(
-                    $"#bv-toggle-{SanitizeId(t)}:checked ~ .page-wrapper .bv-togglebar " +
-                    $"label[for=\"bv-toggle-{SanitizeId(t)}\"] {{ background:#34C759; color:#fff; border-color:#34C759; }}\n");
-            }
-
-            string zoom = _currentZoom.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            string surround = SurroundColor;
-
-            return $@"<!DOCTYPE html>
-<html>
-<head>
-<meta charset='UTF-8'>
-<meta name='viewport' content='width=device-width,initial-scale=1.0,maximum-scale=5.0,user-scalable=yes'>
-<title>{fileName}</title>
-<style>
-{fontCss}
-
-* {{ margin:0; padding:0; box-sizing:border-box; }}
-
-html, body {{
-    width:100%; height:100%; overflow:auto;
-    background:{surround};
-    -webkit-font-smoothing: antialiased;
-}}
-body {{ display:flex; justify-content:center; align-items:flex-start; }}
-
-.page-wrapper {{ display:flex; justify-content:center; align-items:flex-start; }}
-.page-container {{
-    position:relative;
-    width:{pageWidth}px;
-    height:{pageHeight}px;
-    flex-shrink:0;
-    background:#fff;
-    box-shadow:0 0 20px rgba(0,0,0,.15);
-    overflow:hidden;
-    border-radius:2px;
-    transform: scale({zoom});
-    transform-origin: top center;
-}}
-
-.bgcls-img {{
-    position:absolute; top:0; left:0;
-    width:100%; height:100%;
-    pointer-events:none;
-    z-index:1;
-}}
-
-.base-content {{
-    position:absolute; top:0; left:0;
-    width:100%; height:100%;
-    z-index:5;
-    pointer-events:none;
-}}
-.base-content > div {{
-    position:absolute;
-    line-height:1.5em;
-    white-space:pre;
-    font-kerning:none;
-    font-feature-settings:'kern' 0,'liga' 0;
-    text-rendering: geometricPrecision;
-}}
-.base-content .x1 {{ -webkit-transform: translateX(.1px); }}
-.base-content .x2 {{ -webkit-transform: translateX(.2px); }}
-.base-content .x3 {{ -webkit-transform: translateX(.3px); }}
-.base-content .x4 {{ -webkit-transform: translateX(.4px); }}
-.base-content .x5 {{ -webkit-transform: translateX(-.5px); }}
-.base-content .x6 {{ -webkit-transform: translateX(-.4px); }}
-.base-content .x7 {{ -webkit-transform: translateX(-.3px); }}
-.base-content .x8 {{ -webkit-transform: translateX(-.2px); }}
-.base-content .x9 {{ -webkit-transform: translateX(-.1px); }}
-
-.answer-layer {{
-    position:absolute; top:0; left:0;
-    width:100%; height:100%;
-    z-index:20;
-    pointer-events:none;
-}}
-.answer-layer > .answer-item {{
-    position:absolute;
-    display:none;
-}}
-.answer-layer .answer-item > div,
-.answer-layer .answer-item > svg {{
-    position: static;
-    display: block;
-}}
-
-.bv-toggle {{ position:absolute; opacity:0; pointer-events:none; }}
-
-.bv-togglebar {{
-    position:absolute; top:10px; right:10px; z-index:9999;
-    display:flex; gap:6px; pointer-events:auto;
-    font-family: system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
-}}
-.bv-toggle-label {{
-    display:inline-block;
-    padding:6px 14px;
-    border-radius:18px;
-    background:#F7F7F9;
-    color:#111;
-    font-size:13px;
-    font-weight:600;
-    cursor:pointer;
-    user-select:none;
-    -webkit-user-select:none;
-    border:1px solid rgba(0,0,0,.08);
-    box-shadow:0 1px 3px rgba(0,0,0,.08);
-    transition: background .15s, color .15s;
-}}
-
-/* Per-page rules, generated from the redAnswer contents */
-{cssRules}
-</style>
-</head>
-<body>
-
-{checkboxHtml}
-<div class='page-wrapper'>
-    <div class='page-container'>
-        <div class='bv-togglebar'>
-{labelHtml}
-        </div>
-        <img class='bgcls-img' src='{bgImage}' alt='' />
-        <div class='base-content'>{contentHtml}</div>
-        <div class='answer-layer'>{answerLayer}</div>
-    </div>
-</div>
-
-</body>
-</html>";
-        }
-
-        private static string SanitizeId(string s)
-        {
-            var sb = new StringBuilder();
-            foreach (var c in s ?? "")
-                sb.Append(char.IsLetterOrDigit(c) || c == '-' || c == '_' ? c : '_');
-            return sb.ToString();
-        }
-
         public void NavigatePrevious()
         {
             if (_currentPageIndex > 0) _ = LoadPageAsync(_currentPageIndex - 1);
@@ -1413,11 +1308,7 @@ body {{ display:flex; justify-content:center; align-items:flex-start; }}
             OnStatusChanged?.Invoke(this, show ? "Answers shown" : "Answers hidden");
         }
 
-        // ================================================================
-        // PDF render path — kept from the original but now also supports
-        // baking the current toggle state into the output.
-        // ================================================================
-
+        // PDF render path.
         public async Task<string> BuildPageHtmlForRenderAsync(
             string filePath,
             bool includeAnswers,
@@ -1426,20 +1317,29 @@ body {{ display:flex; justify-content:center; align-items:flex-start; }}
         {
             var rawHtml = await File.ReadAllTextAsync(filePath);
 
-            var savedTeacher = _showTeacherNotes;
-            var savedStudent = _showStudentAnswers;
+            var saved = new Dictionary<string, bool>(_groupToggles);
 
             try
             {
-                _showTeacherNotes   = includeAnswers && includeTeacherNotes;
-                _showStudentAnswers = includeAnswers && includeStudentAnswers;
+                if (!includeAnswers)
+                {
+                    _groupToggles.Clear();
+                }
+                else
+                {
+                    foreach (var k in _groupToggles.Keys.ToList())
+                        _groupToggles[k] = false;
+
+                    if (includeTeacherNotes) _groupToggles["teacherNotes"] = true;
+                    if (includeStudentAnswers) _groupToggles["studentAnswer"] = true;
+                }
 
                 return await ProcessHtmlContent(rawHtml, filePath);
             }
             finally
             {
-                _showTeacherNotes   = savedTeacher;
-                _showStudentAnswers = savedStudent;
+                _groupToggles.Clear();
+                foreach (var kv in saved) _groupToggles[kv.Key] = kv.Value;
             }
         }
     }
