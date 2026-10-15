@@ -36,16 +36,14 @@ namespace BookViewer
         private readonly Dictionary<string, Dictionary<int, string>> _sectionFolioMap = new();
         private readonly Dictionary<string, int> _sectionFirstIndex = new();
 
-        private static readonly object _logLock = new object();
-        private static string _logFilePath = "";
-
-        // Splitpane overlay geometry, keyed by splitpane id. Persisted so a
-        // dragged panel stays where the user put it across page reloads.
         private readonly Dictionary<string, (double left, double top)> _splitPanePositions = new();
         public IReadOnlyDictionary<string, (double left, double top)> SplitPanePositions => _splitPanePositions;
 
+        private static readonly object _logLock = new object();
+        private static string _logFilePath = "";
+
         public int CurrentPageWidth { get; private set; } = 1024;
-        public int CurrentPageHeight { get; private set; } = 1309;
+        public int CurrentPageHeight { get; private set; } = 1344;
 
         private static string SurroundColor =>
             Application.Current?.RequestedTheme == AppTheme.Dark ? "#1C1C1E" : "#E8E8E8";
@@ -79,21 +77,24 @@ window.__setRedAnswers = function(show){
     if (show) { if (rp.style.display === 'none') rp.style.display = ''; }
     else { rp.style.display = 'none'; }
   }
+  // Direct toggle of the individual answer elements. The pane rule handles
+  // visibility in the HTML reader, but we also flip each .tbnote / .sa / .tbred
+  // because their inline display:none was stripped at load time.
+  if (show) {
+    document.querySelectorAll('pane.redAnswer .tbnote, pane.redAnswer .sa, pane.redAnswer .tbred, pane.redAnswer .has2, pane.redAnswer has2').forEach(function(el){
+      el.style.display = '';
+    });
+  } else {
+    document.querySelectorAll('pane.redAnswer .tbnote, pane.redAnswer .sa, pane.redAnswer .tbred, pane.redAnswer .has2, pane.redAnswer has2').forEach(function(el){
+      el.style.display = 'none';
+    });
+  }
   if (!show) {
-    document.querySelectorAll('svg.tbred').forEach(function(s){
-      rememberDisplay(s); s.style.display = 'none'; });
-    document.querySelectorAll('pane.redAnswer .tbred').forEach(function(t){
-      rememberDisplay(t); t.style.display = 'none'; });
+    document.querySelectorAll('svg.tbred').forEach(function(s){ s.style.display = 'none'; });
     document.querySelectorAll('has2').forEach(function(el){
       var wrap = el.closest('.tbred') || el;
-      rememberDisplay(wrap); wrap.style.display = 'none'; });
-    document.querySelectorAll('hsg').forEach(function(h){
-      h.setAttribute('on','false');
-      var gi = document.getElementById(h.id + '_img');
-      if (gi) { var gs = gi.getAttribute('src') || '';
-        gi.setAttribute('src', gs.replace('redlayerNone.svg','redlayerAll.svg').replace('None','All')); }
+      wrap.style.display = 'none';
     });
-    document.querySelectorAll('[data-on]').forEach(function(el){ el.setAttribute('data-on','false'); });
   }
 };
 window.XN_toggleRedLayers = function(id){
@@ -160,17 +161,20 @@ window.XN_MinPopH = function(id){ var e = document.getElementById(id); if (e) e.
 window.XN_MaxPopH = function(id){ var e = document.getElementById(id); if (e) e.style.display = ''; };
 window.CH_delHandS = function(){};
 window.CH_showIcon = function(){};
+
+// Re-apply red-answer button icon state (the SVGs like redlayerAll/None).
+window.__applyRedAnswerIcons = function(show){
+  document.querySelectorAll('img.hsgbtn').forEach(function(img){
+    var onPath = img.getAttribute('onimagepath');
+    var offPath = img.getAttribute('offimagepath');
+    var target = show ? (offPath || onPath) : (onPath || offPath);
+    if (target) img.setAttribute('src', target);
+  });
+};
 ";
 
         // ============================================================
-        // Splitpane dragger runtime (the \"move\" button)
-        // Ported from the HTML reader's startDrag/moveDrag/endDrag block.
-        // A splitpane.ext/assessment.ext/exercise.ext is a movable panel:
-        //   - click its <a class=\"btn_h_m dragger\">move</a>  => open panel
-        //   - drag  that same handle                           => reposition
-        // On reposition, we post to MAUI via a hash sentinel:
-        //   #ext-reposition:<json>
-        // MAUI's WebView.Navigating catches it and persists left/top.
+        // Splitpane dragger runtime
         // ============================================================
         private const string DraggerRuntimeJs = @"
 (function(){
@@ -184,9 +188,7 @@ window.CH_showIcon = function(){};
     toHide.setAttribute('data-minimized', 'true');
     if (!toHide.__origDisplays) toHide.__origDisplays = new Map();
     toHide.querySelectorAll(':scope > div').forEach(function(d){
-      if (!toHide.__origDisplays.has(d)) {
-        toHide.__origDisplays.set(d, d.style.display || '');
-      }
+      if (!toHide.__origDisplays.has(d)) toHide.__origDisplays.set(d, d.style.display || '');
       d.style.display = 'none';
     });
     var mv = sp.querySelector('.dragger');
@@ -213,39 +215,27 @@ window.CH_showIcon = function(){};
         var orig = toHide.__origDisplays ? toHide.__origDisplays.get(d) : '';
         d.style.display = orig == null ? '' : orig;
       });
-    } else {
-      minimizePanel(sp);
-    }
+    } else minimizePanel(sp);
   }
 
   function openExt(pane){
     var tag = (pane.tagName || '').toLowerCase();
     var img = pane.querySelector('img');
-    if (img && img.onclick) {
-      try { img.click(); return; } catch(e){}
-    }
+    if (img && img.onclick) { try { img.click(); return; } catch(e){} }
     var info = (tag === 'splitpane')
       ? (window.getSplitPaneInfo ? window.getSplitPaneInfo(pane) : { id: pane.id })
       : (window.getAssessmentInfo ? window.getAssessmentInfo(pane) : { id: pane.id });
-    try {
-      if (window.parent && window.parent !== window) {
-        window.parent.postMessage({ type: 'ext:open', payload: info, tag: tag }, '*');
-      }
-    } catch(e){}
-    // Also emit a hash sentinel so MAUI can catch it even without a parent frame.
-    try {
-      window.location.hash = 'ext-open:' + encodeURIComponent(JSON.stringify({ info: info, tag: tag }));
-    } catch(e){}
+    try { if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ type: 'ext:open', payload: info, tag: tag }, '*'); } } catch(e){}
+    try { window.location.hash = 'ext-open:' + encodeURIComponent(JSON.stringify({ info: info, tag: tag })); } catch(e){}
   }
 
   function startDrag(e, handle, pane){
     var pt = e.touches ? e.touches[0] : e;
-    dragState = {
-      pane: pane, handle: handle,
+    dragState = { pane: pane, handle: handle,
       startX: pt.clientX, startY: pt.clientY,
       originLeft: pane.offsetLeft, originTop: pane.offsetTop,
-      moved: false
-    };
+      moved: false };
     pane.style.zIndex = '9999';
   }
 
@@ -262,27 +252,14 @@ window.CH_showIcon = function(){};
 
   function endDrag(e){
     if (!dragState) return;
-    var pane = dragState.pane;
-    var moved = dragState.moved;
+    var pane = dragState.pane, moved = dragState.moved;
     if (moved) {
-      var payload = {
-        id: pane.id,
-        left: pane.style.left,
-        top: pane.style.top,
-        tag: (pane.tagName || '').toLowerCase()
-      };
-      try {
-        if (window.parent && window.parent !== window) {
-          window.parent.postMessage({ type: 'ext:reposition', payload: payload }, '*');
-        }
-      } catch(err){}
-      // Hash sentinel for MAUI bridging.
-      try {
-        window.location.hash = 'ext-reposition:' + encodeURIComponent(JSON.stringify(payload));
-      } catch(err){}
-    } else {
-      openExt(pane);
-    }
+      var payload = { id: pane.id, left: pane.style.left, top: pane.style.top,
+        tag: (pane.tagName || '').toLowerCase() };
+      try { if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ type: 'ext:reposition', payload: payload }, '*'); } } catch(err){}
+      try { window.location.hash = 'ext-reposition:' + encodeURIComponent(JSON.stringify(payload)); } catch(err){}
+    } else openExt(pane);
     dragState = null;
   }
 
@@ -293,16 +270,9 @@ window.CH_showIcon = function(){};
       minimizePanel(sp);
       var mv = sp.querySelector('.dragger');
       if (mv) {
-        mv.addEventListener('mousedown', function(e){
-          e.preventDefault(); e.stopPropagation();
-          startDrag(e, mv, sp);
-        });
-        mv.addEventListener('touchstart', function(e){
-          e.stopPropagation(); startDrag(e, mv, sp);
-        }, { passive: false });
-        mv.addEventListener('contextmenu', function(e){
-          e.preventDefault(); togglePanel(sp);
-        });
+        mv.addEventListener('mousedown', function(e){ e.preventDefault(); e.stopPropagation(); startDrag(e, mv, sp); });
+        mv.addEventListener('touchstart', function(e){ e.stopPropagation(); startDrag(e, mv, sp); }, { passive: false });
+        mv.addEventListener('contextmenu', function(e){ e.preventDefault(); togglePanel(sp); });
       }
     });
   }
@@ -312,14 +282,11 @@ window.CH_showIcon = function(){};
   window.addEventListener('mouseup', endDrag);
   window.addEventListener('touchend', endDrag);
 
-  if (document.readyState === 'loading')
-    document.addEventListener('DOMContentLoaded', attach);
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', attach);
   else attach();
-
   var mo = new MutationObserver(attach);
   mo.observe(document.documentElement, { childList: true, subtree: true });
 
-  // Re-apply persisted positions supplied by MAUI via window.__splitPanePositions
   function applyPersistedPositions(){
     var map = window.__splitPanePositions;
     if (!map) return;
@@ -333,15 +300,14 @@ window.CH_showIcon = function(){};
       }
     });
   }
-  if (document.readyState === 'loading')
-    document.addEventListener('DOMContentLoaded', applyPersistedPositions);
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', applyPersistedPositions);
   else applyPersistedPositions();
   window.__applySplitPanePositions = applyPersistedPositions;
 })();
 ";
 
         // ============================================================
-        // Splitpane controller stubs (called by the page's inline onclick)
+        // Splitpane controller (page's inline onclick handlers)
         // ============================================================
         private const string SplitPaneControllerJs = @"
 window.BY_SplitPaneATController = {
@@ -349,7 +315,6 @@ window.BY_SplitPaneATController = {
     var el = document.getElementById(id);
     if (!el) return;
     var info = window.getSplitPaneInfo ? window.getSplitPaneInfo(el) : { id: id };
-    try { console.log('[reader] removeSplitPaneFrame', info); } catch(e){}
     try { if (window.parent && window.parent !== window) {
       window.parent.postMessage({ type: 'splitpane:delete', payload: info }, '*'); } } catch(e){}
     try { window.location.hash = 'splitpane-delete:' + encodeURIComponent(JSON.stringify(info)); } catch(e){}
@@ -378,7 +343,6 @@ window.BY_SplitPaneController = {
     var sp = document.getElementById(id);
     if (!sp) return;
     var info = window.getSplitPaneInfo ? window.getSplitPaneInfo(sp) : { id: id };
-    try { console.log('[reader] showSplitPanePage', info); } catch(e){}
     try { if (window.parent && window.parent !== window) {
       window.parent.postMessage({ type: 'splitpane:open', payload: info }, '*'); } } catch(e){}
     try { window.location.hash = 'splitpane-open:' + encodeURIComponent(JSON.stringify(info)); } catch(e){}
@@ -447,9 +411,6 @@ window.BY_SplitPaneController = {
         public event EventHandler<bool> OnTwoPageSpreadToggled;
         public event EventHandler<double> OnZoomChanged;
         public event EventHandler<bool> OnRedAnswersToggled;
-
-        // Fired when the WebView reports an ext:* event (drag, open, delete).
-        // Args: (type, jsonPayload). Consumer = BookViewerPage.
         public event EventHandler<(string type, string payloadJson)> OnExtMessage;
 
         public List<string> PageFiles => _pageFiles;
@@ -464,31 +425,25 @@ window.BY_SplitPaneController = {
         public bool ShowTeacherNotes => _showTeacherNotes;
         public bool ShowStudentAnswers => _showStudentAnswers;
         public bool RedAnswersOn => _redAnswersOn;
-
         public Dictionary<int, string> FolioToStepFile => _folioToStepFile;
         public Dictionary<string, int> StepFileToIndex => _stepFileToIndex;
 
         public void SetShowTeacherNotes(bool show)
         {
             _showTeacherNotes = show;
-            if (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count)
-                _ = LoadPageAsync(_currentPageIndex);
+            if (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count) _ = LoadPageAsync(_currentPageIndex);
         }
-
         public void SetShowStudentAnswers(bool show)
         {
             _showStudentAnswers = show;
-            if (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count)
-                _ = LoadPageAsync(_currentPageIndex);
+            if (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count) _ = LoadPageAsync(_currentPageIndex);
         }
-
         public void SetRedAnswers(bool show)
         {
             _redAnswersOn = show;
             OnRedAnswersToggled?.Invoke(this, show);
         }
 
-        // Called by BookViewerPage when it receives an ext:* hash from the WebView.
         public void HandleExtMessage(string type, string payloadJson)
         {
             try
@@ -499,17 +454,11 @@ window.BY_SplitPaneController = {
                     var left = ExtractJsonString(payloadJson, "left");
                     var top = ExtractJsonString(payloadJson, "top");
                     if (!string.IsNullOrEmpty(id))
-                    {
                         _splitPanePositions[id] = (ParsePx(left), ParsePx(top));
-                        Log($"Reposition {id} -> left={left} top={top}");
-                    }
                 }
                 OnExtMessage?.Invoke(this, (type, payloadJson));
             }
-            catch (Exception ex)
-            {
-                Log($"HandleExtMessage error: {ex.Message}");
-            }
+            catch (Exception ex) { Log($"HandleExtMessage error: {ex.Message}"); }
         }
 
         private static double ParsePx(string s)
@@ -535,10 +484,8 @@ window.BY_SplitPaneController = {
         {
             _currentZoom = Math.Max(0.5, Math.Min(3.0, zoom));
             OnZoomChanged?.Invoke(this, _currentZoom);
-            if (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count)
-                _ = LoadPageAsync(_currentPageIndex);
+            if (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count) _ = LoadPageAsync(_currentPageIndex);
         }
-
         public void ZoomIn() => SetZoom(_currentZoom + 0.1);
         public void ZoomOut() => SetZoom(_currentZoom - 0.1);
         public void ResetZoom() => SetZoom(1.0);
@@ -547,17 +494,14 @@ window.BY_SplitPaneController = {
         {
             _sideBySideMode = !_sideBySideMode;
             OnSideBySideToggled?.Invoke(this, _sideBySideMode);
-            if (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count)
-                _ = LoadPageAsync(_currentPageIndex);
+            if (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count) _ = LoadPageAsync(_currentPageIndex);
         }
-
         public void ToggleTwoPageSpread()
         {
             _twoPageSpread = !_twoPageSpread;
             _sideBySideMode = _twoPageSpread;
             OnTwoPageSpreadToggled?.Invoke(this, _twoPageSpread);
-            if (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count)
-                _ = LoadPageAsync(_currentPageIndex);
+            if (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count) _ = LoadPageAsync(_currentPageIndex);
         }
 
         public int GetIndexForStepFile(string stepFile)
@@ -567,14 +511,11 @@ window.BY_SplitPaneController = {
             if (_stepFileToIndex.TryGetValue(name, out int idx)) return idx;
             return -1;
         }
-
         public int GetIndexForFolio(int folio)
         {
-            if (_folioToStepFile.TryGetValue(folio, out var stepFile))
-                return GetIndexForStepFile(stepFile);
+            if (_folioToStepFile.TryGetValue(folio, out var stepFile)) return GetIndexForStepFile(stepFile);
             return -1;
         }
-
         public int GetIndexForSectionFolio(string sectionId, int folio)
         {
             if (string.IsNullOrEmpty(sectionId)) return -1;
@@ -589,7 +530,6 @@ window.BY_SplitPaneController = {
             }
             return -1;
         }
-
         public int GetFirstIndexOfSection(string sectionId)
         {
             if (string.IsNullOrEmpty(sectionId)) return -1;
@@ -605,14 +545,12 @@ window.BY_SplitPaneController = {
             try
             {
                 Log($"=== LOADING BOOK from: {folderPath} ===");
-                Log($"BookService log file: {GetLogFilePath()}");
                 _currentBookPath = folderPath;
 
                 _tempFolder = Path.Combine(FileSystem.CacheDirectory, "BookViewer", $"temp_{Guid.NewGuid().ToString().Substring(0, 8)}");
                 Directory.CreateDirectory(_tempFolder);
 
                 var bookXmlPath = Path.Combine(folderPath, "book.xml");
-
                 if (!File.Exists(bookXmlPath))
                 {
                     Log($"ERROR: book.xml not found at: {bookXmlPath}");
@@ -622,12 +560,9 @@ window.BY_SplitPaneController = {
 
                 var folderName = Path.GetFileName(folderPath);
                 var bookIdMatch = Regex.Match(folderName, @"book_(\d+)");
-                if (bookIdMatch.Success)
-                    _currentBookUid = bookIdMatch.Groups[1].Value;
+                if (bookIdMatch.Success) _currentBookUid = bookIdMatch.Groups[1].Value;
 
                 var content = await File.ReadAllTextAsync(bookXmlPath);
-                Log($"book.xml loaded, size: {content.Length} bytes");
-
                 if (string.IsNullOrEmpty(_currentBookUid))
                 {
                     var uidMatch = Regex.Match(content, @"id=""([^""]+)""");
@@ -650,14 +585,11 @@ window.BY_SplitPaneController = {
                 _bookTitle = "Unknown Book";
                 var titleMatch = Regex.Match(content, @"name=""([^""]+)""");
                 if (titleMatch.Success) _bookTitle = titleMatch.Groups[1].Value;
-
                 OnBookLoaded?.Invoke(this, _bookTitle);
 
-                if (bookXmlDecrypted)
-                    await DecryptBookFilesAsync(folderPath);
+                if (bookXmlDecrypted) await DecryptBookFilesAsync(folderPath);
 
                 _pageFiles.Clear();
-
                 var stepsFiles = Directory.GetFiles(folderPath, "steps_*.html", SearchOption.AllDirectories)
                     .Concat(Directory.GetFiles(folderPath, "step_*.html", SearchOption.AllDirectories))
                     .Where(f => IsPureStepsFile(Path.GetFileName(f)))
@@ -721,17 +653,13 @@ window.BY_SplitPaneController = {
                                     var folioStr = p.Attributes?["folio"]?.Value ?? "";
                                     var file = p.Attributes?["file"]?.Value ?? "";
                                     if (int.TryParse(folioStr, out int folio) && !string.IsNullOrEmpty(file))
-                                        if (!_folioToStepFile.ContainsKey(folio))
-                                            _folioToStepFile[folio] = file;
+                                        if (!_folioToStepFile.ContainsKey(folio)) _folioToStepFile[folio] = file;
                                 }
                             }
                         }
                     }
                 }
-                catch (Exception ex)
-                {
-                    Log($"Error parsing book.xml: {ex.Message}");
-                }
+                catch (Exception ex) { Log($"Error parsing book.xml: {ex.Message}"); }
 
                 var sectionFolders = Directory.GetDirectories(folderPath, "s_*");
                 foreach (var sectionDir in sectionFolders)
@@ -750,8 +678,7 @@ window.BY_SplitPaneController = {
                             if (idx >= 0) pagesContent = pagesContent.Substring(idx + 2);
                             trimmed = pagesContent.TrimStart();
                         }
-                        if (!trimmed.StartsWith("<pages"))
-                            pagesContent = $"<pages>{pagesContent}</pages>";
+                        if (!trimmed.StartsWith("<pages")) pagesContent = $"<pages>{pagesContent}</pages>";
 
                         var pagesDoc = new XmlDocument();
                         pagesDoc.LoadXml(pagesContent);
@@ -770,10 +697,7 @@ window.BY_SplitPaneController = {
                         }
                         _sectionFolioMap[sectionId] = folioMap;
                     }
-                    catch (Exception ex)
-                    {
-                        Log($"Error parsing {pagesXmlPath}: {ex.Message}");
-                    }
+                    catch (Exception ex) { Log($"Error parsing {pagesXmlPath}: {ex.Message}"); }
                 }
 
                 OnPagesLoaded?.Invoke(this, _pageFiles);
@@ -800,9 +724,6 @@ window.BY_SplitPaneController = {
             }
         }
 
-        // ============================================================
-        // Decryption
-        // ============================================================
         private async Task DecryptBookFilesAsync(string folderPath)
         {
             try
@@ -813,23 +734,14 @@ window.BY_SplitPaneController = {
 
                 int bookKey = _decryptionService.CalculateKey(_currentBookUid);
 
-                int decryptedCount = 0, alreadyDecryptedCount = 0;
-                int htmlDecryptedCount = 0, htmlSkippedCount = 0;
-
-                var allXmlAndHtmFiles = new List<string>();
-                allXmlAndHtmFiles.AddRange(xmlFiles);
-                allXmlAndHtmFiles.AddRange(htmFiles);
-
-                foreach (var file in allXmlAndHtmFiles)
+                foreach (var file in xmlFiles.Concat(htmFiles))
                 {
                     try
                     {
-                        var fileName = Path.GetFileName(file);
                         var fileContent = await File.ReadAllTextAsync(file);
-                        if (!_decryptionService.IsEncrypted(fileContent)) { alreadyDecryptedCount++; continue; }
-                        var decryptedContent = _decryptionService.DecryptXmlOrHtm(fileContent, fileName);
+                        if (!_decryptionService.IsEncrypted(fileContent)) continue;
+                        var decryptedContent = _decryptionService.DecryptXmlOrHtm(fileContent, Path.GetFileName(file));
                         await File.WriteAllTextAsync(file, decryptedContent);
-                        decryptedCount++;
                     }
                     catch (Exception ex) { Log($"Error decrypting {Path.GetFileName(file)}: {ex.Message}"); }
                 }
@@ -839,16 +751,12 @@ window.BY_SplitPaneController = {
                     try
                     {
                         var fileContent = await File.ReadAllTextAsync(file);
-                        // Use IsEncrypted, NOT the class/id heuristic that corrupted skeleton pages.
-                        if (!_decryptionService.IsEncrypted(fileContent)) { htmlSkippedCount++; continue; }
+                        if (!_decryptionService.IsEncrypted(fileContent)) continue;
                         var decryptedContent = _decryptionService.DecryptWithKey(fileContent, bookKey);
                         await File.WriteAllTextAsync(file, decryptedContent);
-                        htmlDecryptedCount++;
                     }
                     catch (Exception ex) { Log($"Error decrypting {Path.GetFileName(file)}: {ex.Message}"); }
                 }
-
-                Log($"Decrypt summary: XML/HTM {decryptedCount} decrypted, {alreadyDecryptedCount} plain; HTML {htmlDecryptedCount} decrypted, {htmlSkippedCount} plain");
             }
             catch (Exception ex) { Log($"ERROR in DecryptBookFilesAsync: {ex.Message}"); }
         }
@@ -930,60 +838,76 @@ window.BY_SplitPaneController = {
                     string redHtml  = await ReadSiblingAsync(directory, nameWithoutExt + "_redAnswer.html");
                     string pageXml  = await ReadSiblingAsync(directory, nameWithoutExt + ".xml");
 
+                    Log($"Page {nameWithoutExt}: skeleton={skeletonHtml.Length} base={baseHtml.Length} ori={oriHtml.Length} red={redHtml.Length} xml={pageXml.Length}");
+
+                    // ---- Page size from #rez ----
                     int pageWidth = 1024, pageHeight = 1344;
                     var rezMatch = Regex.Match(skeletonHtml,
-                        @"id\s*=\s*[""']rez[""'][^>]*style\s*=\s*[""'][^""']*width\s*:\s*(\d+)px[^""']*height\s*:\s*(\d+)px",
+                        @"id\s*=\s*[""']rez[""'][^>]*style\s*=\s*[""']([^""']*)[""']",
                         RegexOptions.IgnoreCase);
                     if (rezMatch.Success)
                     {
-                        if (int.TryParse(rezMatch.Groups[1].Value, out int w)) pageWidth = w;
-                        if (int.TryParse(rezMatch.Groups[2].Value, out int h)) pageHeight = h;
-                    }
-                    else
-                    {
-                        // Fall back to the skeleton's own style="" width/height
-                        var wh = Regex.Match(skeletonHtml,
-                            @"id\s*=\s*[""']rez[""'][^>]*style\s*=\s*[""'][^""']*width\s*:\s*(\d+)px[^""']*height\s*:\s*(\d+)px",
-                            RegexOptions.IgnoreCase);
-                        if (wh.Success)
-                        {
-                            if (int.TryParse(wh.Groups[1].Value, out int w2)) pageWidth = w2;
-                            if (int.TryParse(wh.Groups[2].Value, out int h2)) pageHeight = h2;
-                        }
+                        var styleText = rezMatch.Groups[1].Value;
+                        var wm = Regex.Match(styleText, @"width\s*:\s*(\d+)px", RegexOptions.IgnoreCase);
+                        var hm = Regex.Match(styleText, @"height\s*:\s*(\d+)px", RegexOptions.IgnoreCase);
+                        if (wm.Success && int.TryParse(wm.Groups[1].Value, out int w)) pageWidth = w;
+                        if (hm.Success && int.TryParse(hm.Groups[1].Value, out int h)) pageHeight = h;
                     }
                     CurrentPageWidth = pageWidth;
                     CurrentPageHeight = pageHeight;
+                    Log($"Detected page size: {pageWidth}x{pageHeight}");
 
-                    var cssBuilder = new StringBuilder();
+                    // ---- Font CSS ----
+                    string fontCss = await GetFontCssWithEmbeddedFonts(directory);
+                    Log($"Font CSS length: {fontCss.Length}");
+
+                    // ---- CSS from <css> tags in steps_N.xml ----
+                    var pageCss = new StringBuilder();
                     if (!string.IsNullOrEmpty(pageXml))
                     {
                         var cssTags = Regex.Matches(pageXml, @"<css>([^<]+)</css>", RegexOptions.IgnoreCase);
+                        Log($"Found {cssTags.Count} <css> tags in steps_N.xml");
                         var seenCss = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                         foreach (Match m in cssTags)
                         {
                             var cssName = m.Groups[1].Value.Trim();
                             var cssRel = Path.Combine(directory, cssName);
-                            if (!File.Exists(cssRel)) continue;
+                            if (!File.Exists(cssRel)) { Log($"css missing: {cssRel}"); continue; }
                             if (!seenCss.Add(cssRel)) continue;
                             var cssText = await File.ReadAllTextAsync(cssRel);
-                            cssBuilder.AppendLine(await InlineFontCssAsync(cssText, directory));
+                            pageCss.AppendLine(cssText);
                         }
                     }
 
-                    string fontCss = cssBuilder.Length > 0
-                        ? cssBuilder.ToString()
-                        : await GetFontCssWithEmbeddedFonts(directory);
-
+                    // ---- Rewrite URLs in every layer ----
                     skeletonHtml = await RewriteRelativeUrls(skeletonHtml, directory);
                     baseHtml     = await RewriteRelativeUrls(baseHtml,     directory);
                     oriHtml      = await RewriteRelativeUrls(oriHtml,      directory);
                     redHtml      = await RewriteRelativeUrls(redHtml,      directory);
 
+                    // ---- Red-answer: strip display:none, force absolute ----
+                    if (!string.IsNullOrEmpty(redHtml))
+                    {
+                        redHtml = Regex.Replace(redHtml, @"display\s*:\s*none\s*;?", "", RegexOptions.IgnoreCase);
+                        redHtml = Regex.Replace(redHtml, @"visibility\s*:\s*hidden\s*;?", "", RegexOptions.IgnoreCase);
+                        redHtml = ForceAbsolutePlacement(redHtml);
+                        Log($"Red answer content prepared: {redHtml.Length} chars");
+                    }
+
+                    // ---- Fill panes ----
                     skeletonHtml = FillPane(skeletonHtml, "ori",       oriHtml);
                     skeletonHtml = FillPane(skeletonHtml, "base",      baseHtml);
                     skeletonHtml = FillPane(skeletonHtml, "redAnswer", redHtml);
 
-                    return BuildSkeletonOverlayHtml(skeletonHtml, fontCss, pageWidth, pageHeight);
+                    // ---- Fix red-answer button SVGs: strip display:none from hsgbtn ----
+                    // The page's own <img class="hsgbtn" src="./images/teacherNotes.svg"> was
+                    // hidden inline. __setRedAnswers reveals it, but it needs to render at
+                    // all first, so strip the inline hide.
+                    skeletonHtml = Regex.Replace(skeletonHtml,
+                        @"(<img[^>]*class\s*=\s*[""'][^""']*hsgbtn[^""']*[""'][^>]*?)display\s*:\s*none\s*;?",
+                        "$1", RegexOptions.IgnoreCase);
+
+                    return BuildSkeletonOverlayHtml(skeletonHtml, fontCss, pageCss.ToString(), pageWidth, pageHeight);
                 }
 
                 return htmlContent;
@@ -1015,16 +939,44 @@ window.BY_SplitPaneController = {
                 RegexOptions.IgnoreCase);
         }
 
+        /// <summary>
+        /// Red-answer fragments carry left/top but no position:absolute — the HTML
+        /// reader applies that via a CSS rule which is fragile here. Inject position
+        /// directly into the inline style so it always applies.
+        /// </summary>
+        private static string ForceAbsolutePlacement(string html)
+        {
+            if (string.IsNullOrEmpty(html)) return html;
+            return Regex.Replace(html,
+                @"<(?<tag>[a-zA-Z][a-zA-Z0-9]*)(?<pre>[^>]*?)style\s*=\s*""(?<style>[^""]*)""(?<post>[^>]*)>",
+                m =>
+                {
+                    var tag = m.Groups["tag"].Value;
+                    var pre = m.Groups["pre"].Value;
+                    var style = m.Groups["style"].Value;
+                    var post = m.Groups["post"].Value;
+
+                    bool hasLeft = Regex.IsMatch(style, @"(^|;)\s*left\s*:", RegexOptions.IgnoreCase);
+                    bool hasTop  = Regex.IsMatch(style, @"(^|;)\s*top\s*:",  RegexOptions.IgnoreCase);
+                    bool hasPos  = Regex.IsMatch(style, @"(^|;)\s*position\s*:", RegexOptions.IgnoreCase);
+
+                    if (hasLeft && hasTop && !hasPos)
+                    {
+                        if (!style.TrimEnd().EndsWith(";")) style += ";";
+                        style += "position:absolute;";
+                    }
+                    return "<" + tag + pre + "style=\"" + style + "\"" + post + ">";
+                },
+                RegexOptions.IgnoreCase);
+        }
+
         // ============================================================
         // BuildSkeletonOverlayHtml — wraps skeleton, adds runtime JS + CSS
         // ============================================================
-        private string BuildSkeletonOverlayHtml(string skeletonHtml, string fontCss, int pageWidth, int pageHeight)
+        private string BuildSkeletonOverlayHtml(string skeletonHtml, string fontCss, string pageCss, int pageWidth, int pageHeight)
         {
             double zoom = _currentZoom;
             string surround = SurroundColor;
-
-            // Serialize persisted splitpane positions so the dragger JS can
-            // reapply them on load.
             var posJson = SerializeSplitPanePositions();
 
             return $@"<!DOCTYPE html>
@@ -1033,8 +985,9 @@ window.BY_SplitPaneController = {
 <meta charset='UTF-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes'>
 <title>Page</title>
+<style>{fontCss}</style>
+<style>{pageCss}</style>
 <style>
-{fontCss}
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 html, body {{
     width: 100%; height: 100%; overflow: auto;
@@ -1060,6 +1013,7 @@ pane.ori, pane.base, pane.redAnswer {{
     position: absolute; top: 0; left: 0; width: 100%; height: 100%;
 }}
 pane.base > *, pane.redAnswer > *, pane.ori > * {{ position: absolute; }}
+pane.redAnswer * {{ position: absolute; }}
 .redbtn {{ cursor: pointer; opacity: .85; }}
 .redbtn:hover {{ opacity: 1; }}
 .hideBtn {{ display: none; }}
@@ -1175,12 +1129,12 @@ window.__splitPanePositions = {posJson};
                     if (rest.Count > 0 &&
                         (rest[0].Equals("FONTS", StringComparison.OrdinalIgnoreCase) ||
                          rest[0].Equals("fonts", StringComparison.OrdinalIgnoreCase)))
-                        return await ToDataUrlIfPossible(rest, pageDir, query, hash);
+                        return await ToDataUrlIfPossible(rest, "", query, hash);
 
                     var baseSegs = pageDir.Split('/').Where(s => s.Length > 0).ToList();
                     for (int i = 0; i < levels && baseSegs.Count > 0; i++) baseSegs.RemoveAt(baseSegs.Count - 1);
                     var combined = baseSegs.Concat(rest).ToList();
-                    return await ToDataUrlIfPossible(combined, pageDir, query, hash);
+                    return await ToDataUrlIfPossible(combined, "", query, hash);
                 }
 
                 while (segments.Count > 1)
@@ -1281,56 +1235,28 @@ window.__splitPanePositions = {posJson};
             _ => "application/octet-stream"
         };
 
-        private async Task<string> InlineFontCssAsync(string cssText, string pageDir)
+        // ============================================================
+        // Font loading — fixed to work like the HTML reader
+        // ============================================================
+        private string _fontIndexRoot = "";
+        private readonly Dictionary<string, string> _fontNameToPathCache = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Scans FONTS/ (or fonts/) once and builds name -> full path. Cached per book root.
+        /// </summary>
+        private Dictionary<string, string> BuildFontIndex()
         {
-            if (string.IsNullOrEmpty(cssText)) return "";
-            var fontIndex = await GetFontIndexAsync();
+            if (_fontIndexRoot == _currentBookPath && _fontNameToPathCache.Count > 0)
+                return _fontNameToPathCache;
 
-            var urlRe = new Regex(@"url\(\s*['""]?([^'""\)]+)['""]?\s*\)", RegexOptions.IgnoreCase);
-            var matches = urlRe.Matches(cssText).Cast<Match>().ToList();
-            var css = cssText;
+            _fontNameToPathCache.Clear();
+            _fontIndexRoot = _currentBookPath;
 
-            foreach (var m in matches)
-            {
-                var raw = m.Groups[1].Value.Trim();
-                if (Regex.IsMatch(raw, @"^(data:|https?:)", RegexOptions.IgnoreCase)) continue;
-
-                var cleaned = raw
-                    .Replace("../FONTS/", "").Replace("../fonts/", "")
-                    .Replace("./", "").Replace("/", "").Trim();
-                var cleanedNoQ = cleaned.Split('?')[0].Split('#')[0];
-                var justName = Path.GetFileName(cleanedNoQ);
-                var justStem = Path.GetFileNameWithoutExtension(cleanedNoQ);
-                var noSpace = justStem.Replace(" ", "").Replace("-", "").Replace("_", "");
-
-                string fullPath = null;
-                if (fontIndex.TryGetValue(justName, out var p1)) fullPath = p1;
-                else if (fontIndex.TryGetValue(justStem, out var p2)) fullPath = p2;
-                else if (fontIndex.TryGetValue(noSpace, out var p3)) fullPath = p3;
-
-                if (string.IsNullOrEmpty(fullPath) || !File.Exists(fullPath)) continue;
-
-                var ext = Path.GetExtension(fullPath).ToLowerInvariant();
-                var mime = MimeFor(ext);
-                var bytes = await File.ReadAllBytesAsync(fullPath);
-                var dataUri = $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
-                css = css.Replace(m.Value, "url('" + dataUri + "')");
-            }
-            return css;
-        }
-
-        private Dictionary<string, string> _fontIndexCache;
-
-        private async Task<Dictionary<string, string>> GetFontIndexAsync()
-        {
-            if (_fontIndexCache != null) return _fontIndexCache;
-
-            var index = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var fontsFolder = Path.Combine(_currentBookPath, "FONTS");
             if (!Directory.Exists(fontsFolder)) fontsFolder = Path.Combine(_currentBookPath, "fonts");
-            if (!Directory.Exists(fontsFolder)) { _fontIndexCache = index; return index; }
+            if (!Directory.Exists(fontsFolder)) fontsFolder = Path.Combine(_currentBookPath, "Fonts");
 
-            await Task.Run(() =>
+            if (Directory.Exists(fontsFolder))
             {
                 foreach (var f in Directory.GetFiles(fontsFolder, "*.*", SearchOption.AllDirectories))
                 {
@@ -1339,38 +1265,95 @@ window.__splitPanePositions = {posJson};
                     var name = Path.GetFileName(f);
                     var stem = Path.GetFileNameWithoutExtension(f);
                     var noSpace = stem.Replace(" ", "").Replace("-", "").Replace("_", "");
-                    if (!index.ContainsKey(name)) index[name] = f;
-                    if (!index.ContainsKey(stem)) index[stem] = f;
-                    if (!index.ContainsKey(noSpace)) index[noSpace] = f;
+                    if (!_fontNameToPathCache.ContainsKey(name)) _fontNameToPathCache[name] = f;
+                    if (!_fontNameToPathCache.ContainsKey(stem)) _fontNameToPathCache[stem] = f;
+                    if (!_fontNameToPathCache.ContainsKey(noSpace)) _fontNameToPathCache[noSpace] = f;
                 }
-            });
-            _fontIndexCache = index;
-            return index;
+            }
+
+            return _fontNameToPathCache;
         }
 
+        /// <summary>
+        /// Reads *_{dir}_font.css or font.css, and inlines every @font-face url(...)
+        /// by matching the referenced filename against the FONTS/ index. This is
+        /// the same approach as the HTML reader's inlineFontCss().
+        /// </summary>
         public async Task<string> GetFontCssWithEmbeddedFonts(string directory)
         {
             try
             {
                 if (_fontCache.TryGetValue(directory, out var cached)) return cached;
 
-                string fontCss = "";
-                string fontCssPath = "";
+                string fontCssPath = null;
 
-                var fontCssFiles = Directory.GetFiles(directory, "*_font.css");
-                if (fontCssFiles.Length > 0) fontCssPath = fontCssFiles[0];
-                else
+                // Priority 1: a *_font.css next to the page (e.g. SEC201_font.css)
+                var localFontCssFiles = Directory.GetFiles(directory, "*_font.css");
+                if (localFontCssFiles.Length > 0) fontCssPath = localFontCssFiles[0];
+
+                // Priority 2: book-root font.css
+                if (fontCssPath == null)
                 {
                     var rootFontCss = Path.Combine(_currentBookPath, "font.css");
                     if (File.Exists(rootFontCss)) fontCssPath = rootFontCss;
                 }
 
-                if (!string.IsNullOrEmpty(fontCssPath) && File.Exists(fontCssPath))
+                if (fontCssPath == null || !File.Exists(fontCssPath))
                 {
-                    fontCss = await File.ReadAllTextAsync(fontCssPath);
-                    fontCss = await InlineFontCssAsync(fontCss, directory);
+                    // Generate from scratch: enumerate FONTS/ and make @font-face rules.
+                    var generated = await GenerateFontCssFromFontsFolder();
+                    generated += CjkMetricLockCss;
+                    _fontCache[directory] = generated;
+                    return generated;
                 }
-                else fontCss = await GenerateFontCssFromFiles();
+
+                var fontCss = await File.ReadAllTextAsync(fontCssPath);
+                var fontIndex = BuildFontIndex();
+                Log($"Font index: {fontIndex.Count} entries; source: {fontCssPath}");
+
+                // Find every url(...) inside the css, resolve to a local file, inline as data URI.
+                var urlRe = new Regex(@"url\(\s*['""]?([^'""\)]+)['""]?\s*\)", RegexOptions.IgnoreCase);
+                var matches = urlRe.Matches(fontCss).Cast<Match>().ToList();
+                int inlined = 0, missing = 0;
+
+                foreach (var m in matches)
+                {
+                    var raw = m.Groups[1].Value.Trim();
+                    if (Regex.IsMatch(raw, @"^(data:|https?:)", RegexOptions.IgnoreCase)) continue;
+
+                    // Strip directory prefix and query/hash
+                    var clean = raw
+                        .Replace("../FONTS/", "")
+                        .Replace("../fonts/", "")
+                        .Replace("./", "")
+                        .Trim();
+                    var cleanNoQ = clean.Split('?')[0].Split('#')[0];
+                    cleanNoQ = cleanNoQ.Replace("/", "").Replace("\\", "");
+                    var justName = Path.GetFileName(cleanNoQ);
+                    var justStem = Path.GetFileNameWithoutExtension(cleanNoQ);
+                    var noSpace = justStem.Replace(" ", "").Replace("-", "").Replace("_", "");
+
+                    string fullPath = null;
+                    if (fontIndex.TryGetValue(justName, out var p1)) fullPath = p1;
+                    else if (fontIndex.TryGetValue(justStem, out var p2)) fullPath = p2;
+                    else if (fontIndex.TryGetValue(noSpace, out var p3)) fullPath = p3;
+
+                    if (string.IsNullOrEmpty(fullPath) || !File.Exists(fullPath))
+                    {
+                        Log($"font not found: {raw}");
+                        missing++;
+                        continue;
+                    }
+
+                    var ext = Path.GetExtension(fullPath).ToLowerInvariant();
+                    var mime = MimeFor(ext);
+                    var bytes = await File.ReadAllBytesAsync(fullPath);
+                    var dataUri = $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
+                    fontCss = fontCss.Replace(m.Value, "url('" + dataUri + "')");
+                    inlined++;
+                }
+
+                Log($"Font inlining: {inlined} inlined, {missing} missing, of {matches.Count} url() refs");
 
                 fontCss += CjkMetricLockCss;
                 _fontCache[directory] = fontCss;
@@ -1396,42 +1379,35 @@ window.__splitPanePositions = {posJson};
     descent-override: 0%;
     line-gap-override: 0%;
 }
-body, .para, .base-content, .content-overlay {
-    font-family: 'CJKLocked', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
-}
 ";
 
-        private async Task<string> GenerateFontCssFromFiles()
+        private async Task<string> GenerateFontCssFromFontsFolder()
         {
             try
             {
                 var fontCss = new StringBuilder();
-                var fontsFolder = Path.Combine(_currentBookPath, "FONTS");
-                if (!Directory.Exists(fontsFolder)) fontsFolder = Path.Combine(_currentBookPath, "fonts");
-                if (!Directory.Exists(fontsFolder)) return "";
-
-                foreach (var ext in new[] { ".ttf", ".otf", ".woff", ".woff2" })
+                var fontIndex = BuildFontIndex();
+                foreach (var kvp in fontIndex)
                 {
-                    foreach (var fontFile in Directory.GetFiles(fontsFolder, "*" + ext))
+                    var fontFile = kvp.Value;
+                    try
                     {
-                        try
+                        var fontName = Path.GetFileNameWithoutExtension(fontFile);
+                        var fontBytes = await File.ReadAllBytesAsync(fontFile);
+                        var fontBase64 = Convert.ToBase64String(fontBytes);
+                        var ext = Path.GetExtension(fontFile).ToLower();
+                        var format = ext switch
                         {
-                            var fontName = Path.GetFileNameWithoutExtension(fontFile);
-                            var fontBytes = await File.ReadAllBytesAsync(fontFile);
-                            var fontBase64 = Convert.ToBase64String(fontBytes);
-                            var fext = Path.GetExtension(fontFile).ToLower();
-                            var format = fext switch
-                            {
-                                ".ttf" => "truetype",
-                                ".otf" => "opentype",
-                                ".woff" => "woff",
-                                ".woff2" => "woff2",
-                                _ => "truetype"
-                            };
-                            var mime = MimeFor(fext);
-                            var dataUri = $"data:{mime};base64,{fontBase64}";
+                            ".ttf" => "truetype",
+                            ".otf" => "opentype",
+                            ".woff" => "woff",
+                            ".woff2" => "woff2",
+                            _ => "truetype"
+                        };
+                        var mime = MimeFor(ext);
+                        var dataUri = $"data:{mime};base64,{fontBase64}";
 
-                            fontCss.AppendLine($@"
+                        fontCss.AppendLine($@"
 @font-face {{
     font-family: '{fontName}';
     src: url('{dataUri}') format('{format}');
@@ -1441,11 +1417,9 @@ body, .para, .base-content, .content-overlay {
     descent-override: 0%;
     line-gap-override: 0%;
 }}");
-                        }
-                        catch { }
                     }
+                    catch { }
                 }
-
                 return fontCss.ToString();
             }
             catch { return ""; }
@@ -1470,7 +1444,7 @@ body, .para, .base-content, .content-overlay {
         }
 
         private string GetPlaceholderImage()
-            => "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1024' height='1309'%3E%3Crect width='1024' height='1309' fill='%23ffffff'/%3E%3C/svg%3E";
+            => "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1024' height='1344'%3E%3Crect width='1024' height='1344' fill='%23ffffff'/%3E%3C/svg%3E";
 
         private string ConvertImageToBase64HighQuality(string imagePath)
         {
@@ -1493,31 +1467,7 @@ body, .para, .base-content, .content-overlay {
             {
                 var directory = Path.GetDirectoryName(filePath) ?? "";
                 var fileName = Path.GetFileNameWithoutExtension(filePath) ?? "";
-
                 string redAnswerPath = Path.Combine(directory, fileName + "_redAnswer.html");
-                if (!File.Exists(redAnswerPath))
-                {
-                    string[] altPatterns = answerType == "teacherNotes"
-                        ? new[]
-                        {
-                            Path.Combine(directory, fileName + "_teacherNotes.html"),
-                            Path.Combine(directory, fileName + "_teacher.html"),
-                            Path.Combine(directory, "teacherNotes.html"),
-                            Path.Combine(directory, "teacher.html")
-                        }
-                        : new[]
-                        {
-                            Path.Combine(directory, fileName + "_studentAnswers.html"),
-                            Path.Combine(directory, fileName + "_studentAnswer.html"),
-                            Path.Combine(directory, fileName + "_student.html"),
-                            Path.Combine(directory, "studentAnswers.html"),
-                            Path.Combine(directory, "studentAnswer.html"),
-                            Path.Combine(directory, "redAnswer.html")
-                        };
-                    foreach (var alt in altPatterns)
-                        if (File.Exists(alt)) { redAnswerPath = alt; break; }
-                }
-
                 if (!File.Exists(redAnswerPath)) return "";
 
                 string content = await File.ReadAllTextAsync(redAnswerPath);
@@ -1527,18 +1477,7 @@ body, .para, .base-content, .content-overlay {
                 var bodyMatch = Regex.Match(content, @"<body[^>]*>([\s\S]*?)</body>", RegexOptions.IgnoreCase);
                 if (bodyMatch.Success) content = bodyMatch.Groups[1].Value;
 
-                string extractedContent = "";
-                string classPattern = answerType == "teacherNotes" ? "tbnote" : "sa";
-
-                var matches = Regex.Matches(content,
-                    @"<[^>]*class\s*=\s*[""'][^""']*" + classPattern + @"[^""']*[""'][^>]*>[\s\S]*?</[^>]*>",
-                    RegexOptions.IgnoreCase);
-
-                foreach (Match match in matches) extractedContent += match.Value + "\n";
-                if (string.IsNullOrEmpty(extractedContent) && answerType == "studentAnswers")
-                    extractedContent = content;
-
-                return extractedContent;
+                return content;
             }
             catch { return ""; }
         }
