@@ -39,6 +39,11 @@ namespace BookViewer
         private static readonly object _logLock = new object();
         private static string _logFilePath = "";
 
+        // Splitpane overlay geometry, keyed by splitpane id. Persisted so a
+        // dragged panel stays where the user put it across page reloads.
+        private readonly Dictionary<string, (double left, double top)> _splitPanePositions = new();
+        public IReadOnlyDictionary<string, (double left, double top)> SplitPanePositions => _splitPanePositions;
+
         public int CurrentPageWidth { get; private set; } = 1024;
         public int CurrentPageHeight { get; private set; } = 1309;
 
@@ -158,6 +163,245 @@ window.CH_showIcon = function(){};
 ";
 
         // ============================================================
+        // Splitpane dragger runtime (the \"move\" button)
+        // Ported from the HTML reader's startDrag/moveDrag/endDrag block.
+        // A splitpane.ext/assessment.ext/exercise.ext is a movable panel:
+        //   - click its <a class=\"btn_h_m dragger\">move</a>  => open panel
+        //   - drag  that same handle                           => reposition
+        // On reposition, we post to MAUI via a hash sentinel:
+        //   #ext-reposition:<json>
+        // MAUI's WebView.Navigating catches it and persists left/top.
+        // ============================================================
+        private const string DraggerRuntimeJs = @"
+(function(){
+  var EX_SEL = 'splitpane.ext, assessment.ext, exercise.ext, assessment, exercise';
+  var dragState = null;
+
+  function minimizePanel(sp){
+    var toHide = sp.querySelector('tohide');
+    if (!toHide) return;
+    if (toHide.getAttribute('data-minimized') === 'true') return;
+    toHide.setAttribute('data-minimized', 'true');
+    if (!toHide.__origDisplays) toHide.__origDisplays = new Map();
+    toHide.querySelectorAll(':scope > div').forEach(function(d){
+      if (!toHide.__origDisplays.has(d)) {
+        toHide.__origDisplays.set(d, d.style.display || '');
+      }
+      d.style.display = 'none';
+    });
+    var mv = sp.querySelector('.dragger');
+    if (mv) {
+      mv.style.display = '';
+      mv.style.position = 'absolute';
+      mv.style.left = '0';
+      mv.style.top = '0';
+      mv.style.zIndex = '101';
+      mv.style.background = '#EEEEEE';
+      mv.style.border = '1px solid #888';
+      mv.style.padding = '2px 6px';
+      mv.style.fontSize = '11px';
+    }
+  }
+
+  function togglePanel(sp){
+    var toHide = sp.querySelector('tohide');
+    if (!toHide) return;
+    var isMin = toHide.getAttribute('data-minimized') === 'true';
+    if (isMin) {
+      toHide.setAttribute('data-minimized','false');
+      toHide.querySelectorAll(':scope > div').forEach(function(d){
+        var orig = toHide.__origDisplays ? toHide.__origDisplays.get(d) : '';
+        d.style.display = orig == null ? '' : orig;
+      });
+    } else {
+      minimizePanel(sp);
+    }
+  }
+
+  function openExt(pane){
+    var tag = (pane.tagName || '').toLowerCase();
+    var img = pane.querySelector('img');
+    if (img && img.onclick) {
+      try { img.click(); return; } catch(e){}
+    }
+    var info = (tag === 'splitpane')
+      ? (window.getSplitPaneInfo ? window.getSplitPaneInfo(pane) : { id: pane.id })
+      : (window.getAssessmentInfo ? window.getAssessmentInfo(pane) : { id: pane.id });
+    try {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ type: 'ext:open', payload: info, tag: tag }, '*');
+      }
+    } catch(e){}
+    // Also emit a hash sentinel so MAUI can catch it even without a parent frame.
+    try {
+      window.location.hash = 'ext-open:' + encodeURIComponent(JSON.stringify({ info: info, tag: tag }));
+    } catch(e){}
+  }
+
+  function startDrag(e, handle, pane){
+    var pt = e.touches ? e.touches[0] : e;
+    dragState = {
+      pane: pane, handle: handle,
+      startX: pt.clientX, startY: pt.clientY,
+      originLeft: pane.offsetLeft, originTop: pane.offsetTop,
+      moved: false
+    };
+    pane.style.zIndex = '9999';
+  }
+
+  function moveDrag(e){
+    if (!dragState) return;
+    var pt = e.touches ? e.touches[0] : e;
+    var dx = pt.clientX - dragState.startX;
+    var dy = pt.clientY - dragState.startY;
+    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) dragState.moved = true;
+    dragState.pane.style.left = (dragState.originLeft + dx) + 'px';
+    dragState.pane.style.top  = (dragState.originTop  + dy) + 'px';
+    e.preventDefault();
+  }
+
+  function endDrag(e){
+    if (!dragState) return;
+    var pane = dragState.pane;
+    var moved = dragState.moved;
+    if (moved) {
+      var payload = {
+        id: pane.id,
+        left: pane.style.left,
+        top: pane.style.top,
+        tag: (pane.tagName || '').toLowerCase()
+      };
+      try {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'ext:reposition', payload: payload }, '*');
+        }
+      } catch(err){}
+      // Hash sentinel for MAUI bridging.
+      try {
+        window.location.hash = 'ext-reposition:' + encodeURIComponent(JSON.stringify(payload));
+      } catch(err){}
+    } else {
+      openExt(pane);
+    }
+    dragState = null;
+  }
+
+  function attach(){
+    document.querySelectorAll(EX_SEL).forEach(function(sp){
+      if (sp.__bound) return;
+      sp.__bound = true;
+      minimizePanel(sp);
+      var mv = sp.querySelector('.dragger');
+      if (mv) {
+        mv.addEventListener('mousedown', function(e){
+          e.preventDefault(); e.stopPropagation();
+          startDrag(e, mv, sp);
+        });
+        mv.addEventListener('touchstart', function(e){
+          e.stopPropagation(); startDrag(e, mv, sp);
+        }, { passive: false });
+        mv.addEventListener('contextmenu', function(e){
+          e.preventDefault(); togglePanel(sp);
+        });
+      }
+    });
+  }
+
+  window.addEventListener('mousemove', moveDrag);
+  window.addEventListener('touchmove', moveDrag, { passive: false });
+  window.addEventListener('mouseup', endDrag);
+  window.addEventListener('touchend', endDrag);
+
+  if (document.readyState === 'loading')
+    document.addEventListener('DOMContentLoaded', attach);
+  else attach();
+
+  var mo = new MutationObserver(attach);
+  mo.observe(document.documentElement, { childList: true, subtree: true });
+
+  // Re-apply persisted positions supplied by MAUI via window.__splitPanePositions
+  function applyPersistedPositions(){
+    var map = window.__splitPanePositions;
+    if (!map) return;
+    Object.keys(map).forEach(function(id){
+      var el = document.getElementById(id);
+      if (!el) return;
+      var p = map[id];
+      if (p && (p.left || p.top)) {
+        if (p.left) el.style.left = p.left;
+        if (p.top)  el.style.top  = p.top;
+      }
+    });
+  }
+  if (document.readyState === 'loading')
+    document.addEventListener('DOMContentLoaded', applyPersistedPositions);
+  else applyPersistedPositions();
+  window.__applySplitPanePositions = applyPersistedPositions;
+})();
+";
+
+        // ============================================================
+        // Splitpane controller stubs (called by the page's inline onclick)
+        // ============================================================
+        private const string SplitPaneControllerJs = @"
+window.BY_SplitPaneATController = {
+  removeSplitPaneFrame: function(id){
+    var el = document.getElementById(id);
+    if (!el) return;
+    var info = window.getSplitPaneInfo ? window.getSplitPaneInfo(el) : { id: id };
+    try { console.log('[reader] removeSplitPaneFrame', info); } catch(e){}
+    try { if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ type: 'splitpane:delete', payload: info }, '*'); } } catch(e){}
+    try { window.location.hash = 'splitpane-delete:' + encodeURIComponent(JSON.stringify(info)); } catch(e){}
+    if (el.parentNode) el.parentNode.removeChild(el);
+  },
+  validateSplitRatio: function(id){
+    var el = document.getElementById('BY_SplitPaneRatio_'+id);
+    if (!el) return;
+    var txt = (el.innerText || '').replace('%','').trim();
+    var n = parseInt(txt, 10); if (isNaN(n)) n = 50;
+    if (n < 1) n = 1; if (n > 99) n = 99;
+    el.innerText = n + '%';
+  },
+  setTooltips: function(id){
+    var el = document.getElementById('BY_SplitPaneTooltips_'+id);
+    var sp = document.getElementById(id);
+    if (!el || !sp) return;
+    var txt = (el.innerText || '').trim();
+    sp.setAttribute('data-tooltip', txt);
+    var img = sp.querySelector('img');
+    if (img && txt) img.setAttribute('title', txt);
+  }
+};
+window.BY_SplitPaneController = {
+  showSplitPanePage: function(id){
+    var sp = document.getElementById(id);
+    if (!sp) return;
+    var info = window.getSplitPaneInfo ? window.getSplitPaneInfo(sp) : { id: id };
+    try { console.log('[reader] showSplitPanePage', info); } catch(e){}
+    try { if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ type: 'splitpane:open', payload: info }, '*'); } } catch(e){}
+    try { window.location.hash = 'splitpane-open:' + encodeURIComponent(JSON.stringify(info)); } catch(e){}
+  }
+};
+(function(){
+  window.getSplitPaneInfo = function(pane){
+    var id = pane.id;
+    function t(x){ return (document.getElementById(x)||{}).innerText || ''; }
+    return {
+      id: id,
+      bookUID: t('BY_SplitPaneBookUID_'+id) || pane.getAttribute('data-book-uid') || '',
+      section: t('BY_SplitPaneSectionNum_'+id) || pane.getAttribute('data-section') || '',
+      unit:    t('BY_SplitPaneUnitNum_'+id)    || pane.getAttribute('data-unit')    || '',
+      step:    t('BY_SplitPaneStepNum_'+id)    || pane.getAttribute('data-step')    || '',
+      split:   t('BY_SplitPaneRatio_'+id)      || pane.getAttribute('data-split')   || '50%',
+      tooltip: t('BY_SplitPaneTooltips_'+id)   || pane.getAttribute('data-tooltip') || ''
+    };
+  };
+})();
+";
+
+        // ============================================================
         // Logging
         // ============================================================
         private string GetLogFilePath()
@@ -204,6 +448,10 @@ window.CH_showIcon = function(){};
         public event EventHandler<double> OnZoomChanged;
         public event EventHandler<bool> OnRedAnswersToggled;
 
+        // Fired when the WebView reports an ext:* event (drag, open, delete).
+        // Args: (type, jsonPayload). Consumer = BookViewerPage.
+        public event EventHandler<(string type, string payloadJson)> OnExtMessage;
+
         public List<string> PageFiles => _pageFiles;
         public int CurrentPageIndex => _currentPageIndex;
         public string CurrentBookPath => _currentBookPath;
@@ -220,9 +468,6 @@ window.CH_showIcon = function(){};
         public Dictionary<int, string> FolioToStepFile => _folioToStepFile;
         public Dictionary<string, int> StepFileToIndex => _stepFileToIndex;
 
-        // ============================================================
-        // Setters
-        // ============================================================
         public void SetShowTeacherNotes(bool show)
         {
             _showTeacherNotes = show;
@@ -241,6 +486,46 @@ window.CH_showIcon = function(){};
         {
             _redAnswersOn = show;
             OnRedAnswersToggled?.Invoke(this, show);
+        }
+
+        // Called by BookViewerPage when it receives an ext:* hash from the WebView.
+        public void HandleExtMessage(string type, string payloadJson)
+        {
+            try
+            {
+                if (type == "ext:reposition" || type == "splitpane:reposition")
+                {
+                    var id = ExtractJsonString(payloadJson, "id");
+                    var left = ExtractJsonString(payloadJson, "left");
+                    var top = ExtractJsonString(payloadJson, "top");
+                    if (!string.IsNullOrEmpty(id))
+                    {
+                        _splitPanePositions[id] = (ParsePx(left), ParsePx(top));
+                        Log($"Reposition {id} -> left={left} top={top}");
+                    }
+                }
+                OnExtMessage?.Invoke(this, (type, payloadJson));
+            }
+            catch (Exception ex)
+            {
+                Log($"HandleExtMessage error: {ex.Message}");
+            }
+        }
+
+        private static double ParsePx(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return 0;
+            s = s.Trim();
+            if (s.EndsWith("px", StringComparison.OrdinalIgnoreCase)) s = s.Substring(0, s.Length - 2);
+            return double.TryParse(s, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : 0;
+        }
+
+        private static string ExtractJsonString(string json, string key)
+        {
+            if (string.IsNullOrEmpty(json)) return "";
+            var m = Regex.Match(json, "\"" + Regex.Escape(key) + "\"\\s*:\\s*\"([^\"]*)\"");
+            return m.Success ? m.Groups[1].Value : "";
         }
 
         public bool IsFileEncrypted(string content) => _decryptionService.IsEncrypted(content);
@@ -275,9 +560,6 @@ window.CH_showIcon = function(){};
                 _ = LoadPageAsync(_currentPageIndex);
         }
 
-        // ============================================================
-        // Lookups
-        // ============================================================
         public int GetIndexForStepFile(string stepFile)
         {
             if (string.IsNullOrEmpty(stepFile)) return -1;
@@ -328,7 +610,6 @@ window.CH_showIcon = function(){};
 
                 _tempFolder = Path.Combine(FileSystem.CacheDirectory, "BookViewer", $"temp_{Guid.NewGuid().ToString().Substring(0, 8)}");
                 Directory.CreateDirectory(_tempFolder);
-                Log($"Temp folder: {_tempFolder}");
 
                 var bookXmlPath = Path.Combine(folderPath, "book.xml");
 
@@ -342,59 +623,38 @@ window.CH_showIcon = function(){};
                 var folderName = Path.GetFileName(folderPath);
                 var bookIdMatch = Regex.Match(folderName, @"book_(\d+)");
                 if (bookIdMatch.Success)
-                {
                     _currentBookUid = bookIdMatch.Groups[1].Value;
-                    Log($"Extracted book ID from folder: {_currentBookUid}");
-                }
 
                 var content = await File.ReadAllTextAsync(bookXmlPath);
                 Log($"book.xml loaded, size: {content.Length} bytes");
-                Log($"book.xml IsEncrypted check: {_decryptionService.IsEncrypted(content)}");
 
                 if (string.IsNullOrEmpty(_currentBookUid))
                 {
                     var uidMatch = Regex.Match(content, @"id=""([^""]+)""");
-                    if (uidMatch.Success)
-                    {
-                        _currentBookUid = uidMatch.Groups[1].Value;
-                        Log($"Extracted Book UID from book.xml: {_currentBookUid}");
-                    }
+                    if (uidMatch.Success) _currentBookUid = uidMatch.Groups[1].Value;
                 }
 
                 bool bookXmlDecrypted = false;
                 if (_decryptionService.IsEncrypted(content))
                 {
-                    Log("book.xml IS encrypted → decrypting book.xml");
                     if (string.IsNullOrEmpty(_currentBookUid))
                     {
-                        Log("ERROR: Could not find book UID for decryption");
                         OnStatusChanged?.Invoke(this, "Could not decrypt book.xml - UID not found");
                         return false;
                     }
-
                     content = _decryptionService.DecryptBookFile(content, _currentBookUid);
-                    Log($"book.xml decrypted, size: {content.Length} bytes");
                     await File.WriteAllTextAsync(bookXmlPath, content);
                     bookXmlDecrypted = true;
-                }
-                else
-                {
-                    Log("book.xml is NOT encrypted → skipping book.xml decryption");
                 }
 
                 _bookTitle = "Unknown Book";
                 var titleMatch = Regex.Match(content, @"name=""([^""]+)""");
                 if (titleMatch.Success) _bookTitle = titleMatch.Groups[1].Value;
-                Log($"Book title: {_bookTitle}");
-                Log($"Book UID: {_currentBookUid}");
 
                 OnBookLoaded?.Invoke(this, _bookTitle);
 
                 if (bookXmlDecrypted)
-                {
-                    Log("book.xml was decrypted → running DecryptBookFilesAsync");
                     await DecryptBookFilesAsync(folderPath);
-                }
 
                 _pageFiles.Clear();
 
@@ -403,8 +663,6 @@ window.CH_showIcon = function(){};
                     .Where(f => IsPureStepsFile(Path.GetFileName(f)))
                     .Distinct()
                     .ToList();
-
-                Log($"Found {stepsFiles.Count} step files");
 
                 _pageFiles = stepsFiles
                     .GroupBy(f => Path.GetDirectoryName(f) ?? "")
@@ -415,8 +673,6 @@ window.CH_showIcon = function(){};
                          .ThenBy(x => x.Path)
                          .Select(x => x.Path))
                     .ToList();
-
-                Log($"Sorted {_pageFiles.Count} page files");
 
                 _stepFileToIndex.Clear();
                 _folioToStepFile.Clear();
@@ -465,16 +721,12 @@ window.CH_showIcon = function(){};
                                     var folioStr = p.Attributes?["folio"]?.Value ?? "";
                                     var file = p.Attributes?["file"]?.Value ?? "";
                                     if (int.TryParse(folioStr, out int folio) && !string.IsNullOrEmpty(file))
-                                    {
                                         if (!_folioToStepFile.ContainsKey(folio))
                                             _folioToStepFile[folio] = file;
-                                    }
                                 }
                             }
                         }
                     }
-
-                    Log($"book.xml: {_sectionFirstIndex.Count} sections mapped, {_folioToStepFile.Count} folios");
                 }
                 catch (Exception ex)
                 {
@@ -524,31 +776,25 @@ window.CH_showIcon = function(){};
                     }
                 }
 
-                Log($"Built section folio map: {_sectionFolioMap.Count} sections");
-
                 OnPagesLoaded?.Invoke(this, _pageFiles);
 
                 if (_pageFiles.Count > 0)
                 {
                     _currentPageIndex = 0;
-                    Log($"Loading first page: {Path.GetFileName(_pageFiles[0])}");
                     await LoadPageAsync(0);
                 }
                 else
                 {
-                    Log("No page files found!");
                     OnStatusChanged?.Invoke(this, "No pages found in this book");
                     return false;
                 }
 
                 OnStatusChanged?.Invoke(this, $"Loaded: {_bookTitle} ({_pageFiles.Count} pages)");
-                Log($"=== BOOK LOADED SUCCESSFULLY ===");
                 return true;
             }
             catch (Exception ex)
             {
                 Log($"ERROR loading book: {ex.Message}");
-                Log($"Stack trace: {ex.StackTrace}");
                 OnStatusChanged?.Invoke(this, $"Error: {ex.Message}");
                 return false;
             }
@@ -561,18 +807,14 @@ window.CH_showIcon = function(){};
         {
             try
             {
-                Log($"=== DECRYPT BOOK FILES START: {folderPath} ===");
-
                 var htmlFiles = Directory.GetFiles(folderPath, "*.html", SearchOption.AllDirectories).ToList();
                 var xmlFiles = Directory.GetFiles(folderPath, "*.xml", SearchOption.AllDirectories).ToList();
                 var htmFiles = Directory.GetFiles(folderPath, "*.htm", SearchOption.AllDirectories).ToList();
 
                 int bookKey = _decryptionService.CalculateKey(_currentBookUid);
 
-                int decryptedCount = 0;
-                int alreadyDecryptedCount = 0;
-                int htmlDecryptedCount = 0;
-                int htmlSkippedCount = 0;
+                int decryptedCount = 0, alreadyDecryptedCount = 0;
+                int htmlDecryptedCount = 0, htmlSkippedCount = 0;
 
                 var allXmlAndHtmFiles = new List<string>();
                 allXmlAndHtmFiles.AddRange(xmlFiles);
@@ -584,74 +826,42 @@ window.CH_showIcon = function(){};
                     {
                         var fileName = Path.GetFileName(file);
                         var fileContent = await File.ReadAllTextAsync(file);
-                        bool isEncrypted = _decryptionService.IsEncrypted(fileContent);
-
-                        if (!isEncrypted)
-                        {
-                            alreadyDecryptedCount++;
-                            continue;
-                        }
-
-                        string decryptedContent = _decryptionService.DecryptXmlOrHtm(fileContent, fileName);
+                        if (!_decryptionService.IsEncrypted(fileContent)) { alreadyDecryptedCount++; continue; }
+                        var decryptedContent = _decryptionService.DecryptXmlOrHtm(fileContent, fileName);
                         await File.WriteAllTextAsync(file, decryptedContent);
                         decryptedCount++;
                     }
-                    catch (Exception ex)
-                    {
-                        Log($"Error decrypting {Path.GetFileName(file)}: {ex.Message}");
-                    }
+                    catch (Exception ex) { Log($"Error decrypting {Path.GetFileName(file)}: {ex.Message}"); }
                 }
 
                 foreach (var file in htmlFiles)
                 {
                     try
                     {
-                        var fileName = Path.GetFileName(file);
                         var fileContent = await File.ReadAllTextAsync(file);
-
-                        // Use the same IsEncrypted check as everywhere else — NOT the
-                        // class/id heuristic that corrupts skeleton pages.
-                        if (!_decryptionService.IsEncrypted(fileContent))
-                        {
-                            htmlSkippedCount++;
-                            continue;
-                        }
-
-                        string decryptedContent = _decryptionService.DecryptWithKey(fileContent, bookKey);
+                        // Use IsEncrypted, NOT the class/id heuristic that corrupted skeleton pages.
+                        if (!_decryptionService.IsEncrypted(fileContent)) { htmlSkippedCount++; continue; }
+                        var decryptedContent = _decryptionService.DecryptWithKey(fileContent, bookKey);
                         await File.WriteAllTextAsync(file, decryptedContent);
                         htmlDecryptedCount++;
                     }
-                    catch (Exception ex)
-                    {
-                        Log($"Error decrypting {Path.GetFileName(file)}: {ex.Message}");
-                    }
+                    catch (Exception ex) { Log($"Error decrypting {Path.GetFileName(file)}: {ex.Message}"); }
                 }
 
                 Log($"Decrypt summary: XML/HTM {decryptedCount} decrypted, {alreadyDecryptedCount} plain; HTML {htmlDecryptedCount} decrypted, {htmlSkippedCount} plain");
             }
-            catch (Exception ex)
-            {
-                Log($"ERROR in DecryptBookFilesAsync: {ex.Message}");
-            }
+            catch (Exception ex) { Log($"ERROR in DecryptBookFilesAsync: {ex.Message}"); }
         }
 
         public async Task DecryptBookAsync()
         {
-            if (string.IsNullOrEmpty(_currentBookPath))
-            {
-                OnStatusChanged?.Invoke(this, "No book loaded");
-                return;
-            }
-
+            if (string.IsNullOrEmpty(_currentBookPath)) { OnStatusChanged?.Invoke(this, "No book loaded"); return; }
             OnStatusChanged?.Invoke(this, "Decrypting book files...");
             await DecryptBookFilesAsync(_currentBookPath);
             OnStatusChanged?.Invoke(this, "Decryption complete! Reloading book...");
             await LoadBookAsync(_currentBookPath);
         }
 
-        // ============================================================
-        // Helpers
-        // ============================================================
         private bool IsPureStepsFile(string fileName)
             => Regex.IsMatch(fileName ?? "", @"^steps?_\d+\.html$", RegexOptions.IgnoreCase);
 
@@ -661,7 +871,6 @@ window.CH_showIcon = function(){};
             {
                 var m = Regex.Match(fileName ?? "", @"^steps?_(\d+)\.html$", RegexOptions.IgnoreCase);
                 if (m.Success && int.TryParse(m.Groups[1].Value, out int idx)) return idx;
-
                 m = Regex.Match(fileName ?? "", @"(\d+)");
                 if (m.Success && int.TryParse(m.Groups[1].Value, out int idx3)) return idx3;
             }
@@ -669,13 +878,9 @@ window.CH_showIcon = function(){};
             return -1;
         }
 
-        // ============================================================
-        // Load page
-        // ============================================================
         public async Task LoadPageAsync(int index)
         {
             if (index < 0 || index >= _pageFiles.Count) return;
-
             try
             {
                 _currentPageIndex = index;
@@ -692,10 +897,7 @@ window.CH_showIcon = function(){};
                     var nextContent = await File.ReadAllTextAsync(nextFilePath);
                     _nextPageHtml = await ProcessHtmlContent(nextContent, nextFilePath);
                 }
-                else
-                {
-                    _nextPageHtml = "";
-                }
+                else _nextPageHtml = "";
 
                 OnPageChanged?.Invoke(this, processedHtml);
                 OnStatusChanged?.Invoke(this, $"Viewing: {fileName} ({index + 1}/{_pageFiles.Count})");
@@ -722,16 +924,13 @@ window.CH_showIcon = function(){};
                 {
                     string nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
 
-                    // ---- 1. Load all sibling layers ----
                     string skeletonHtml = htmlContent;
-                    string baseHtml     = await ReadSiblingAsync(directory, nameWithoutExt + "_base.html");
-                    string oriHtml      = await ReadSiblingAsync(directory, nameWithoutExt + "_ori.html");
-                    string redHtml      = await ReadSiblingAsync(directory, nameWithoutExt + "_redAnswer.html");
-                    string paraXml      = await ReadSiblingAsync(directory, nameWithoutExt + "_para.xml");
-                    string pageXml      = await ReadSiblingAsync(directory, nameWithoutExt + ".xml");
+                    string baseHtml = await ReadSiblingAsync(directory, nameWithoutExt + "_base.html");
+                    string oriHtml  = await ReadSiblingAsync(directory, nameWithoutExt + "_ori.html");
+                    string redHtml  = await ReadSiblingAsync(directory, nameWithoutExt + "_redAnswer.html");
+                    string pageXml  = await ReadSiblingAsync(directory, nameWithoutExt + ".xml");
 
-                    // ---- 2. Page dimensions from skeleton #rez ----
-                    int pageWidth = 1024, pageHeight = 1309;
+                    int pageWidth = 1024, pageHeight = 1344;
                     var rezMatch = Regex.Match(skeletonHtml,
                         @"id\s*=\s*[""']rez[""'][^>]*style\s*=\s*[""'][^""']*width\s*:\s*(\d+)px[^""']*height\s*:\s*(\d+)px",
                         RegexOptions.IgnoreCase);
@@ -739,12 +938,22 @@ window.CH_showIcon = function(){};
                     {
                         if (int.TryParse(rezMatch.Groups[1].Value, out int w)) pageWidth = w;
                         if (int.TryParse(rezMatch.Groups[2].Value, out int h)) pageHeight = h;
-                        Log($"Detected page size from #rez: {pageWidth}x{pageHeight}");
+                    }
+                    else
+                    {
+                        // Fall back to the skeleton's own style="" width/height
+                        var wh = Regex.Match(skeletonHtml,
+                            @"id\s*=\s*[""']rez[""'][^>]*style\s*=\s*[""'][^""']*width\s*:\s*(\d+)px[^""']*height\s*:\s*(\d+)px",
+                            RegexOptions.IgnoreCase);
+                        if (wh.Success)
+                        {
+                            if (int.TryParse(wh.Groups[1].Value, out int w2)) pageWidth = w2;
+                            if (int.TryParse(wh.Groups[2].Value, out int h2)) pageHeight = h2;
+                        }
                     }
                     CurrentPageWidth = pageWidth;
                     CurrentPageHeight = pageHeight;
 
-                    // ---- 3. CSS from <css> tags inside steps_N.xml ----
                     var cssBuilder = new StringBuilder();
                     if (!string.IsNullOrEmpty(pageXml))
                     {
@@ -754,36 +963,29 @@ window.CH_showIcon = function(){};
                         {
                             var cssName = m.Groups[1].Value.Trim();
                             var cssRel = Path.Combine(directory, cssName);
-                            if (!File.Exists(cssRel)) { Log($"css missing: {cssRel}"); continue; }
+                            if (!File.Exists(cssRel)) continue;
                             if (!seenCss.Add(cssRel)) continue;
                             var cssText = await File.ReadAllTextAsync(cssRel);
                             cssBuilder.AppendLine(await InlineFontCssAsync(cssText, directory));
                         }
                     }
 
-                    // ---- 4. Font CSS fallback ----
                     string fontCss = cssBuilder.Length > 0
                         ? cssBuilder.ToString()
                         : await GetFontCssWithEmbeddedFonts(directory);
 
-                    // ---- 5. Rewrite relative URLs in every layer ----
                     skeletonHtml = await RewriteRelativeUrls(skeletonHtml, directory);
                     baseHtml     = await RewriteRelativeUrls(baseHtml,     directory);
                     oriHtml      = await RewriteRelativeUrls(oriHtml,      directory);
                     redHtml      = await RewriteRelativeUrls(redHtml,      directory);
 
-                    // ---- 6. Fill skeleton panes ----
-                    // pane.ori -> oriHtml, pane.base -> baseHtml, pane.redAnswer -> redHtml
                     skeletonHtml = FillPane(skeletonHtml, "ori",       oriHtml);
                     skeletonHtml = FillPane(skeletonHtml, "base",      baseHtml);
                     skeletonHtml = FillPane(skeletonHtml, "redAnswer", redHtml);
 
-                    // ---- 7. Build overlay HTML with the runtime JS ----
-                    return BuildSkeletonOverlayHtml(
-                        skeletonHtml, fontCss, pageWidth, pageHeight);
+                    return BuildSkeletonOverlayHtml(skeletonHtml, fontCss, pageWidth, pageHeight);
                 }
 
-                // Non-skeleton file (e.g. index.html) — return as-is.
                 return htmlContent;
             }
             catch (Exception ex)
@@ -804,10 +1006,6 @@ window.CH_showIcon = function(){};
             catch { return ""; }
         }
 
-        /// <summary>
-        /// Fills a &lt;pane class="X"&gt;&lt;/pane&gt; element in the skeleton with content.
-        /// Handles both &lt;pane class="base"&gt;&lt;/pane&gt; and &lt;pane class="base" attr="..."&gt;&lt;/pane&gt;.
-        /// </summary>
         private static string FillPane(string skeleton, string paneClass, string content)
         {
             if (string.IsNullOrEmpty(skeleton) || content == null) return skeleton;
@@ -818,12 +1016,16 @@ window.CH_showIcon = function(){};
         }
 
         // ============================================================
-        // BuildSkeletonOverlayHtml — wraps skeleton in a full doc, adds runtime
+        // BuildSkeletonOverlayHtml — wraps skeleton, adds runtime JS + CSS
         // ============================================================
         private string BuildSkeletonOverlayHtml(string skeletonHtml, string fontCss, int pageWidth, int pageHeight)
         {
             double zoom = _currentZoom;
             string surround = SurroundColor;
+
+            // Serialize persisted splitpane positions so the dragger JS can
+            // reapply them on load.
+            var posJson = SerializeSplitPanePositions();
 
             return $@"<!DOCTYPE html>
 <html>
@@ -864,10 +1066,34 @@ pane.base > *, pane.redAnswer > *, pane.ori > * {{ position: absolute; }}
 .tbred {{ color: #E40477 !important; }}
 .hsgbtn {{ cursor: pointer; }}
 pane.redAnswer {{ pointer-events: none; }}
+pane.redAnswer .tbred {{ pointer-events: none; }}
 hsg {{ pointer-events: auto; }}
 splitpane.ext, assessment.ext, exercise.ext {{ pointer-events: auto; }}
 splitpane.ext img, assessment.ext img, exercise.ext img {{ cursor: pointer; }}
-splitpane.ext .dragger, assessment.ext .dragger, exercise.ext .dragger {{ cursor: move; user-select: none; }}
+splitpane.ext .dragger, assessment.ext .dragger, exercise.ext .dragger {{
+    cursor: move; user-select: none;
+    display: inline-block;
+    padding: 1px 4px;
+    background: #EEEEEE;
+    border: 1px solid #888;
+    border-radius: 3px;
+    font-size: 11px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}}
+splitpane.ext .btn_h, splitpane.ext .btn_h_m,
+assessment.ext .btn_h, assessment.ext .btn_h_m,
+exercise.ext .btn_h, exercise.ext .btn_h_m {{
+    display: inline-block; cursor: pointer; padding: 1px 4px;
+}}
+splitpane.ext .btn_h:hover, splitpane.ext .btn_h_m:hover,
+assessment.ext .btn_h:hover, assessment.ext .btn_h_m:hover,
+exercise.ext .btn_h:hover, exercise.ext .btn_h_m:hover {{ background: #999; }}
+splitpane.ext [contenteditable=""true""],
+assessment.ext [contenteditable=""true""],
+exercise.ext [contenteditable=""true""] {{
+    background: #fff; border: 1px solid #888; padding: 0 2px;
+    min-width: 40px; display: inline-block;
+}}
 </style>
 </head>
 <body>
@@ -877,14 +1103,35 @@ splitpane.ext .dragger, assessment.ext .dragger, exercise.ext .dragger {{ cursor
     </div>
 </div>
 <script>
+window.__splitPanePositions = {posJson};
 {RedAnswersRuntimeJs}
+{SplitPaneControllerJs}
+{DraggerRuntimeJs}
 </script>
 </body>
 </html>";
         }
 
+        private string SerializeSplitPanePositions()
+        {
+            if (_splitPanePositions.Count == 0) return "{}";
+            var sb = new StringBuilder("{");
+            bool first = true;
+            foreach (var kvp in _splitPanePositions)
+            {
+                if (!first) sb.Append(",");
+                first = false;
+                var l = kvp.Value.left.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                var t = kvp.Value.top.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                sb.Append("\"").Append(kvp.Key.Replace("\"", "\\\"")).Append("\":")
+                  .Append("{\"left\":\"").Append(l).Append("px\",\"top\":\"").Append(t).Append("px\"}");
+            }
+            sb.Append("}");
+            return sb.ToString();
+        }
+
         // ============================================================
-        // URL rewriting (ported from the HTML reader's rewriteRelativeUrls)
+        // URL rewriting
         // ============================================================
         private static readonly HashSet<string> KnownFolders = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -897,7 +1144,6 @@ splitpane.ext .dragger, assessment.ext .dragger, exercise.ext .dragger {{ cursor
         private async Task<string> RewriteRelativeUrls(string html, string pageDir)
         {
             if (string.IsNullOrEmpty(html)) return html;
-
             pageDir = (pageDir ?? "").Replace('\\', '/').TrimEnd('/');
 
             async Task<string> Resolve(string url)
@@ -920,20 +1166,16 @@ splitpane.ext .dragger, assessment.ext .dragger, exercise.ext .dragger {{ cursor
 
                 var segments = clean.Split('/').Where(s => s.Length > 0).ToList();
 
-                // ../ resolution
                 if (segments.Count > 0 && segments[0] == "..")
                 {
                     int levels = 0;
                     while (levels < segments.Count && segments[levels] == "..") levels++;
                     var rest = segments.Skip(levels).ToList();
 
-                    // ../FONTS/ → book root FONTS/
                     if (rest.Count > 0 &&
                         (rest[0].Equals("FONTS", StringComparison.OrdinalIgnoreCase) ||
                          rest[0].Equals("fonts", StringComparison.OrdinalIgnoreCase)))
-                    {
-                        return ToDataUrlIfPossible(rest, pageDir, query, hash);
-                    }
+                        return await ToDataUrlIfPossible(rest, pageDir, query, hash);
 
                     var baseSegs = pageDir.Split('/').Where(s => s.Length > 0).ToList();
                     for (int i = 0; i < levels && baseSegs.Count > 0; i++) baseSegs.RemoveAt(baseSegs.Count - 1);
@@ -941,7 +1183,6 @@ splitpane.ext .dragger, assessment.ext .dragger, exercise.ext .dragger {{ cursor
                     return await ToDataUrlIfPossible(combined, pageDir, query, hash);
                 }
 
-                // Strip leading book_N or pageDir duplicates / known folders
                 while (segments.Count > 1)
                 {
                     var first = segments[0];
@@ -957,7 +1198,6 @@ splitpane.ext .dragger, assessment.ext .dragger, exercise.ext .dragger {{ cursor
 
                 if (isSvg)
                 {
-                    // SVG button assets live at book root images/
                     var rootRel = string.Join("/", segments);
                     var rootPath = Path.Combine(_currentBookPath, rootRel);
                     if (File.Exists(rootPath))
@@ -967,11 +1207,8 @@ splitpane.ext .dragger, assessment.ext .dragger, exercise.ext .dragger {{ cursor
                     var pagePath = Path.Combine(_currentBookPath, pageRel.Replace('/', Path.DirectorySeparatorChar));
                     if (File.Exists(pagePath))
                         return await ToDataUrlFromFile(pagePath, query, hash);
-
-                    // fall through: return raw
                 }
 
-                var fullRel = string.IsNullOrEmpty(pageDir) ? string.Join("/", segments) : pageDir + "/" + string.Join("/", segments);
                 return await ToDataUrlIfPossible(segments, pageDir, query, hash);
             }
 
@@ -981,7 +1218,6 @@ splitpane.ext .dragger, assessment.ext .dragger, exercise.ext .dragger {{ cursor
                 var full = string.IsNullOrEmpty(pDir) ? rel : pDir + "/" + rel;
                 var path = Path.Combine(_currentBookPath, full.Replace('/', Path.DirectorySeparatorChar));
                 if (File.Exists(path)) return await ToDataUrlFromFile(path, query, hash);
-                // If not found, return the URL as-is (WebView will try to load it)
                 return rel + query + hash;
             }
 
@@ -998,7 +1234,6 @@ splitpane.ext .dragger, assessment.ext .dragger, exercise.ext .dragger {{ cursor
             pieces.Add(html.Substring(last));
             var result = string.Concat(pieces);
 
-            // url(...) inside CSS
             var urlRe = new Regex(@"url\(\s*(['""]?)([^'""\)]+)\1\s*\)", RegexOptions.IgnoreCase);
             var urlMatches = urlRe.Matches(result).Cast<Match>().ToList();
             foreach (var m in urlMatches)
@@ -1021,10 +1256,7 @@ splitpane.ext .dragger, assessment.ext .dragger, exercise.ext .dragger {{ cursor
                 var mime = MimeFor(ext);
                 return $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
             }
-            catch
-            {
-                return path + query + hash;
-            }
+            catch { return path + query + hash; }
         }
 
         private static string MimeFor(string ext) => ext switch
@@ -1049,14 +1281,9 @@ splitpane.ext .dragger, assessment.ext .dragger, exercise.ext .dragger {{ cursor
             _ => "application/octet-stream"
         };
 
-        // ============================================================
-        // CSS / font inlining
-        // ============================================================
         private async Task<string> InlineFontCssAsync(string cssText, string pageDir)
         {
             if (string.IsNullOrEmpty(cssText)) return "";
-
-            // Build font index once per book
             var fontIndex = await GetFontIndexAsync();
 
             var urlRe = new Regex(@"url\(\s*['""]?([^'""\)]+)['""]?\s*\)", RegexOptions.IgnoreCase);
@@ -1081,11 +1308,7 @@ splitpane.ext .dragger, assessment.ext .dragger, exercise.ext .dragger {{ cursor
                 else if (fontIndex.TryGetValue(justStem, out var p2)) fullPath = p2;
                 else if (fontIndex.TryGetValue(noSpace, out var p3)) fullPath = p3;
 
-                if (string.IsNullOrEmpty(fullPath) || !File.Exists(fullPath))
-                {
-                    Log($"font not found: {raw}");
-                    continue;
-                }
+                if (string.IsNullOrEmpty(fullPath) || !File.Exists(fullPath)) continue;
 
                 var ext = Path.GetExtension(fullPath).ToLowerInvariant();
                 var mime = MimeFor(ext);
@@ -1104,13 +1327,8 @@ splitpane.ext .dragger, assessment.ext .dragger, exercise.ext .dragger {{ cursor
 
             var index = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var fontsFolder = Path.Combine(_currentBookPath, "FONTS");
-            if (!Directory.Exists(fontsFolder))
-                fontsFolder = Path.Combine(_currentBookPath, "fonts");
-            if (!Directory.Exists(fontsFolder))
-            {
-                _fontIndexCache = index;
-                return index;
-            }
+            if (!Directory.Exists(fontsFolder)) fontsFolder = Path.Combine(_currentBookPath, "fonts");
+            if (!Directory.Exists(fontsFolder)) { _fontIndexCache = index; return index; }
 
             await Task.Run(() =>
             {
@@ -1152,10 +1370,7 @@ splitpane.ext .dragger, assessment.ext .dragger, exercise.ext .dragger {{ cursor
                     fontCss = await File.ReadAllTextAsync(fontCssPath);
                     fontCss = await InlineFontCssAsync(fontCss, directory);
                 }
-                else
-                {
-                    fontCss = await GenerateFontCssFromFiles();
-                }
+                else fontCss = await GenerateFontCssFromFiles();
 
                 fontCss += CjkMetricLockCss;
                 _fontCache[directory] = fontCss;
@@ -1195,31 +1410,28 @@ body, .para, .base-content, .content-overlay {
                 if (!Directory.Exists(fontsFolder)) fontsFolder = Path.Combine(_currentBookPath, "fonts");
                 if (!Directory.Exists(fontsFolder)) return "";
 
-                var fontExtensions = new[] { ".ttf", ".otf", ".woff", ".woff2" };
-                var fontFiles = new List<string>();
-                foreach (var ext in fontExtensions)
-                    fontFiles.AddRange(Directory.GetFiles(fontsFolder, "*" + ext));
-
-                foreach (var fontFile in fontFiles)
+                foreach (var ext in new[] { ".ttf", ".otf", ".woff", ".woff2" })
                 {
-                    try
+                    foreach (var fontFile in Directory.GetFiles(fontsFolder, "*" + ext))
                     {
-                        var fontName = Path.GetFileNameWithoutExtension(fontFile);
-                        var fontBytes = await File.ReadAllBytesAsync(fontFile);
-                        var fontBase64 = Convert.ToBase64String(fontBytes);
-                        var ext = Path.GetExtension(fontFile).ToLower();
-                        var format = ext switch
+                        try
                         {
-                            ".ttf" => "truetype",
-                            ".otf" => "opentype",
-                            ".woff" => "woff",
-                            ".woff2" => "woff2",
-                            _ => "truetype"
-                        };
-                        var mime = MimeFor(ext);
-                        var dataUri = $"data:{mime};base64,{fontBase64}";
+                            var fontName = Path.GetFileNameWithoutExtension(fontFile);
+                            var fontBytes = await File.ReadAllBytesAsync(fontFile);
+                            var fontBase64 = Convert.ToBase64String(fontBytes);
+                            var fext = Path.GetExtension(fontFile).ToLower();
+                            var format = fext switch
+                            {
+                                ".ttf" => "truetype",
+                                ".otf" => "opentype",
+                                ".woff" => "woff",
+                                ".woff2" => "woff2",
+                                _ => "truetype"
+                            };
+                            var mime = MimeFor(fext);
+                            var dataUri = $"data:{mime};base64,{fontBase64}";
 
-                        fontCss.AppendLine($@"
+                            fontCss.AppendLine($@"
 @font-face {{
     font-family: '{fontName}';
     src: url('{dataUri}') format('{format}');
@@ -1229,8 +1441,9 @@ body, .para, .base-content, .content-overlay {
     descent-override: 0%;
     line-gap-override: 0%;
 }}");
+                        }
+                        catch { }
                     }
-                    catch { }
                 }
 
                 return fontCss.ToString();
@@ -1238,9 +1451,6 @@ body, .para, .base-content, .content-overlay {
             catch { return ""; }
         }
 
-        // ============================================================
-        // Legacy helpers still used by BuildPageHtmlForRenderAsync
-        // ============================================================
         public string GetStepBackgroundImage(string filePath)
         {
             var directory = Path.GetDirectoryName(filePath) ?? "";
@@ -1249,19 +1459,13 @@ body, .para, .base-content, .content-overlay {
             var imagesPath = Path.Combine(directory, "images");
             if (Directory.Exists(imagesPath))
             {
-                var imagePath = Path.Combine(imagesPath, $"steps_{stepNumber}.jpg");
-                if (File.Exists(imagePath)) return ConvertImageToBase64HighQuality(imagePath);
-
-                imagePath = Path.Combine(imagesPath, $"steps_{stepNumber}.png");
-                if (File.Exists(imagePath)) return ConvertImageToBase64HighQuality(imagePath);
-
-                imagePath = Path.Combine(imagesPath, $"step_{stepNumber}.jpg");
-                if (File.Exists(imagePath)) return ConvertImageToBase64HighQuality(imagePath);
-
-                imagePath = Path.Combine(imagesPath, $"step_{stepNumber}.png");
-                if (File.Exists(imagePath)) return ConvertImageToBase64HighQuality(imagePath);
+                foreach (var name in new[] { $"steps_{stepNumber}.jpg", $"steps_{stepNumber}.png",
+                                             $"step_{stepNumber}.jpg", $"step_{stepNumber}.png" })
+                {
+                    var imagePath = Path.Combine(imagesPath, name);
+                    if (File.Exists(imagePath)) return ConvertImageToBase64HighQuality(imagePath);
+                }
             }
-
             return GetPlaceholderImage();
         }
 
@@ -1283,9 +1487,6 @@ body, .para, .base-content, .content-overlay {
             catch { return GetPlaceholderImage(); }
         }
 
-        // ============================================================
-        // Answer fragments (legacy teacher/student view)
-        // ============================================================
         public async Task<string> GetRedAnswerContentAsync(string filePath, string answerType)
         {
             try
@@ -1294,7 +1495,6 @@ body, .para, .base-content, .content-overlay {
                 var fileName = Path.GetFileNameWithoutExtension(filePath) ?? "";
 
                 string redAnswerPath = Path.Combine(directory, fileName + "_redAnswer.html");
-
                 if (!File.Exists(redAnswerPath))
                 {
                     string[] altPatterns = answerType == "teacherNotes"
@@ -1314,11 +1514,8 @@ body, .para, .base-content, .content-overlay {
                             Path.Combine(directory, "studentAnswer.html"),
                             Path.Combine(directory, "redAnswer.html")
                         };
-
                     foreach (var alt in altPatterns)
-                    {
                         if (File.Exists(alt)) { redAnswerPath = alt; break; }
-                    }
                 }
 
                 if (!File.Exists(redAnswerPath)) return "";
@@ -1338,7 +1535,6 @@ body, .para, .base-content, .content-overlay {
                     RegexOptions.IgnoreCase);
 
                 foreach (Match match in matches) extractedContent += match.Value + "\n";
-
                 if (string.IsNullOrEmpty(extractedContent) && answerType == "studentAnswers")
                     extractedContent = content;
 
@@ -1347,15 +1543,8 @@ body, .para, .base-content, .content-overlay {
             catch { return ""; }
         }
 
-        public void NavigatePrevious()
-        {
-            if (_currentPageIndex > 0) _ = LoadPageAsync(_currentPageIndex - 1);
-        }
-
-        public void NavigateNext()
-        {
-            if (_currentPageIndex < _pageFiles.Count - 1) _ = LoadPageAsync(_currentPageIndex + 1);
-        }
+        public void NavigatePrevious() { if (_currentPageIndex > 0) _ = LoadPageAsync(_currentPageIndex - 1); }
+        public void NavigateNext() { if (_currentPageIndex < _pageFiles.Count - 1) _ = LoadPageAsync(_currentPageIndex + 1); }
 
         public void ToggleAnswers(bool show)
         {
@@ -1363,14 +1552,8 @@ body, .para, .base-content, .content-overlay {
             OnStatusChanged?.Invoke(this, show ? "Answers shown" : "Answers hidden");
         }
 
-        // ============================================================
-        // PDF rendering path (kept for backwards compat)
-        // ============================================================
         public async Task<string> BuildPageHtmlForRenderAsync(
-            string filePath,
-            bool includeAnswers,
-            bool includeTeacherNotes,
-            bool includeStudentAnswers)
+            string filePath, bool includeAnswers, bool includeTeacherNotes, bool includeStudentAnswers)
         {
             var rawHtml = await File.ReadAllTextAsync(filePath);
             return await ProcessHtmlContent(rawHtml, filePath);
