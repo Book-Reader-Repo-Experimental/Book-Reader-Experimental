@@ -61,6 +61,10 @@ function rememberDisplay(el){
 }
 window.__setRedAnswers = function(show){
   window.__readerRedAnswersVisible = !!show;
+
+  // 1. Show/hide the small per-answer toggle icons (has2btn / redbtn) and the
+  //    big group toggle (hsgbtn). hideBtn is the class-level hide; removing it
+  //    on show, adding it on hide.
   document.querySelectorAll('img.redbtn, img.has2btn, img.hsgbtn').forEach(function(b){
     rememberDisplay(b);
     if (show) {
@@ -71,32 +75,44 @@ window.__setRedAnswers = function(show){
       b.style.display = 'none';
     }
   });
+
+  // 2. Toggle the entire red-answer pane.
   var rp = document.querySelector('pane.redAnswer');
   if (rp) {
     rememberDisplay(rp);
     if (show) { if (rp.style.display === 'none') rp.style.display = ''; }
     else { rp.style.display = 'none'; }
   }
-  // Direct toggle of the individual answer elements. The pane rule handles
-  // visibility in the HTML reader, but we also flip each .tbnote / .sa / .tbred
-  // because their inline display:none was stripped at load time.
+
+  // 3. Flip per-answer elements inside the pane.
   if (show) {
     document.querySelectorAll('pane.redAnswer .tbnote, pane.redAnswer .sa, pane.redAnswer .tbred, pane.redAnswer .has2, pane.redAnswer has2').forEach(function(el){
       el.style.display = '';
+    });
+    // Sync the HSG button srcs to the ON state.
+    document.querySelectorAll('img.hsgbtn').forEach(function(img){
+      var offPath = img.getAttribute('offimagepath');
+      if (offPath) img.setAttribute('src', offPath);
+      img.setAttribute('on', 'true');
     });
   } else {
     document.querySelectorAll('pane.redAnswer .tbnote, pane.redAnswer .sa, pane.redAnswer .tbred, pane.redAnswer .has2, pane.redAnswer has2').forEach(function(el){
       el.style.display = 'none';
     });
-  }
-  if (!show) {
     document.querySelectorAll('svg.tbred').forEach(function(s){ s.style.display = 'none'; });
     document.querySelectorAll('has2').forEach(function(el){
       var wrap = el.closest('.tbred') || el;
       wrap.style.display = 'none';
     });
+    // Reset HSG buttons to the OFF state.
+    document.querySelectorAll('img.hsgbtn').forEach(function(img){
+      var onPath = img.getAttribute('onimagepath');
+      if (onPath) img.setAttribute('src', onPath);
+      img.setAttribute('on', 'false');
+    });
   }
 };
+
 window.XN_toggleRedLayers = function(id){
   var btn = document.getElementById(id);
   var isOn = btn && btn.getAttribute('data-on') === 'true';
@@ -110,6 +126,7 @@ window.XN_toggleRedLayers = function(id){
   document.querySelectorAll('.tbred[name=""' + id + '""]').forEach(function(el){
     rememberDisplay(el); el.style.display = turnOn ? '' : 'none'; });
 };
+
 window.XN_toggleHands = function(id){
   var btn = document.getElementById(id);
   var isOn = btn && btn.getAttribute('data-on') === 'true';
@@ -121,6 +138,7 @@ window.XN_toggleHands = function(id){
   document.querySelectorAll('svg.tbred[name=""' + id + '""]').forEach(function(s){
     rememberDisplay(s); s.style.display = turnOn ? '' : 'none'; });
 };
+
 window.CH_toggleHSG = function(id){
   var g = document.getElementById(id);
   var img = document.getElementById(id + '_img');
@@ -154,6 +172,7 @@ window.CH_toggleHSG = function(id){
     else img.setAttribute('src', src.replace('redlayerNone.svg','redlayerAll.svg').replace('None','All'));
   }
 };
+
 window.CH_RemoveHSGroup = function(){};
 window.CH_changeButton = function(){};
 window.BY_showAllSubElementIcons = function(){};
@@ -161,16 +180,6 @@ window.XN_MinPopH = function(id){ var e = document.getElementById(id); if (e) e.
 window.XN_MaxPopH = function(id){ var e = document.getElementById(id); if (e) e.style.display = ''; };
 window.CH_delHandS = function(){};
 window.CH_showIcon = function(){};
-
-// Re-apply red-answer button icon state (the SVGs like redlayerAll/None).
-window.__applyRedAnswerIcons = function(show){
-  document.querySelectorAll('img.hsgbtn').forEach(function(img){
-    var onPath = img.getAttribute('onimagepath');
-    var offPath = img.getAttribute('offimagepath');
-    var target = show ? (offPath || onPath) : (onPath || offPath);
-    if (target) img.setAttribute('src', target);
-  });
-};
 ";
 
         // ============================================================
@@ -899,12 +908,9 @@ window.BY_SplitPaneController = {
                     skeletonHtml = FillPane(skeletonHtml, "base",      baseHtml);
                     skeletonHtml = FillPane(skeletonHtml, "redAnswer", redHtml);
 
-                    // ---- Fix red-answer button SVGs: strip display:none from hsgbtn ----
-                    // The page's own <img class="hsgbtn" src="./images/teacherNotes.svg"> was
-                    // hidden inline. __setRedAnswers reveals it, but it needs to render at
-                    // all first, so strip the inline hide.
+                    // ---- Reveal red-answer toggle icons (big: hsgbtn, small: has2btn / redbtn) ----
                     skeletonHtml = Regex.Replace(skeletonHtml,
-                        @"(<img[^>]*class\s*=\s*[""'][^""']*hsgbtn[^""']*[""'][^>]*?)display\s*:\s*none\s*;?",
+                        @"(<img[^>]*class\s*=\s*[""'][^""']*(?:hsgbtn|has2btn|redbtn)[^""']*[""'][^>]*?)display\s*:\s*none\s*;?",
                         "$1", RegexOptions.IgnoreCase);
 
                     return BuildSkeletonOverlayHtml(skeletonHtml, fontCss, pageCss.ToString(), pageWidth, pageHeight);
@@ -939,11 +945,6 @@ window.BY_SplitPaneController = {
                 RegexOptions.IgnoreCase);
         }
 
-        /// <summary>
-        /// Red-answer fragments carry left/top but no position:absolute — the HTML
-        /// reader applies that via a CSS rule which is fragile here. Inject position
-        /// directly into the inline style so it always applies.
-        /// </summary>
         private static string ForceAbsolutePlacement(string html)
         {
             if (string.IsNullOrEmpty(html)) return html;
@@ -971,7 +972,7 @@ window.BY_SplitPaneController = {
         }
 
         // ============================================================
-        // BuildSkeletonOverlayHtml — wraps skeleton, adds runtime JS + CSS
+        // BuildSkeletonOverlayHtml
         // ============================================================
         private string BuildSkeletonOverlayHtml(string skeletonHtml, string fontCss, string pageCss, int pageWidth, int pageHeight)
         {
@@ -1236,14 +1237,11 @@ window.__splitPanePositions = {posJson};
         };
 
         // ============================================================
-        // Font loading — fixed to work like the HTML reader
+        // Font loading
         // ============================================================
         private string _fontIndexRoot = "";
         private readonly Dictionary<string, string> _fontNameToPathCache = new(StringComparer.OrdinalIgnoreCase);
 
-        /// <summary>
-        /// Scans FONTS/ (or fonts/) once and builds name -> full path. Cached per book root.
-        /// </summary>
         private Dictionary<string, string> BuildFontIndex()
         {
             if (_fontIndexRoot == _currentBookPath && _fontNameToPathCache.Count > 0)
@@ -1270,15 +1268,9 @@ window.__splitPanePositions = {posJson};
                     if (!_fontNameToPathCache.ContainsKey(noSpace)) _fontNameToPathCache[noSpace] = f;
                 }
             }
-
             return _fontNameToPathCache;
         }
 
-        /// <summary>
-        /// Reads *_{dir}_font.css or font.css, and inlines every @font-face url(...)
-        /// by matching the referenced filename against the FONTS/ index. This is
-        /// the same approach as the HTML reader's inlineFontCss().
-        /// </summary>
         public async Task<string> GetFontCssWithEmbeddedFonts(string directory)
         {
             try
@@ -1286,12 +1278,9 @@ window.__splitPanePositions = {posJson};
                 if (_fontCache.TryGetValue(directory, out var cached)) return cached;
 
                 string fontCssPath = null;
-
-                // Priority 1: a *_font.css next to the page (e.g. SEC201_font.css)
                 var localFontCssFiles = Directory.GetFiles(directory, "*_font.css");
                 if (localFontCssFiles.Length > 0) fontCssPath = localFontCssFiles[0];
 
-                // Priority 2: book-root font.css
                 if (fontCssPath == null)
                 {
                     var rootFontCss = Path.Combine(_currentBookPath, "font.css");
@@ -1300,7 +1289,6 @@ window.__splitPanePositions = {posJson};
 
                 if (fontCssPath == null || !File.Exists(fontCssPath))
                 {
-                    // Generate from scratch: enumerate FONTS/ and make @font-face rules.
                     var generated = await GenerateFontCssFromFontsFolder();
                     generated += CjkMetricLockCss;
                     _fontCache[directory] = generated;
@@ -1311,7 +1299,6 @@ window.__splitPanePositions = {posJson};
                 var fontIndex = BuildFontIndex();
                 Log($"Font index: {fontIndex.Count} entries; source: {fontCssPath}");
 
-                // Find every url(...) inside the css, resolve to a local file, inline as data URI.
                 var urlRe = new Regex(@"url\(\s*['""]?([^'""\)]+)['""]?\s*\)", RegexOptions.IgnoreCase);
                 var matches = urlRe.Matches(fontCss).Cast<Match>().ToList();
                 int inlined = 0, missing = 0;
@@ -1321,7 +1308,6 @@ window.__splitPanePositions = {posJson};
                     var raw = m.Groups[1].Value.Trim();
                     if (Regex.IsMatch(raw, @"^(data:|https?:)", RegexOptions.IgnoreCase)) continue;
 
-                    // Strip directory prefix and query/hash
                     var clean = raw
                         .Replace("../FONTS/", "")
                         .Replace("../fonts/", "")
