@@ -25,6 +25,9 @@ public partial class BookViewerPage : ContentPage
     private int _startFolio = 1;
     private string _targetSectionId = "";
 
+    // Prevents the hash-navigation bridge from re-firing during our own writes.
+    private bool _suppressHashHandling = false;
+
     private static readonly object _logLock = new object();
     private static string _logFilePath = "";
 
@@ -65,9 +68,6 @@ public partial class BookViewerPage : ContentPage
         _startFolio = startFolio;
 
         Log("=== BOOK VIEWER PAGE INITIALIZED ===");
-        Log($"Book folder: {bookFolder}");
-        Log($"Start folio: {_startFolio}");
-        Log($"Log file: {GetLogFilePath()}");
 
         _bookService.OnPagesLoaded += (s, pages) => Dispatcher.Dispatch(() => UpdateUI());
 
@@ -80,7 +80,7 @@ public partial class BookViewerPage : ContentPage
                 LoadStudentView();
                 UpdateDisplay();
                 UpdateUI();
-                // Re-apply red answers state after the WebView finishes loading
+
                 ContentWebView.Navigated -= OnContentWebViewNavigated;
                 ContentWebView.Navigated += OnContentWebViewNavigated;
             });
@@ -109,12 +109,14 @@ public partial class BookViewerPage : ContentPage
         _bookService.OnSideBySideToggled += (s, enabled) => Dispatcher.Dispatch(() => UpdateDisplay());
         _bookService.OnZoomChanged += (s, zoom) => Dispatcher.Dispatch(() => ZoomLabel.Text = $"{zoom:F1}x");
 
+        // Wire the WebView hash bridge.
+        ContentWebView.Navigating += OnContentWebViewNavigating;
+
         Loaded += async (s, e) =>
         {
             if (_bookLoaded) return;
             _bookLoaded = true;
 
-            Log("Loaded event fired → calling LoadBookAsync");
             var success = await _bookService.LoadBookAsync(bookFolder);
             if (success)
             {
@@ -139,17 +141,9 @@ public partial class BookViewerPage : ContentPage
                 if (!string.IsNullOrEmpty(_targetSectionId))
                 {
                     int idx = _bookService.GetFirstIndexOfSection(_targetSectionId);
-                    Log($"Section {_targetSectionId} → first index {idx}");
                     if (idx < 0 && _startFolio > 0)
-                    {
                         idx = _bookService.GetIndexForSectionFolio(_targetSectionId, _startFolio);
-                        Log($"Fallback folio {_startFolio} → index {idx}");
-                    }
-                    if (idx < 0 && _startFolio > 0)
-                    {
-                        idx = _startFolio - 1;
-                        Log($"Last fallback: folio {_startFolio} → index {idx}");
-                    }
+                    if (idx < 0 && _startFolio > 0) idx = _startFolio - 1;
                     if (idx >= 0 && idx < _bookService.PageFiles.Count)
                         await _bookService.LoadPageAsync(idx);
                 }
@@ -175,13 +169,67 @@ public partial class BookViewerPage : ContentPage
     }
 
     // ============================================================
-    // Red Answers — the headline feature
+    // WebView hash bridge — catches ext-reposition / splitpane-open / etc.
+    // ============================================================
+    private void OnContentWebViewNavigating(object sender, WebNavigatingEventArgs e)
+    {
+        if (_suppressHashHandling) return;
+        if (string.IsNullOrEmpty(e.Url)) return;
+
+        var hashIdx = e.Url.IndexOf('#');
+        if (hashIdx < 0) return;
+
+        var hash = e.Url.Substring(hashIdx + 1);
+        var colonIdx = hash.IndexOf(':');
+        if (colonIdx < 0) return;
+
+        var type = hash.Substring(0, colonIdx);
+        var payloadEncoded = hash.Substring(colonIdx + 1);
+        string payloadJson;
+        try { payloadJson = Uri.UnescapeDataString(payloadEncoded); }
+        catch { payloadJson = payloadEncoded; }
+
+        switch (type)
+        {
+            case "ext-reposition":
+            case "splitpane-reposition":
+                // Cancel the navigation — it's just a signal channel.
+                e.Cancel = true;
+                _bookService.HandleExtMessage("ext:reposition", payloadJson);
+                Log($"[bridge] reposition {payloadJson}");
+                break;
+
+            case "splitpane-delete":
+                e.Cancel = true;
+                _bookService.HandleExtMessage("splitpane:delete", payloadJson);
+                Log($"[bridge] delete {payloadJson}");
+                break;
+
+            case "splitpane-open":
+                e.Cancel = true;
+                _bookService.HandleExtMessage("splitpane:open", payloadJson);
+                Log($"[bridge] open {payloadJson}");
+                // Opening the split-pane itself is handled by the page's <img onclick>
+                // (which calls the real BY_SplitPaneController). We could push a new
+                // BookViewerPage here, but the .ext overlay is a side-by-side view
+                // inside the same page — leave it as a log for now.
+                break;
+
+            case "ext-open":
+                e.Cancel = true;
+                _bookService.HandleExtMessage("ext:open", payloadJson);
+                Log($"[bridge] ext-open {payloadJson}");
+                break;
+        }
+    }
+
+    // ============================================================
+    // Red Answers
     // ============================================================
     private void OnRedAnswersClicked(object sender, EventArgs e)
     {
         _redAnswersOn = !_redAnswersOn;
         _bookService.SetRedAnswers(_redAnswersOn);
-
         UpdateRedAnswersButton();
         ApplyRedAnswers(_redAnswersOn);
         StatusLabel.Text = _redAnswersOn ? "Red answers ON" : "Red answers OFF";
@@ -190,10 +238,8 @@ public partial class BookViewerPage : ContentPage
     private void UpdateRedAnswersButton()
     {
         if (RedAnswersButton == null) return;
-
         bool active = _redAnswersOn;
         bool dark = Application.Current?.RequestedTheme == AppTheme.Dark;
-
         RedAnswersButton.Text = active ? "✱ Hide Answers" : "✱ Red Answers";
         RedAnswersButton.BackgroundColor = active
             ? Color.FromArgb("#E40477")
@@ -216,11 +262,20 @@ public partial class BookViewerPage : ContentPage
     private void OnContentWebViewNavigated(object sender, WebNavigatedEventArgs e)
     {
         ContentWebView.Navigated -= OnContentWebViewNavigated;
+
+        // Restore persisted splitpane positions before anything else.
+        try
+        {
+            ContentWebView.EvaluateJavaScriptAsync(
+                "window.__applySplitPanePositions && window.__applySplitPanePositions();");
+        }
+        catch { }
+
         if (_redAnswersOn) ApplyRedAnswers(true);
     }
 
     // ============================================================
-    // Legacy teacher/student fragments
+    // Teacher / student fragments (legacy)
     // ============================================================
     private async void LoadTeacherView()
     {
@@ -253,7 +308,6 @@ public partial class BookViewerPage : ContentPage
     private string InjectAnswerOverlay(string contentHtml, string fragment, string viewType)
     {
         if (string.IsNullOrEmpty(fragment)) return contentHtml;
-
         string borderColor = viewType == "teacherNotes" ? "#3498db" : "#2ecc71";
         string highlightClass = viewType == "teacherNotes" ? "tbnote" : "sa";
 
@@ -329,7 +383,6 @@ public partial class BookViewerPage : ContentPage
             "content" => "content",
             _ => "content"
         };
-
         UpdateDisplay();
         UpdateViewModeButton();
         UpdateTeacherButton();
@@ -341,10 +394,7 @@ public partial class BookViewerPage : ContentPage
         if (!string.IsNullOrEmpty(_currentTeacherFragment))
         {
             _currentViewMode = _currentViewMode == "teacher" ? "content" : "teacher";
-            UpdateDisplay();
-            UpdateViewModeButton();
-            UpdateTeacherButton();
-            UpdateStudentButton();
+            UpdateDisplay(); UpdateViewModeButton(); UpdateTeacherButton(); UpdateStudentButton();
         }
         else StatusLabel.Text = "No teacher notes available for this page";
     }
@@ -354,10 +404,7 @@ public partial class BookViewerPage : ContentPage
         if (!string.IsNullOrEmpty(_currentStudentFragment))
         {
             _currentViewMode = _currentViewMode == "student" ? "content" : "student";
-            UpdateDisplay();
-            UpdateViewModeButton();
-            UpdateTeacherButton();
-            UpdateStudentButton();
+            UpdateDisplay(); UpdateViewModeButton(); UpdateTeacherButton(); UpdateStudentButton();
         }
         else StatusLabel.Text = "No student answers available for this page";
     }
@@ -382,13 +429,7 @@ public partial class BookViewerPage : ContentPage
         StudentAnswersButton.TextColor = active ? Colors.White : (dark ? Colors.White : Colors.Black);
     }
 
-    // ============================================================
-    // Existing handlers
-    // ============================================================
-    private async void OnBackClicked(object sender, EventArgs e)
-    {
-        await Navigation.PopAsync();
-    }
+    private async void OnBackClicked(object sender, EventArgs e) => await Navigation.PopAsync();
 
     private async void OnExportPdfClicked(object sender, EventArgs e)
     {
@@ -401,10 +442,8 @@ public partial class BookViewerPage : ContentPage
         try
         {
             var includeAnswers = await DisplayAlert("Export Options", "Include answers in the PDF?", "Yes", "No");
-
             bool includeTeacherNotes = false;
             bool includeStudentAnswers = false;
-
             if (includeAnswers)
             {
                 includeTeacherNotes = await DisplayAlert("Answer Type", "Include Teacher Notes?", "Yes", "No");
@@ -412,8 +451,7 @@ public partial class BookViewerPage : ContentPage
                 if (!includeTeacherNotes && !includeStudentAnswers) includeAnswers = false;
             }
 
-            var bookTitle = _bookService.BookTitle;
-            var safeFileName = string.Join("_", bookTitle.Split(Path.GetInvalidFileNameChars()));
+            var safeFileName = string.Join("_", _bookService.BookTitle.Split(Path.GetInvalidFileNameChars()));
             var documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
             var exportDir = Path.Combine(documentsPath, "BookViewer", "Exports");
             Directory.CreateDirectory(exportDir);
@@ -468,15 +506,10 @@ public partial class BookViewerPage : ContentPage
     private async void OnGridClicked(object sender, EventArgs e)
     {
         if (_bookService.PageFiles.Count == 0) return;
-
         var gridPage = new PageGridView(
             _bookService.PageFiles,
             _bookService.CurrentPageIndex,
-            (pageIndex) =>
-            {
-                Dispatcher.Dispatch(async () => await _bookService.LoadPageAsync(pageIndex));
-            });
-
+            (pageIndex) => Dispatcher.Dispatch(async () => await _bookService.LoadPageAsync(pageIndex)));
         await Navigation.PushAsync(gridPage);
     }
 
@@ -522,11 +555,7 @@ public partial class BookViewerPage : ContentPage
         else _bookService.NavigateNext();
     }
 
-    private void OnSideBySideClicked(object sender, EventArgs e)
-    {
-        _bookService.ToggleTwoPageSpread();
-    }
-
+    private void OnSideBySideClicked(object sender, EventArgs e) => _bookService.ToggleTwoPageSpread();
     private void OnZoomInClicked(object sender, EventArgs e) => _bookService.ZoomIn();
     private void OnZoomOutClicked(object sender, EventArgs e) => _bookService.ZoomOut();
 
@@ -534,7 +563,6 @@ public partial class BookViewerPage : ContentPage
     {
         var total = _bookService.PageFiles.Count;
         var current = _bookService.CurrentPageIndex + 1;
-
         PrevButton.IsEnabled = _bookService.CurrentPageIndex > 0 && total > 0;
         NextButton.IsEnabled = _bookService.CurrentPageIndex < total - 1 && total > 0;
         PageInfoLabel.Text = total > 0 ? $"{current} / {total}" : "0 / 0";
