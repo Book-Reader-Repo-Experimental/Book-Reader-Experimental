@@ -413,6 +413,27 @@ namespace BookViewer
             return -1;
         }
 
+        public void SetShowStudentAnswers(bool show)
+        {
+            _showStudentAnswers = show;
+            if (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count)
+                _ = LoadPageAsync(_currentPageIndex);
+        }
+        
+        public void ShowAllTeacherNotes(bool show)
+        {
+            _showTeacherNotes = show;
+            if (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count)
+                _ = LoadPageAsync(_currentPageIndex);
+        }
+        
+        public void ShowAllStudentAnswers(bool show)
+        {
+            _showStudentAnswers = show;
+            if (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count)
+                _ = LoadPageAsync(_currentPageIndex);
+        }
+
         public async Task<bool> LoadBookAsync(string folderPath)
         {
             try
