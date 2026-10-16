@@ -66,7 +66,6 @@ namespace BookViewer
         text-rendering: geometricPrecision; -webkit-font-smoothing: antialiased;
     }
 
-    /* Answer / note content sits directly on the page; hidden until toggled on */
     .tbnote, .tbred, .sa {
         display: none;
         position: absolute !important;
@@ -77,7 +76,6 @@ namespace BookViewer
     .tbnote { background: rgba(255,235,150,0.55); border: 3px solid #3498db; border-radius: 4px; padding: 3px; }
     .tbred, .sa { background: rgba(255,235,150,0.55); border: 3px solid #2ecc71; border-radius: 4px; padding: 3px; }
 
-    /* The hsg group panels and toggle icons are shown/hidden by JS */
     hsg { display: none; }
     img.hsgbtn, img.redbtn, img.has2btn {
         pointer-events: auto !important;
@@ -85,7 +83,6 @@ namespace BookViewer
         z-index: 500 !important;
     }
 
-    /* Item buttons */
     .item-btns { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 600; pointer-events: none; }
     .item-btn {
         position: absolute; width: 22px; height: 22px;
@@ -99,13 +96,6 @@ namespace BookViewer
     .item-btn.on { background: #CC0000; color: #fff; border-color: #900; }
 ";
 
-        // ============================================================
-        // JS — mirrors the web-reader behavior:
-        //   __toggleByName(lid, on)         → shows/hides matching .tbnote/.tbred
-        //   __setNotes(on) / __setAnswers(on) → bulk toggle
-        //   group icon click                 → toggles its own group
-        //   per-item button click            → toggles one item
-        // ============================================================
         private const string OverlayJsTemplate = @"
 (function() {
     function log(m) { try { console.log('[reader] ' + m); } catch(e) {} }
@@ -165,7 +155,6 @@ namespace BookViewer
             if (icon.__wired) return;
             icon.__wired = true;
 
-            // Replace the inline onclick with a listener that also syncs per-item buttons
             var onclickStr = icon.getAttribute('onclick') || '';
             var fn = null;
             if (onclickStr) {
@@ -184,7 +173,6 @@ namespace BookViewer
                         if (lid) window.__toggleByName(lid, turnOn);
                     });
                 }
-                // Sync any per-item buttons belonging to this group
                 g.querySelectorAll('hastext[linkname]').forEach(function(h) {
                     var lid = h.getAttribute('linkname');
                     if (!lid) return;
@@ -214,16 +202,14 @@ namespace BookViewer
             var baseLeft = parseFloat(icon.style.left) || 0;
             var baseTop  = parseFloat(icon.style.top)  || 0;
             var children = g.querySelectorAll('hastext[linkname]');
-            log('  group ' + g.id + ' children=' + children.length);
 
             var i = 0;
             children.forEach(function(h) {
                 var lid = h.getAttribute('linkname');
                 if (!lid) return;
                 var items = findItemsByLinkname(lid);
-                if (!items.length) { log('    no items for ' + lid); return; }
+                if (!items.length) { log('  no items for ' + lid); return; }
 
-                // Tag every matched item with data-ans-id (once)
                 if (!items[0].getAttribute('data-ans-id')) {
                     items[0].setAttribute('data-ans-id', 'ans_' + g.id + '_' + i);
                 }
@@ -677,9 +663,7 @@ namespace BookViewer
                     string bgImage = GetStepBackgroundImage(filePath);
                     string contentHtml = await ExtractContentFromHtmlFile(filePath, fileName, directory);
                     string fontCss = await GetFontCssWithEmbeddedFonts(directory);
-
-                    // Extract the hsg group markup + toggle icons from the skeleton
-                    string hsgMarkup = ExtractHsgMarkup(htmlContent);
+                    string hsgMarkup = ExtractHsgMarkup(htmlContent, directory);
 
                     int pageWidth = 1024, pageHeight = 1344;
                     var rezMatch = Regex.Match(htmlContent,
@@ -707,28 +691,95 @@ namespace BookViewer
         }
 
         /// <summary>
-        /// Pull every &lt;hsg&gt; group, every has2btn/redbtn/hsgbtn marker, and every
-        /// splitpane/assessment block out of the raw skeleton so we can re-inject them.
+        /// Pull every hsg group, every toggle marker, and every splitpane/assessment
+        /// block out of the raw skeleton. Rewrites every src / onimagepath /
+        /// offimagepath to an inline data URI so the WebView can actually render
+        /// the SVG. All SVGs live at <bookRoot>/images/.
         /// </summary>
-        private string ExtractHsgMarkup(string skeletonHtml)
+        private string ExtractHsgMarkup(string skeletonHtml, string pageDirectory)
         {
             if (string.IsNullOrEmpty(skeletonHtml)) return "";
 
             var sb = new StringBuilder();
 
-            // hsg groups — capture opening tag, children, closing tag
             var hsgMatches = Regex.Matches(skeletonHtml,
                 @"<hsg\b[^>]*>[\s\S]*?</hsg>",
                 RegexOptions.IgnoreCase);
-            foreach (Match m in hsgMatches) sb.AppendLine(m.Value);
+            foreach (Match m in hsgMatches)
+                sb.AppendLine(RewriteImgSrcs(m.Value, pageDirectory));
 
-            // Toggle marker images (self-closing or plain <img>)
             var imgMatches = Regex.Matches(skeletonHtml,
                 @"<img\b[^>]*\bclass\s*=\s*[""'][^""']*\b(hsgbtn|redbtn|has2btn)\b[^""']*[""'][^>]*>",
                 RegexOptions.IgnoreCase);
-            foreach (Match m in imgMatches) sb.AppendLine(m.Value);
+            foreach (Match m in imgMatches)
+                sb.AppendLine(RewriteImgSrcs(m.Value, pageDirectory));
 
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// Rewrite every src / onimagepath / offimagepath inside the fragment to an
+        /// inline data URI. All SVGs live at <bookRoot>/images/, so we only need the
+        /// filename part of whatever path the skeleton used.
+        /// </summary>
+        private string RewriteImgSrcs(string fragment, string pageDirectory)
+        {
+            if (string.IsNullOrEmpty(fragment) || string.IsNullOrEmpty(_currentBookPath))
+                return fragment;
+
+            var imagesDir = Path.Combine(_currentBookPath, "images");
+
+            string ResolveToDataUri(string rawPath)
+            {
+                if (string.IsNullOrEmpty(rawPath)) return rawPath;
+
+                if (rawPath.StartsWith("data:", StringComparison.OrdinalIgnoreCase) ||
+                    rawPath.StartsWith("http", StringComparison.OrdinalIgnoreCase) ||
+                    rawPath.StartsWith("//"))
+                    return rawPath;
+
+                var clean = rawPath;
+                var q = clean.IndexOfAny(new[] { '?', '#' });
+                if (q >= 0) clean = clean.Substring(0, q);
+
+                var fileName = Path.GetFileName(clean.Replace('\\', '/'));
+                if (string.IsNullOrEmpty(fileName)) return rawPath;
+
+                var full = Path.Combine(imagesDir, fileName);
+                if (!File.Exists(full))
+                {
+                    Log($"[svg-miss] '{fileName}' not found in {imagesDir}");
+                    return rawPath;
+                }
+
+                try
+                {
+                    var bytes = File.ReadAllBytes(full);
+                    var ext = Path.GetExtension(full).ToLowerInvariant();
+                    var mime = ext switch
+                    {
+                        ".svg" => "image/svg+xml",
+                        ".png" => "image/png",
+                        ".jpg" or ".jpeg" => "image/jpeg",
+                        ".gif" => "image/gif",
+                        ".webp" => "image/webp",
+                        ".bmp" => "image/bmp",
+                        _ => "application/octet-stream"
+                    };
+                    return $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
+                }
+                catch { return rawPath; }
+            }
+
+            fragment = Regex.Replace(fragment,
+                @"(\bsrc\s*=\s*[""'])([^""']+)([""'])",
+                m => m.Groups[1].Value + ResolveToDataUri(m.Groups[2].Value) + m.Groups[3].Value);
+
+            fragment = Regex.Replace(fragment,
+                @"(\b(on|off)imagepath\s*=\s*[""'])([^""']+)([""'])",
+                m => m.Groups[1].Value + ResolveToDataUri(m.Groups[3].Value) + m.Groups[4].Value);
+
+            return fragment;
         }
 
         private async Task<string> ExtractContentFromHtmlFile(string filePath, string fileName, string directory)
