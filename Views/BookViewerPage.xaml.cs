@@ -2,6 +2,7 @@ using Microsoft.Maui.Controls;
 using Microsoft.Maui.Storage;
 using System;
 using System.IO;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Web;
 using Color = Microsoft.Maui.Graphics.Color;
@@ -17,6 +18,7 @@ public partial class BookViewerPage : ContentPage
     private bool _bookLoaded = false;
     private int _startFolio = 1;
     private string _targetSectionId = "";
+    private int _targetStep = 0;
 
     private static readonly object _logLock = new object();
     private static string _logFilePath = "";
@@ -96,7 +98,6 @@ public partial class BookViewerPage : ContentPage
         _bookService.OnZoomChanged += (s, zoom) =>
             Dispatcher.Dispatch(() => { if (ZoomLabel != null) ZoomLabel.Text = $"{zoom:F1}x"; });
 
-        // Catch bookviewer:// bridge URLs from the splitpane buttons
         ContentWebView.Navigating += OnWebViewNavigating;
 
         Loaded += async (s, e) =>
@@ -105,37 +106,55 @@ public partial class BookViewerPage : ContentPage
             _bookLoaded = true;
 
             var success = await _bookService.LoadBookAsync(bookFolder);
-            if (success)
-            {
-                TeacherNotesButton.IsEnabled = true;
-                StudentAnswersButton.IsEnabled = true;
-                DecryptButton.IsEnabled = true;
-                SideBySideButton.IsEnabled = true;
-                ExportPdfButton.IsEnabled = true;
-                GridButton.IsEnabled = true;
-
-                _showTeacherNotes = false;
-                _showStudentAnswers = false;
-                UpdateTeacherButton();
-                UpdateStudentButton();
-
-                if (!string.IsNullOrEmpty(_targetSectionId))
-                {
-                    int idx = _bookService.GetFirstIndexOfSection(_targetSectionId);
-                    if (idx < 0 && _startFolio > 0) idx = _bookService.GetIndexForSectionFolio(_targetSectionId, _startFolio);
-                    if (idx < 0 && _startFolio > 0) idx = _startFolio - 1;
-                    if (idx >= 0 && idx < _bookService.PageFiles.Count) await _bookService.LoadPageAsync(idx);
-                }
-                else if (_startFolio > 0)
-                {
-                    int idx = _bookService.GetIndexForFolio(_startFolio);
-                    if (idx < 0) idx = _startFolio - 1;
-                    if (idx >= 0 && idx < _bookService.PageFiles.Count) await _bookService.LoadPageAsync(idx);
-                }
-            }
-            else
+            if (!success)
             {
                 await DisplayAlert("Error", "Failed to load book", "OK");
+                return;
+            }
+
+            TeacherNotesButton.IsEnabled = true;
+            StudentAnswersButton.IsEnabled = true;
+            DecryptButton.IsEnabled = true;
+            SideBySideButton.IsEnabled = true;
+            ExportPdfButton.IsEnabled = true;
+            GridButton.IsEnabled = true;
+
+            _showTeacherNotes = false;
+            _showStudentAnswers = false;
+            UpdateTeacherButton();
+            UpdateStudentButton();
+
+            if (!string.IsNullOrEmpty(_targetSectionId) && _targetStep > 0)
+            {
+                int idx = _bookService.FindPageIndex(_targetSectionId, _targetStep);
+                if (idx < 0) idx = _bookService.GetFirstIndexOfSection(_targetSectionId);
+                if (idx >= 0 && idx < _bookService.PageFiles.Count)
+                {
+                    await _bookService.LoadPageAsync(idx);
+                    return;
+                }
+            }
+
+            if (!string.IsNullOrEmpty(_targetSectionId))
+            {
+                int idx = _bookService.GetFirstIndexOfSection(_targetSectionId);
+                if (idx < 0 && _startFolio > 0)
+                    idx = _bookService.GetIndexForSectionFolio(_targetSectionId, _startFolio);
+                if (idx >= 0 && idx < _bookService.PageFiles.Count)
+                {
+                    await _bookService.LoadPageAsync(idx);
+                    return;
+                }
+            }
+
+            if (_startFolio > 0)
+            {
+                int idx = _bookService.GetIndexForFolio(_startFolio);
+                if (idx >= 0 && idx < _bookService.PageFiles.Count)
+                {
+                    await _bookService.LoadPageAsync(idx);
+                    return;
+                }
             }
         };
     }
@@ -144,6 +163,13 @@ public partial class BookViewerPage : ContentPage
         : this(bookFolder, startFolio)
     {
         _targetSectionId = sectionId;
+    }
+
+    public BookViewerPage(string bookFolder, string sectionId, int step, int startFolio)
+        : this(bookFolder, startFolio)
+    {
+        _targetSectionId = sectionId;
+        _targetStep = step;
     }
 
     private async void OnWebViewNavigating(object sender, WebNavigatingEventArgs e)
@@ -161,8 +187,14 @@ public partial class BookViewerPage : ContentPage
             {
                 var bookUid = q["bookUID"];
                 var section = q["section"] ?? "";
-                var step = q["step"] ?? "";
+                var unit = q["unit"] ?? "";
+                var stepStr = q["step"] ?? "";
 
+                if (string.IsNullOrEmpty(section) && !string.IsNullOrEmpty(unit))
+                    section = unit;
+
+                int step = 0;
+                int.TryParse(stepStr, out step);
                 if (string.IsNullOrEmpty(bookUid)) return;
 
                 var targetFolder = Path.Combine(
@@ -175,11 +207,23 @@ public partial class BookViewerPage : ContentPage
                     return;
                 }
 
-                int folio = 1;
-                if (int.TryParse(step, out int s) && s > 0) folio = s;
-
-                var viewer = new BookViewerPage(targetFolder, section, folio);
+                var viewer = new BookViewerPage(targetFolder, section, step, 0);
                 await Navigation.PushAsync(viewer);
+            }
+            else if (uri.Host == "assessment-open")
+            {
+                // Interactive activity — open the pool HTML in the overlay
+                var elId = q["id"] ?? "";
+                var poolType = q["poolType"] ?? "ASSESSMENT";
+                await OpenAssessmentAsync(elId, poolType);
+            }
+            else if (uri.Host == "assessment-close")
+            {
+                CloseAssessment();
+            }
+            else if (uri.Host == "splitpane-delete")
+            {
+                Log("splitpane delete " + q["bookUID"]);
             }
         }
         catch (Exception ex)
@@ -187,6 +231,76 @@ public partial class BookViewerPage : ContentPage
             Log($"bridge nav error: {ex.Message}");
         }
     }
+
+    // ============================================================
+    // Assessment / interactive activity overlay
+    // ============================================================
+
+    private async Task OpenAssessmentAsync(string elId, string poolType)
+    {
+        try
+        {
+            // Read the group # out of the current page's HTML by matching
+            //   <a id="BY_assessmentQuestion_<elId>" ...>1373</a>
+            var groupId = "";
+            var m = Regex.Match(_currentContentHtml ?? "",
+                @"id=""BY_assessmentQuestion_" + Regex.Escape(elId) + @"""[^>]*>([^<]+)<",
+                RegexOptions.IgnoreCase);
+            if (m.Success) groupId = m.Groups[1].Value.Trim();
+
+            Log($"assessment open el={elId} group={groupId} pool={poolType}");
+
+            if (string.IsNullOrEmpty(groupId))
+            {
+                await DisplayAlert("Missing group", "No question group id for " + elId, "OK");
+                return;
+            }
+
+            // Look for the pool HTML under the book folder
+            var poolPath = _bookService.FindPoolFile(groupId);
+            if (string.IsNullOrEmpty(poolPath) || !File.Exists(poolPath))
+            {
+                await DisplayAlert("Not found",
+                    $"Interactive activity not found for group {groupId}.\nLooked under ola/ and pools/.",
+                    "OK");
+                return;
+            }
+
+            // Build the HTML with assets inlined, then show in the overlay WebView
+            var html = await _bookService.BuildPoolHtmlAsync(poolPath, groupId);
+
+            AssessmentTitleLabel.Text = "Activity " + groupId;
+            AssessmentWebView.Source = new HtmlWebViewSource { Html = html };
+            AssessmentOverlay.IsVisible = true;
+
+            // Also disable the page behind it
+            ContentWebView.IsVisible = false;
+        }
+        catch (Exception ex)
+        {
+            Log($"OpenAssessmentAsync err: {ex.Message}");
+            await DisplayAlert("Error", ex.Message, "OK");
+        }
+    }
+
+    private void CloseAssessment()
+    {
+        AssessmentOverlay.IsVisible = false;
+        AssessmentWebView.Source = new HtmlWebViewSource { Html = "<html><body></body></html>" };
+        ContentWebView.IsVisible = true;
+    }
+
+    private void OnAssessmentCloseClicked(object sender, EventArgs e) => CloseAssessment();
+
+    private async void OnAssessmentBackClicked(object sender, EventArgs e)
+    {
+        try { await AssessmentWebView.EvaluateJavaScriptAsync("history.back()"); }
+        catch { CloseAssessment(); }
+    }
+
+    // ============================================================
+    // Rest of the page — same as before
+    // ============================================================
 
     private void UpdateTwoPageLayout()
     {
