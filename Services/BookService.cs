@@ -672,6 +672,37 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
             }
         }
 
+        /// <summary>
+        /// Find a page by (section folder name, step number). Matches pages where
+        /// the parent folder equals the section and the file is steps_N.html (or step_N.html).
+        /// </summary>
+        public int FindPageIndex(string section, int step)
+        {
+            if (step <= 0) return -1;
+            var wanted = "steps_" + step;
+            var wantedAlt = "step_" + step;
+        
+            for (int i = 0; i < _pageFiles.Count; i++)
+            {
+                var name = Path.GetFileNameWithoutExtension(_pageFiles[i]);
+                var dir = Path.GetFileName(Path.GetDirectoryName(_pageFiles[i]) ?? "");
+                if (!string.IsNullOrEmpty(section) &&
+                    dir != section &&
+                    !dir.EndsWith("/" + section) &&
+                    !dir.EndsWith(section))
+                    continue;
+                if (name == wanted || name == wantedAlt) return i;
+            }
+        
+            for (int i = 0; i < _pageFiles.Count; i++)
+            {
+                var name = Path.GetFileNameWithoutExtension(_pageFiles[i]);
+                if (name == wanted || name == wantedAlt) return i;
+            }
+        
+            return -1;
+        }
+                
         // ============================================================
         // Find the pool HTML for a given question group id.
         // Looks under:
