@@ -210,16 +210,84 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
         
         // ---- Split-pane controller: move button opens the target book ----
         window.getSplitPaneInfo = function(pane){
-          var id = pane.id;
-          function t(x){ var e = document.getElementById(x); return e ? (e.innerText || '').trim() : ''; }
+          if (!pane) return { id:'', bookUID:'', section:'', unit:'', step:'', split:'50%', tooltip:'' };
+          var id = pane.id || '';
+
+          function textOf(el){
+            if (!el) return '';
+            var t = (el.innerText || el.textContent || '').trim();
+            return t;
+          }
+
+          // Try a list of candidate element ids first; then any descendant whose
+          // id ends with one of the known suffixes; then pane attributes.
+          function pick(candidateIds, attrNames){
+            for (var i = 0; i < candidateIds.length; i++) {
+              var el = document.getElementById(candidateIds[i]);
+              var v = textOf(el);
+              if (v) return v;
+            }
+            if (attrNames && attrNames.length) {
+              for (var k = 0; k < attrNames.length; k++) {
+                var a = pane.getAttribute(attrNames[k]);
+                if (a) return ('' + a).trim();
+              }
+            }
+            return '';
+          }
+
+          // Descendant scan: match any element whose id ends with one of the
+          // given suffixes (covers whatever naming the book uses).
+          function pickDescendant(suffixes){
+            for (var i = 0; i < suffixes.length; i++) {
+              var el = pane.querySelector('[id$=""' + suffixes[i] + '""]');
+              var v = textOf(el);
+              if (v) return v;
+            }
+            return '';
+          }
+
+          var bookUID = pick(
+              ['BY_SplitPaneBookUID_' + id, 'BY_SplitPaneBookUID'],
+              ['data-book-uid','data-bookuid','bookuid','book-uid'])
+            || pickDescendant(['BookUID','bookUID','bookuid','book_uid']);
+
+          var section = pick(
+              ['BY_SplitPaneSectionNum_' + id, 'BY_SplitPaneSection_' + id, 'BY_SplitPaneSectionNum'],
+              ['data-section','data-section-num','section'])
+            || pickDescendant(['SectionNum','Section','section','section_num']);
+
+          var unit = pick(
+              ['BY_SplitPaneUnitNum_' + id, 'BY_SplitPaneUnit_' + id, 'BY_SplitPaneUnitNum'],
+              ['data-unit','data-unit-num','unit'])
+            || pickDescendant(['UnitNum','Unit','unit','unit_num']);
+
+          var step = pick(
+              ['BY_SplitPaneStepNum_' + id, 'BY_SplitPaneStep_' + id, 'BY_SplitPaneStepNum'],
+              ['data-step','data-step-num','step'])
+            || pickDescendant(['StepNum','Step','step','step_num']);
+
+          var split = pick(
+              ['BY_SplitPaneRatio_' + id, 'BY_SplitPaneRatio'],
+              ['data-split','data-ratio'])
+            || pickDescendant(['Ratio','ratio','Split','split']) || '50%';
+
+          var tooltip = pick(
+              ['BY_SplitPaneTooltips_' + id, 'BY_SplitPaneTooltips'],
+              ['data-tooltip','title'])
+            || pickDescendant(['Tooltips','Tooltip','tooltip']);
+
+          // If section is empty but unit has a value, use unit
+          if (!section && unit) section = unit;
+
           return {
             id: id,
-            bookUID: t('BY_SplitPaneBookUID_' + id) || pane.getAttribute('data-book-uid') || '',
-            section: t('BY_SplitPaneSectionNum_' + id) || pane.getAttribute('data-section') || '',
-            unit: t('BY_SplitPaneUnitNum_' + id) || pane.getAttribute('data-unit') || '',
-            step: t('BY_SplitPaneStepNum_' + id) || pane.getAttribute('data-step') || '',
-            split: t('BY_SplitPaneRatio_' + id) || pane.getAttribute('data-split') || '50%',
-            tooltip: t('BY_SplitPaneTooltips_' + id) || pane.getAttribute('data-tooltip') || ''
+            bookUID: bookUID,
+            section: section,
+            unit: unit,
+            step: step,
+            split: split,
+            tooltip: tooltip
           };
         };
         
@@ -253,13 +321,17 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
         window.BY_SplitPaneController = {
           showSplitPanePage: function(id){
             var sp = document.getElementById(id);
-            if (!sp) return;
+            if (!sp) { console.log('[splitpane] no element for id=' + id); return; }
             var info = window.getSplitPaneInfo(sp);
+            console.log('[splitpane] info=' + JSON.stringify(info));
+            console.log('[splitpane] pane-html=' + (sp.outerHTML || '').substring(0, 2000));
             var url = 'bookviewer://splitpane-open'
                     + '?bookUID=' + encodeURIComponent(info.bookUID)
                     + '&section=' + encodeURIComponent(info.section)
+                    + '&unit=' + encodeURIComponent(info.unit)
                     + '&step=' + encodeURIComponent(info.step);
-            try { window.location.href = url; } catch(e){}
+            console.log('[splitpane] url=' + url);
+            try { window.location.href = url; } catch(e){ console.log('[splitpane] nav err=' + e); }
           }
         };
         
@@ -673,33 +745,99 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
         }
 
         /// <summary>
-        /// Find a page by (section folder name, step number). Matches pages where
-        /// the parent folder equals the section and the file is steps_N.html (or step_N.html).
+        /// Find a page by (section identifier, step number).
+        /// The section can be a folder name (e.g. "s_1"), a section id from book.xml,
+        /// or just a number. Matches pages where the parent folder corresponds to
+        /// the section and the file is steps_N.html (or step_N.html).
         /// </summary>
         public int FindPageIndex(string section, int step)
         {
             if (step <= 0) return -1;
             var wanted = "steps_" + step;
             var wantedAlt = "step_" + step;
-        
+
+            // Normalize the section identifier: strip any path, keep last segment
+            string sectionKey = (section ?? "").Replace('\\', '/').Trim();
+            if (sectionKey.Contains('/'))
+                sectionKey = sectionKey.Substring(sectionKey.LastIndexOf('/') + 1);
+
+            // Build a set of acceptable folder names for this section:
+            //   - the raw value ("s_1", "1", etc.)
+            //   - "s_<value>" if the value is numeric and doesn't already start with s_
+            //   - the bare number if the value starts with "s_"
+            var acceptableFolders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrEmpty(sectionKey))
+            {
+                acceptableFolders.Add(sectionKey);
+
+                var numMatch = Regex.Match(sectionKey, @"\d+");
+                if (numMatch.Success)
+                {
+                    var num = numMatch.Value;
+                    acceptableFolders.Add(num);
+                    acceptableFolders.Add("s_" + num);
+                    acceptableFolders.Add("section_" + num);
+                }
+            }
+
+            // PASS 1: match folder + filename
             for (int i = 0; i < _pageFiles.Count; i++)
             {
                 var name = Path.GetFileNameWithoutExtension(_pageFiles[i]);
+                if (name != wanted && name != wantedAlt) continue;
+
                 var dir = Path.GetFileName(Path.GetDirectoryName(_pageFiles[i]) ?? "");
-                if (!string.IsNullOrEmpty(section) &&
-                    dir != section &&
-                    !dir.EndsWith("/" + section) &&
-                    !dir.EndsWith(section))
+                if (acceptableFolders.Count > 0 && !acceptableFolders.Contains(dir))
                     continue;
-                if (name == wanted || name == wantedAlt) return i;
+
+                Log($"[FindPageIndex] PASS1 hit: section='{sectionKey}' step={step} -> idx={i} file={_pageFiles[i]}");
+                return i;
             }
-        
+
+            // PASS 2: match folder only (any step file in that folder), pick the one
+            // whose parsed step index is closest to the requested step.
+            if (acceptableFolders.Count > 0)
+            {
+                int bestIdx = -1;
+                int bestDelta = int.MaxValue;
+                for (int i = 0; i < _pageFiles.Count; i++)
+                {
+                    var dir = Path.GetFileName(Path.GetDirectoryName(_pageFiles[i]) ?? "");
+                    if (!acceptableFolders.Contains(dir)) continue;
+
+                    var name = Path.GetFileNameWithoutExtension(_pageFiles[i]);
+                    var m = Regex.Match(name ?? "", @"^steps?_(\d+)$", RegexOptions.IgnoreCase);
+                    if (!m.Success) continue;
+
+                    if (int.TryParse(m.Groups[1].Value, out int fileStep))
+                    {
+                        int delta = Math.Abs(fileStep - step);
+                        if (delta < bestDelta)
+                        {
+                            bestDelta = delta;
+                            bestIdx = i;
+                        }
+                    }
+                }
+                if (bestIdx >= 0)
+                {
+                    Log($"[FindPageIndex] PASS2 hit: section='{sectionKey}' step={step} -> idx={bestIdx} file={_pageFiles[bestIdx]}");
+                    return bestIdx;
+                }
+            }
+
+            // PASS 3: filename-only fallback (old behavior) — but log it clearly
             for (int i = 0; i < _pageFiles.Count; i++)
             {
                 var name = Path.GetFileNameWithoutExtension(_pageFiles[i]);
-                if (name == wanted || name == wantedAlt) return i;
+                if (name == wanted || name == wantedAlt)
+                {
+                    Log($"[FindPageIndex] PASS3 (filename-only) hit: section='{sectionKey}' step={step} -> idx={i} file={_pageFiles[i]}");
+                    return i;
+                }
             }
-        
+
+            Log($"[FindPageIndex] NO MATCH: section='{sectionKey}' step={step}");
             return -1;
         }
                 
