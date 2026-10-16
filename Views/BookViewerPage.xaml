@@ -36,6 +36,7 @@
                     BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}">
             <HorizontalStackLayout Padding="12,4,12,10" Spacing="8">
 
+                <!-- Navigation group -->
                 <Button x:Name="PrevButton"
                         Text="‹"
                         Clicked="OnPrevClicked"
@@ -62,14 +63,7 @@
                          Color="{AppThemeBinding Light=#E5E5EA, Dark=#38383A}"
                          VerticalOptions="Center" Margin="4,0"/>
 
-                <!-- ===== Red Answers (the headline feature) ===== -->
-                <Button x:Name="RedAnswersButton"
-                        Text="✱ Red Answers"
-                        Clicked="OnRedAnswersClicked"
-                        Style="{StaticResource TintedChip}"
-                        IsEnabled="False"/>
-
-                <!-- ===== Legacy teacher/student views (kept for compat) ===== -->
+                <!-- View modes -->
                 <Button x:Name="TeacherNotesButton"
                         Text="✎ Notes"
                         Clicked="OnTeacherNotesClicked"
@@ -94,16 +88,11 @@
                         Style="{StaticResource TintedChip}"
                         IsEnabled="False"/>
 
-                <Button x:Name="ViewModeButton"
-                        Text="◉ Content"
-                        Clicked="OnViewModeClicked"
-                        Style="{StaticResource TintedChip}"
-                        IsEnabled="False"/>
-
                 <BoxView WidthRequest="1" HeightRequest="20"
                          Color="{AppThemeBinding Light=#E5E5EA, Dark=#38383A}"
                          VerticalOptions="Center" Margin="4,0"/>
 
+                <!-- Actions -->
                 <Button x:Name="DecryptButton"
                         Text="🔒 Decrypt"
                         Clicked="OnDecryptClicked"
@@ -120,6 +109,7 @@
                          Color="{AppThemeBinding Light=#E5E5EA, Dark=#38383A}"
                          VerticalOptions="Center" Margin="4,0"/>
 
+                <!-- Zoom -->
                 <Frame CornerRadius="18"
                        HasShadow="False"
                        BackgroundColor="{AppThemeBinding Light={StaticResource Elevated}, Dark={StaticResource ElevatedDark}}"
@@ -170,8 +160,6 @@
 
             <WebView x:Name="ContentWebView" Grid.Column="0"/>
             <WebView x:Name="NextPageWebView" Grid.Column="1" IsVisible="False"/>
-            <WebView x:Name="TeacherWebView" Grid.Column="1" IsVisible="False"/>
-            <WebView x:Name="StudentWebView" Grid.Column="1" IsVisible="False"/>
         </Grid>
 
         <!-- ================= STATUS ================= -->
