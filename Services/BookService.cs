@@ -78,6 +78,18 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
           }
         }
         
+        window.__resolveHsgId = function(arg, ev){
+          if (typeof arg === 'string') return arg;
+          if (arg && arg.id) return arg.id;
+          if (arg && arg.tagName && arg.tagName.toLowerCase() === 'hsg') return arg.id;
+          var icon = ev && ev.currentTarget;
+          if (icon && icon.id) {
+            var m = icon.id.match(/^(.*)_img$/);
+            if (m) return m[1];
+          }
+          return null;
+        };
+        
         window.__toggleByName = function(lid, turnOn){
           if (!lid) return 0;
           if (turnOn) {
@@ -155,7 +167,9 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
           });
         };
         
-        window.CH_toggleHSG = function(id){
+        window.CH_toggleHSG = function(arg, ev){
+          var id = window.__resolveHsgId(arg, ev);
+          if (!id) return;
           var g = document.getElementById(id);
           if (!g) return;
           var isOn = g.getAttribute('on') === 'true';
@@ -194,11 +208,86 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
           window.__toggleByName(id, turnOn);
         };
         
+        // ---- Split-pane controller: move button opens the target book ----
+        window.getSplitPaneInfo = function(pane){
+          var id = pane.id;
+          function t(x){ var e = document.getElementById(x); return e ? (e.innerText || '').trim() : ''; }
+          return {
+            id: id,
+            bookUID: t('BY_SplitPaneBookUID_' + id) || pane.getAttribute('data-book-uid') || '',
+            section: t('BY_SplitPaneSectionNum_' + id) || pane.getAttribute('data-section') || '',
+            unit: t('BY_SplitPaneUnitNum_' + id) || pane.getAttribute('data-unit') || '',
+            step: t('BY_SplitPaneStepNum_' + id) || pane.getAttribute('data-step') || '',
+            split: t('BY_SplitPaneRatio_' + id) || pane.getAttribute('data-split') || '50%',
+            tooltip: t('BY_SplitPaneTooltips_' + id) || pane.getAttribute('data-tooltip') || ''
+          };
+        };
+        
+        window.BY_SplitPaneATController = {
+          removeSplitPaneFrame: function(id){
+            var el = document.getElementById(id);
+            if (!el) return;
+            var info = window.getSplitPaneInfo(el);
+            try { window.location.href = 'bookviewer://splitpane-delete?bookUID=' + encodeURIComponent(info.bookUID); } catch(e){}
+            if (el.parentNode) el.parentNode.removeChild(el);
+          },
+          validateSplitRatio: function(id){
+            var el = document.getElementById('BY_SplitPaneRatio_' + id);
+            if (!el) return;
+            var n = parseInt((el.innerText || '').replace('%','').trim(), 10);
+            if (isNaN(n)) n = 50;
+            if (n < 1) n = 1; if (n > 99) n = 99;
+            el.innerText = n + '%';
+          },
+          setTooltips: function(id){
+            var el = document.getElementById('BY_SplitPaneTooltips_' + id);
+            var sp = document.getElementById(id);
+            if (!el || !sp) return;
+            var txt = (el.innerText || '').trim();
+            sp.setAttribute('data-tooltip', txt);
+            var img = sp.querySelector('img');
+            if (img && txt) img.setAttribute('title', txt);
+          }
+        };
+        
+        window.BY_SplitPaneController = {
+          showSplitPanePage: function(id){
+            var sp = document.getElementById(id);
+            if (!sp) return;
+            var info = window.getSplitPaneInfo(sp);
+            var url = 'bookviewer://splitpane-open'
+                    + '?bookUID=' + encodeURIComponent(info.bookUID)
+                    + '&section=' + encodeURIComponent(info.section)
+                    + '&step=' + encodeURIComponent(info.step);
+            try { window.location.href = url; } catch(e){}
+          }
+        };
+        
+        window.BY_HtmlController = window.BY_HtmlController || {
+          showExerciseView: function(id, poolType){
+            var el = document.getElementById(id);
+            if (!el) return;
+            try {
+              window.location.href = 'bookviewer://assessment-open?id=' + encodeURIComponent(id)
+                                  + '&poolType=' + encodeURIComponent(poolType || '');
+            } catch(e){}
+          },
+          closeExerciseView: function(){
+            try { window.location.href = 'bookviewer://assessment-close'; } catch(e){}
+          }
+        };
+        
+        // ---- Force every toggle icon visible and clickable ----
         (function(){
           function makeClickable(){
             document.querySelectorAll('img.redbtn, img.has2btn, img.hsgbtn').forEach(function(b){
               b.classList.remove('hideBtn');
               b.style.display = '';
+              b.style.pointerEvents = 'auto';
+              b.style.cursor = 'pointer';
+              b.style.zIndex = '9999';
+            });
+            document.querySelectorAll('splitpane.ext img, assessment img, exercise img').forEach(function(b){
               b.style.pointerEvents = 'auto';
               b.style.cursor = 'pointer';
               b.style.zIndex = '9999';
