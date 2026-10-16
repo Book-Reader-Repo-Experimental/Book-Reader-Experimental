@@ -19,7 +19,6 @@ namespace BookViewer
         private readonly DecryptionService _decryptionService = new();
         private string _bookTitle = "Unknown Book";
         private string _currentPageHtml = "";
-        private readonly Dictionary<string, string> _imageCache = new();
         private readonly Dictionary<string, string> _fontCache = new();
         private bool _sideBySideMode = false;
         private bool _twoPageSpread = false;
@@ -77,7 +76,6 @@ function rememberDisplay(el){
   }
 }
 
-// ---- __toggleByName: toggle every .tbred/.tbnote wrapper containing [name=lid] ----
 window.__toggleByName = function(lid, turnOn){
   if (!lid) return 0;
   var hits = document.querySelectorAll('[name=""' + lid + '""]');
@@ -101,7 +99,6 @@ window.__toggleByName = function(lid, turnOn){
   return hits.length;
 };
 
-// ---- __setRedAnswers: hide/show every answer marker + content ----
 window.__setRedAnswers = function(show){
   window.__readerRedAnswersVisible = !!show;
   document.querySelectorAll('img.redbtn, img.has2btn, img.hsgbtn').forEach(function(b){
@@ -136,7 +133,6 @@ window.__setRedAnswers = function(show){
   }
 };
 
-// ---- __setNotes: toggle all teacherNote groups ----
 window.__setNotes = function(show){
   window.__readerNotesVisible = !!show;
   document.querySelectorAll('hsg[redanswertype=""teacherNotes""]').forEach(function(g){
@@ -153,7 +149,6 @@ window.__setNotes = function(show){
   }
 };
 
-// ---- CH_toggleHSG: toggle one hsg group ----
 window.CH_toggleHSG = function(id){
   var g = document.getElementById(id);
   if (!g) return;
@@ -173,7 +168,6 @@ window.CH_toggleHSG = function(id){
   }
 };
 
-// ---- Per-marker toggles ----
 window.XN_toggleHands = function(id){
   var btn = document.getElementById(id);
   var isOn = btn && btn.getAttribute('data-on') === 'true';
@@ -190,7 +184,6 @@ window.XN_toggleRedLayers = function(id){
   window.__toggleByName(id, turnOn);
 };
 
-// ---- Force teacher-note icons visible ----
 (function(){
   function makeClickable(){
     document.querySelectorAll('img.hsgbtn[redanswertype=""teacherNotes""], img.redbtn[redanswertype=""teacherNotes""], img.has2btn[redanswertype=""teacherNotes""]').forEach(function(b){
@@ -208,7 +201,6 @@ window.XN_toggleRedLayers = function(id){
   setTimeout(makeClickable, 800);
 })();
 
-// ---- Stubs so the skeleton's inline onclick doesn't error ----
 window.CH_RemoveHSGroup = function(){};
 window.CH_changeButton = function(){};
 window.BY_showAllSubElementIcons = function(){};
@@ -574,14 +566,6 @@ window.CH_showIcon = function(){};
             }
         }
 
-        // ============================================================
-        // ProcessHtmlContent — mirror of web reader's buildPageHtml
-        //   1. read skeleton (steps_N.html)
-        //   2. read _base.html, _ori.html, _redAnswer.html
-        //   3. fill <pane class=base|ori|redAnswer> with the contents
-        //   4. rewrite relative asset URLs to file:// paths
-        //   5. wrap with CSS + the reader JS
-        // ============================================================
         private async Task<string> ProcessHtmlContent(string htmlContent, string filePath)
         {
             try
@@ -599,7 +583,6 @@ window.CH_showIcon = function(){};
                 string redHtml  = await ReadIfExists(Path.Combine(directory, nameWithoutExt + "_redAnswer.html"));
                 string fontCss  = await GetFontCssWithEmbeddedFonts(directory);
 
-                // Page size from #rez
                 int pageWidth = 1024, pageHeight = 1344;
                 var rezMatch = Regex.Match(htmlContent,
                     @"id\s*=\s*[""']rez[""'][^>]*style\s*=\s*[""'][^""']*width\s*:\s*(\d+)px[^""']*height\s*:\s*(\d+)px",
@@ -613,7 +596,6 @@ window.CH_showIcon = function(){};
                 CurrentPageWidth = pageWidth;
                 CurrentPageHeight = pageHeight;
 
-                // Fill the three panes
                 string skeleton = htmlContent;
 
                 skeleton = Regex.Replace(skeleton,
@@ -631,15 +613,7 @@ window.CH_showIcon = function(){};
                     m => m.Groups[1].Value + redHtml + m.Groups[3].Value,
                     RegexOptions.IgnoreCase);
 
-                // Rewrite relative URLs to file:// absolute
                 skeleton = RewriteUrlsToFile(skeleton, directory);
-
-                // Initial visibility according to flags
-                if (_showStudentAnswers)
-                    skeleton = Regex.Replace(skeleton,
-                        @"<pane\s+class=""redAnswer""([^>]*)>",
-                        m => "<pane class=\"redAnswer\"" + (m.Groups[1].Value.Contains("style=") ? m.Groups[1].Value : m.Groups[1].Value + " style=\"\"") + ">",
-                        RegexOptions.IgnoreCase);
 
                 return BuildFinalHtml(skeleton, fontCss, pageWidth, pageHeight, fileName);
             }
@@ -657,45 +631,73 @@ window.CH_showIcon = function(){};
         }
 
         /// <summary>
-        /// Rewrite every relative src/href/url() in the fragment to file:// absolute paths
-        /// so the WebView can load images/svgs/fonts from the book folder.
+        /// Rewrite every relative src/href/url() to a file:// absolute URL.
+        /// Handles:
+        ///   "images/redlayer.svg"                 → <pageDir>/images/redlayer.svg
+        ///   "SEC201/images/steps_1.jpg"           → strip "SEC201/" → <pageDir>/images/...
+        ///   "../images/x.svg"                     → walk up
+        ///   "../FONTS/x.ttf"                      → walk up
+        ///   "/absolute/path"                      → as-is
+        /// Falls back to <bookRoot>/<clean> and <bookRoot>/images/<filename>.
         /// </summary>
         private string RewriteUrlsToFile(string html, string pageDir)
         {
             if (string.IsNullOrEmpty(html)) return html;
 
-            string bookRoot = _currentBookPath.Replace('\\', '/');
+            string pageDirUnix = pageDir.Replace('\\', '/');
+            string pageDirName = Path.GetFileName(pageDirUnix);
 
             string Resolve(string raw)
             {
                 if (string.IsNullOrEmpty(raw)) return raw;
-                if (raw.StartsWith("data:") || raw.StartsWith("http") || raw.StartsWith("//")) return raw;
+                if (raw.StartsWith("data:") || raw.StartsWith("http") || raw.StartsWith("//") || raw.StartsWith("file://"))
+                    return raw;
 
-                // strip query/hash
                 var clean = raw;
                 var q = clean.IndexOfAny(new[] { '?', '#' });
                 if (q >= 0) clean = clean.Substring(0, q);
-
                 clean = clean.Replace('\\', '/').TrimStart('.', '/');
 
-                // Resolve relative to page dir first
+                // 1. Direct: <pageDir>/<clean>
                 var candidate = Path.GetFullPath(Path.Combine(pageDir, clean));
-                if (File.Exists(candidate))
-                    return "file://" + candidate.Replace('\\', '/');
+                if (File.Exists(candidate)) return ToFileUrl(candidate);
 
-                // Then book root
-                candidate = Path.GetFullPath(Path.Combine(bookRoot, clean));
-                if (File.Exists(candidate))
-                    return "file://" + candidate.Replace('\\', '/');
+                // 2. Strip leading folder if it equals the page's own folder name
+                //    e.g. "SEC201/images/steps_1.jpg" → "images/steps_1.jpg"
+                var segments = clean.Split('/');
+                if (segments.Length > 1 && segments[0] == pageDirName)
+                {
+                    var stripped = string.Join("/", segments.Skip(1));
+                    candidate = Path.GetFullPath(Path.Combine(pageDir, stripped));
+                    if (File.Exists(candidate)) return ToFileUrl(candidate);
+                }
 
-                // Fallback: book root images/
+                // 3. Walk up two levels
+                var up = pageDir;
+                for (int i = 0; i < 2; i++)
+                {
+                    up = Path.GetDirectoryName(up) ?? up;
+                    candidate = Path.GetFullPath(Path.Combine(up, clean));
+                    if (File.Exists(candidate)) return ToFileUrl(candidate);
+                }
+
+                // 4. Book root
+                candidate = Path.GetFullPath(Path.Combine(_currentBookPath, clean));
+                if (File.Exists(candidate)) return ToFileUrl(candidate);
+
+                // 5. Book root images/
                 var fname = Path.GetFileName(clean);
-                candidate = Path.GetFullPath(Path.Combine(bookRoot, "images", fname));
-                if (File.Exists(candidate))
-                    return "file://" + candidate.Replace('\\', '/');
+                candidate = Path.GetFullPath(Path.Combine(_currentBookPath, "images", fname));
+                if (File.Exists(candidate)) return ToFileUrl(candidate);
 
-                // Give up; return original
                 return raw;
+            }
+
+            string ToFileUrl(string full)
+            {
+                var p = full.Replace('\\', '/');
+                if (!p.StartsWith("/")) p = "/" + p;
+                return "file://" + p;
             }
 
             html = Regex.Replace(html,
@@ -711,9 +713,6 @@ window.CH_showIcon = function(){};
             return html;
         }
 
-        /// <summary>
-        /// Wrap skeleton + CSS + JS into the final HTML document.
-        /// </summary>
         private string BuildFinalHtml(string skeleton, string fontCss, int pageWidth, int pageHeight, string title)
         {
             string surround = SurroundColor;
@@ -759,22 +758,29 @@ window.CH_showIcon = function(){};
                 {
                     fontCss = await File.ReadAllTextAsync(fontCssPath);
 
-                    // Rewrite url('../FONTS/x.ttf') -> file://<bookRoot>/FONTS/x.ttf
-                    var fontsFolder = Path.Combine(_currentBookPath, "FONTS");
-                    if (!Directory.Exists(fontsFolder)) fontsFolder = Path.Combine(_currentBookPath, "fonts");
-                    var fontsFolderUnix = fontsFolder.Replace('\\', '/');
-
+                    // Rewrite url(...) to file:// for any ttf/otf/woff under FONTS at bookRoot or pageDir
                     fontCss = Regex.Replace(fontCss,
                         @"url\(\s*['""]?([^'"")\s]+)['""]?\s*\)",
                         m =>
                         {
                             var raw = m.Groups[1].Value;
-                            if (raw.StartsWith("data:") || raw.StartsWith("http")) return m.Value;
+                            if (raw.StartsWith("data:") || raw.StartsWith("http") || raw.StartsWith("file://")) return m.Value;
 
                             var name = Path.GetFileName(raw.Replace('\\', '/'));
-                            var full = Path.Combine(fontsFolder, name);
-                            if (File.Exists(full))
-                                return "url('file://" + full.Replace('\\', '/') + "')";
+                            var candidates = new[]
+                            {
+                                Path.Combine(_currentBookPath, "FONTS", name),
+                                Path.Combine(_currentBookPath, "fonts", name),
+                                Path.Combine(directory, "FONTS", name),
+                                Path.Combine(directory, "fonts", name)
+                            };
+                            foreach (var c in candidates)
+                                if (File.Exists(c))
+                                {
+                                    var u = c.Replace('\\', '/');
+                                    if (!u.StartsWith("/")) u = "/" + u;
+                                    return "url('file://" + u + "')";
+                                }
                             return m.Value;
                         });
 
