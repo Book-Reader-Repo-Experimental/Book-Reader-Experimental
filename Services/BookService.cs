@@ -68,150 +68,157 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
 ";
 
         private const string ReaderJsTemplate = @"
-window.__readerRedAnswersVisible = false;
-window.__readerNotesVisible = false;
-window.__redAnswerOriginalDisplay = new WeakMap();
-
-function rememberDisplay(el){
-  if (!window.__redAnswerOriginalDisplay.has(el)) {
-    window.__redAnswerOriginalDisplay.set(el, el.style.display || '');
-  }
-}
-
-window.__toggleByName = function(lid, turnOn){
-  if (!lid) return 0;
-  var hits = document.querySelectorAll('[name=""' + lid + '""]');
-  for (var i = 0; i < hits.length; i++) {
-    var el = hits[i];
-    var target = null;
-    var p = el.parentElement;
-    while (p && p !== document.body) {
-      var cls = (p.className || '') + '';
-      if (cls.indexOf('tbnote') !== -1 || cls.indexOf('tbred') !== -1) { target = p; break; }
-      p = p.parentElement;
-    }
-    if (!target && el.parentElement) {
-      var pcls = (el.parentElement.className || '') + '';
-      if (pcls.indexOf('tbnote') !== -1 || pcls.indexOf('tbred') !== -1) target = el.parentElement;
-    }
-    if (!target) target = el;
-    rememberDisplay(target);
-    target.style.display = turnOn ? '' : 'none';
-  }
-  return hits.length;
-};
-
-window.__setRedAnswers = function(show){
-  window.__readerRedAnswersVisible = !!show;
-  document.querySelectorAll('img.redbtn, img.has2btn, img.hsgbtn').forEach(function(b){
-    if (b.getAttribute('redanswertype') === 'teacherNotes') return;
-    rememberDisplay(b);
-    if (show) { b.classList.remove('hideBtn'); if (b.style.display === 'none') b.style.display = ''; }
-    else { b.classList.add('hideBtn'); b.style.display = 'none'; }
-  });
-  var rp = document.querySelector('pane.redAnswer');
-  if (rp) {
-    rememberDisplay(rp);
-    if (show) { if (rp.style.display === 'none') rp.style.display = ''; }
-    else rp.style.display = 'none';
-  }
-  if (!show) {
-    document.querySelectorAll('svg.tbred, .tbred, has2').forEach(function(el){
-      var tn = el.closest ? el.closest('hsg[redanswertype=""teacherNotes""]') : null;
-      if (tn) return;
-      var target = el;
-      var p = el.parentElement;
-      while (p && p !== document.body) {
-        var cls = (p.className || '') + '';
-        if (cls.indexOf('tbnote') !== -1 || cls.indexOf('tbred') !== -1) { target = p; break; }
-        p = p.parentElement;
-      }
-      rememberDisplay(target); target.style.display = 'none';
-    });
-    document.querySelectorAll('hsg').forEach(function(h){
-      if (h.getAttribute('redanswertype') === 'teacherNotes') return;
-      h.setAttribute('on', 'false');
-    });
-  }
-};
-
-window.__setNotes = function(show){
-  window.__readerNotesVisible = !!show;
-  document.querySelectorAll('hsg[redanswertype=""teacherNotes""]').forEach(function(g){
-    var turnOn = !!show;
-    g.setAttribute('on', turnOn ? 'true' : 'false');
-    g.querySelectorAll('hastext[linkname]').forEach(function(h){
-      var lid = h.getAttribute('linkname');
-      if (lid) window.__toggleByName(lid, turnOn);
-    });
-  });
-  if (show) {
-    var rp = document.querySelector('pane.redAnswer');
-    if (rp) { rememberDisplay(rp); if (rp.style.display === 'none') rp.style.display = ''; }
-  }
-};
-
-window.CH_toggleHSG = function(id){
-  var g = document.getElementById(id);
-  if (!g) return;
-  var isOn = g.getAttribute('on') === 'true';
-  var turnOn = !isOn;
-  g.setAttribute('on', turnOn ? 'true' : 'false');
-  g.querySelectorAll('hastext[linkname]').forEach(function(h){
-    var lid = h.getAttribute('linkname');
-    if (lid) window.__toggleByName(lid, turnOn);
-  });
-  var img = document.getElementById(id + '_img');
-  if (img) {
-    var src = img.getAttribute('src') || '';
-    img.setAttribute('src', turnOn
-      ? src.replace('redlayerAll.svg','redlayerNone.svg').replace('teacherNotes.svg','teacherNotes_o.svg')
-      : src.replace('redlayerNone.svg','redlayerAll.svg').replace('teacherNotes_o.svg','teacherNotes.svg'));
-  }
-};
-
-window.XN_toggleHands = function(id){
-  var btn = document.getElementById(id);
-  var isOn = btn && btn.getAttribute('data-on') === 'true';
-  var turnOn = !isOn;
-  if (btn) btn.setAttribute('data-on', turnOn ? 'true' : 'false');
-  window.__toggleByName(id, turnOn);
-};
-
-window.XN_toggleRedLayers = function(id){
-  var btn = document.getElementById(id);
-  var isOn = btn && btn.getAttribute('data-on') === 'true';
-  var turnOn = !isOn;
-  if (btn) btn.setAttribute('data-on', turnOn ? 'true' : 'false');
-  window.__toggleByName(id, turnOn);
-};
-
-(function(){
-  function makeClickable(){
-    document.querySelectorAll('img.hsgbtn[redanswertype=""teacherNotes""], img.redbtn[redanswertype=""teacherNotes""], img.has2btn[redanswertype=""teacherNotes""]').forEach(function(b){
-      b.classList.remove('hideBtn');
-      b.style.display = '';
-      b.style.pointerEvents = 'auto';
-      b.style.cursor = 'pointer';
-      b.style.zIndex = '9999';
-    });
-  }
-  makeClickable();
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', makeClickable);
-  window.addEventListener('load', makeClickable);
-  setTimeout(makeClickable, 200);
-  setTimeout(makeClickable, 800);
-})();
-
-window.CH_RemoveHSGroup = function(){};
-window.CH_changeButton = function(){};
-window.BY_showAllSubElementIcons = function(){};
-window.XN_MinPopH = function(id){ var e = document.getElementById(id); if (e) e.style.display = 'none'; };
-window.XN_MaxPopH = function(id){ var e = document.getElementById(id); if (e) e.style.display = ''; };
-window.CH_delHandS = function(){};
-window.CH_showIcon = function(){};
-";
-
+        window.__readerRedAnswersVisible = false;
+        window.__readerNotesVisible = false;
+        window.__redAnswerOriginalDisplay = new WeakMap();
+        
+        function rememberDisplay(el){
+          if (!window.__redAnswerOriginalDisplay.has(el)) {
+            window.__redAnswerOriginalDisplay.set(el, el.style.display || '');
+          }
+        }
+        
+        window.__toggleByName = function(lid, turnOn){
+          if (!lid) return 0;
+          if (turnOn) {
+            var rp = document.querySelector('pane.redAnswer');
+            if (rp && rp.style.display === 'none') rp.style.display = '';
+          }
+          var hits = document.querySelectorAll('[name=""' + lid + '""]');
+          for (var i = 0; i < hits.length; i++) {
+            var el = hits[i];
+            var target = null;
+            var p = el.parentElement;
+            while (p && p !== document.body) {
+              var cls = (p.className || '') + '';
+              if (cls.indexOf('tbnote') !== -1 || cls.indexOf('tbred') !== -1) { target = p; break; }
+              p = p.parentElement;
+            }
+            if (!target && el.parentElement) {
+              var pcls = (el.parentElement.className || '') + '';
+              if (pcls.indexOf('tbnote') !== -1 || pcls.indexOf('tbred') !== -1) target = el.parentElement;
+            }
+            if (!target) target = el;
+            rememberDisplay(target);
+            target.style.display = turnOn ? '' : 'none';
+          }
+          return hits.length;
+        };
+        
+        window.__setRedAnswers = function(show){
+          window.__readerRedAnswersVisible = !!show;
+          document.querySelectorAll('img.redbtn, img.has2btn, img.hsgbtn').forEach(function(b){
+            if (b.getAttribute('redanswertype') === 'teacherNotes') return;
+            rememberDisplay(b);
+            if (show) { b.classList.remove('hideBtn'); if (b.style.display === 'none') b.style.display = ''; }
+            else { b.classList.add('hideBtn'); b.style.display = 'none'; }
+          });
+          var rp = document.querySelector('pane.redAnswer');
+          if (rp) {
+            rememberDisplay(rp);
+            if (show) { if (rp.style.display === 'none') rp.style.display = ''; }
+            else rp.style.display = 'none';
+          }
+          if (!show) {
+            document.querySelectorAll('svg.tbred, .tbred, has2').forEach(function(el){
+              var tn = el.closest ? el.closest('hsg[redanswertype=""teacherNotes""]') : null;
+              if (tn) return;
+              var target = el;
+              var p = el.parentElement;
+              while (p && p !== document.body) {
+                var cls = (p.className || '') + '';
+                if (cls.indexOf('tbnote') !== -1 || cls.indexOf('tbred') !== -1) { target = p; break; }
+                p = p.parentElement;
+              }
+              rememberDisplay(target); target.style.display = 'none';
+            });
+            document.querySelectorAll('hsg').forEach(function(h){
+              if (h.getAttribute('redanswertype') === 'teacherNotes') return;
+              h.setAttribute('on', 'false');
+            });
+          }
+        };
+        
+        window.__setNotes = function(show){
+          window.__readerNotesVisible = !!show;
+          if (show) {
+            var rp = document.querySelector('pane.redAnswer');
+            if (rp && rp.style.display === 'none') rp.style.display = '';
+          }
+          document.querySelectorAll('hsg[redanswertype=""teacherNotes""]').forEach(function(g){
+            var turnOn = !!show;
+            g.setAttribute('on', turnOn ? 'true' : 'false');
+            g.querySelectorAll('hastext[linkname]').forEach(function(h){
+              var lid = h.getAttribute('linkname');
+              if (lid) window.__toggleByName(lid, turnOn);
+            });
+          });
+        };
+        
+        window.CH_toggleHSG = function(id){
+          var g = document.getElementById(id);
+          if (!g) return;
+          var isOn = g.getAttribute('on') === 'true';
+          var turnOn = !isOn;
+          g.setAttribute('on', turnOn ? 'true' : 'false');
+          if (turnOn) {
+            var rp = document.querySelector('pane.redAnswer');
+            if (rp && rp.style.display === 'none') rp.style.display = '';
+          }
+          g.querySelectorAll('hastext[linkname]').forEach(function(h){
+            var lid = h.getAttribute('linkname');
+            if (lid) window.__toggleByName(lid, turnOn);
+          });
+          var img = document.getElementById(id + '_img');
+          if (img) {
+            var src = img.getAttribute('src') || '';
+            img.setAttribute('src', turnOn
+              ? src.replace('redlayerAll.svg','redlayerNone.svg').replace('teacherNotes.svg','teacherNotes_o.svg')
+              : src.replace('redlayerNone.svg','redlayerAll.svg').replace('teacherNotes_o.svg','teacherNotes.svg'));
+          }
+        };
+        
+        window.XN_toggleHands = function(id){
+          var btn = document.getElementById(id);
+          var isOn = btn && btn.getAttribute('data-on') === 'true';
+          var turnOn = !isOn;
+          if (btn) btn.setAttribute('data-on', turnOn ? 'true' : 'false');
+          window.__toggleByName(id, turnOn);
+        };
+        
+        window.XN_toggleRedLayers = function(id){
+          var btn = document.getElementById(id);
+          var isOn = btn && btn.getAttribute('data-on') === 'true';
+          var turnOn = !isOn;
+          if (btn) btn.setAttribute('data-on', turnOn ? 'true' : 'false');
+          window.__toggleByName(id, turnOn);
+        };
+        
+        (function(){
+          function makeClickable(){
+            document.querySelectorAll('img.redbtn, img.has2btn, img.hsgbtn').forEach(function(b){
+              b.classList.remove('hideBtn');
+              b.style.display = '';
+              b.style.pointerEvents = 'auto';
+              b.style.cursor = 'pointer';
+              b.style.zIndex = '9999';
+            });
+          }
+          makeClickable();
+          if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', makeClickable);
+          window.addEventListener('load', makeClickable);
+          setTimeout(makeClickable, 200);
+          setTimeout(makeClickable, 800);
+        })();
+        
+        window.CH_RemoveHSGroup = function(){};
+        window.CH_changeButton = function(){};
+        window.BY_showAllSubElementIcons = function(){};
+        window.XN_MinPopH = function(id){ var e = document.getElementById(id); if (e) e.style.display = 'none'; };
+        window.XN_MaxPopH = function(id){ var e = document.getElementById(id); if (e) e.style.display = ''; };
+        window.CH_delHandS = function(){};
+        window.CH_showIcon = function(){};
+        ";
         private string GetLogFilePath()
         {
             if (string.IsNullOrEmpty(_logFilePath))
