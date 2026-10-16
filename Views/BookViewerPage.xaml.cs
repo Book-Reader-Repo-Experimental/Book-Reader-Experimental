@@ -226,32 +226,33 @@ public partial class BookViewerPage : ContentPage
 
             if (host == "splitpane-open")
             {
-                var bookUid = q["bookUID"];
-                var section = q["section"] ?? "";
-                var unit = q["unit"] ?? "";
-                var stepStr = q["step"] ?? "";
-
+                var bookUid  = q["bookUID"] ?? "";
+                var section  = q["section"] ?? "";
+                var unit     = q["unit"]    ?? "";
+                var stepStr  = q["step"]    ?? "";
+                var pageStr  = q["page"]    ?? "";
+            
                 if (string.IsNullOrEmpty(section) && !string.IsNullOrEmpty(unit))
                     section = unit;
-
-                int step = 0;
-                int.TryParse(stepStr, out step);
-
-                Log($"splitpane-open bookUID='{bookUid}' section='{section}' unit='{unit}' step='{step}'");
-
+            
+                int step = 0;     int.TryParse(stepStr, out step);
+                int pageNum = 0;  int.TryParse(pageStr, out pageNum);
+            
+                Log($"splitpane-open bookUID='{bookUid}' section='{section}' unit='{unit}' step='{step}' page='{pageNum}'");
+            
                 if (string.IsNullOrEmpty(bookUid)) return;
-
+            
                 var targetFolder = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
                     "BookViewer", "Books", "book_" + bookUid);
-
+            
                 if (!Directory.Exists(targetFolder))
                 {
                     await DisplayAlert("Not found", $"Book folder not found:\nbook_{bookUid}", "OK");
                     return;
                 }
-
-                var viewer = new BookViewerPage(targetFolder, section, step, 0);
+            
+                var viewer = new BookViewerPage(targetFolder, section, step, pageNum);
                 await Navigation.PushAsync(viewer);
             }
             else if (host == "assessment-open")
