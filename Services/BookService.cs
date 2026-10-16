@@ -26,6 +26,7 @@ namespace BookViewer
         private string _nextPageHtml = "";
         private double _currentZoom = 1.0;
         private string _tempFolder = "";
+        private string _lastFontCss = "";
 
         private bool _showTeacherNotes = false;
         private bool _showStudentAnswers = false;
@@ -74,14 +75,6 @@ tohide, tohide *, splitpane tohide, splitpane tohide * {
     visibility: hidden !important;
 }
 .btn_h, .btn_h_m { display: none !important; }
-
-/* Teacher-note toggle buttons render red */
-img.redbtn[redanswertype='teacherNotes'],
-img.hsgbtn[redanswertype='teacherNotes'],
-img.has2btn[redanswertype='teacherNotes'] {
-    filter: invert(15%) sepia(99%) saturate(7000%) hue-rotate(315deg) brightness(90%) contrast(120%);
-    -webkit-filter: invert(15%) sepia(99%) saturate(7000%) hue-rotate(315deg) brightness(90%) contrast(120%);
-}
 ";
 
         private const string ReaderJsTemplate = @"
@@ -110,13 +103,41 @@ img.has2btn[redanswertype='teacherNotes'] {
         
         window.__toggleByName = function(lid, turnOn){
           if (!lid) return 0;
+
           if (turnOn) {
             var rp = document.querySelector('pane.redAnswer');
             if (rp && rp.style.display === 'none') rp.style.display = '';
           }
-          var hits = document.querySelectorAll('[name=""' + lid + '""]');
+
+          var hits = document.querySelectorAll(
+            '[name=""' + lid + '""], [linkname=""' + lid + '""]');
+
+          if (hits.length === 0) {
+            var byId = document.getElementById(lid);
+            if (byId) hits = [byId];
+          }
+
           for (var i = 0; i < hits.length; i++) {
             var el = hits[i];
+
+            var isToggleButton = el.tagName &&
+              el.tagName.toLowerCase() === 'img' &&
+              (el.classList.contains('redbtn') ||
+               el.classList.contains('hsgbtn') ||
+               el.classList.contains('has2btn'));
+
+            if (isToggleButton) {
+              rememberDisplay(el);
+              if (turnOn) {
+                el.classList.remove('hideBtn');
+                if (el.style.display === 'none') el.style.display = '';
+              } else {
+                el.classList.add('hideBtn');
+                el.style.display = 'none';
+              }
+              continue;
+            }
+
             var target = null;
             var p = el.parentElement;
             while (p && p !== document.body) {
@@ -137,18 +158,22 @@ img.has2btn[redanswertype='teacherNotes'] {
         
         window.__setRedAnswers = function(show){
           window.__readerRedAnswersVisible = !!show;
+
           document.querySelectorAll('img.redbtn, img.has2btn, img.hsgbtn').forEach(function(b){
-            if (b.getAttribute('redanswertype') === 'teacherNotes') return;
+            var t = (b.getAttribute('redanswertype') || b.getAttribute('redAnswerType') || '').toLowerCase();
+            if (t === 'teachernotes') return;
             rememberDisplay(b);
             if (show) { b.classList.remove('hideBtn'); if (b.style.display === 'none') b.style.display = ''; }
             else { b.classList.add('hideBtn'); b.style.display = 'none'; }
           });
+
           var rp = document.querySelector('pane.redAnswer');
           if (rp) {
             rememberDisplay(rp);
             if (show) { if (rp.style.display === 'none') rp.style.display = ''; }
             else rp.style.display = 'none';
           }
+
           if (!show) {
             document.querySelectorAll('svg.tbred, .tbred, has2').forEach(function(el){
               var tn = el.closest ? el.closest('hsg[redanswertype=""teacherNotes""]') : null;
@@ -163,25 +188,47 @@ img.has2btn[redanswertype='teacherNotes'] {
               rememberDisplay(target); target.style.display = 'none';
             });
             document.querySelectorAll('hsg').forEach(function(h){
-              if (h.getAttribute('redanswertype') === 'teacherNotes') return;
+              var t = (h.getAttribute('redanswertype') || h.getAttribute('redAnswerType') || '').toLowerCase();
+              if (t === 'teachernotes') return;
               h.setAttribute('on', 'false');
+            });
+          }
+
+          if (show) {
+            document.querySelectorAll('img.redbtn[linkname], img.hsgbtn[linkname], img.has2btn[linkname]').forEach(function(b){
+              var t = (b.getAttribute('redanswertype') || b.getAttribute('redAnswerType') || '').toLowerCase();
+              if (t === 'teachernotes') return;
+              var lid = b.getAttribute('linkname');
+              if (lid) window.__toggleByName(lid, true);
             });
           }
         };
         
         window.__setNotes = function(show){
           window.__readerNotesVisible = !!show;
+
           if (show) {
             var rp = document.querySelector('pane.redAnswer');
             if (rp && rp.style.display === 'none') rp.style.display = '';
           }
-          document.querySelectorAll('hsg[redanswertype=""teacherNotes""]').forEach(function(g){
+
+          document.querySelectorAll('hsg').forEach(function(g){
+            var t = (g.getAttribute('redanswertype') || g.getAttribute('redAnswerType') || '').toLowerCase();
+            if (t !== 'teachernotes') return;
             var turnOn = !!show;
             g.setAttribute('on', turnOn ? 'true' : 'false');
             g.querySelectorAll('hastext[linkname]').forEach(function(h){
               var lid = h.getAttribute('linkname');
               if (lid) window.__toggleByName(lid, turnOn);
             });
+          });
+
+          document.querySelectorAll(
+            'img.redbtn[linkname], img.hsgbtn[linkname], img.has2btn[linkname]').forEach(function(b){
+            var t = (b.getAttribute('redanswertype') || b.getAttribute('redAnswerType') || '').toLowerCase();
+            if (t !== 'teachernotes') return;
+            var lid = b.getAttribute('linkname') || b.id;
+            if (lid) window.__toggleByName(lid, show);
           });
         };
         
@@ -612,6 +659,7 @@ img.has2btn[redanswertype='teacherNotes'] {
                 _currentBookPath = folderPath;
                 _assetCache.Clear();
                 _fontCache.Clear();
+                _lastFontCss = "";
 
                 _tempFolder = Path.Combine(FileSystem.CacheDirectory, "BookViewer", $"temp_{Guid.NewGuid().ToString().Substring(0, 8)}");
                 Directory.CreateDirectory(_tempFolder);
@@ -888,9 +936,10 @@ img.has2btn[redanswertype='teacherNotes'] {
         }
 
         /// <summary>
-        /// Builds a single HTML document that displays the current page and the
-        /// next page side by side, scrolling as one unit. Each page is embedded
-        /// in its own iframe (via srcdoc) so their CSS and JS cannot collide.
+        /// Merge the current page and the next page into a single HTML document
+        /// side by side. Both pages' CSS is scoped so they don't fight, and the
+        /// shared font CSS is emitted once. No iframes, no srcdoc, no attribute
+        /// encoding — the document loads much faster than the previous version.
         /// </summary>
         public Task<string> BuildTwoPageHtmlAsync()
         {
@@ -900,10 +949,7 @@ img.has2btn[redanswertype='teacherNotes'] {
             if (!_twoPageSpread || _currentPageIndex + 1 >= _pageFiles.Count)
                 return Task.FromResult(_currentPageHtml);
 
-            string leftHtml = _currentPageHtml;
-            string rightHtml = _nextPageHtml;
-
-            if (string.IsNullOrEmpty(rightHtml))
+            if (string.IsNullOrEmpty(_nextPageHtml))
                 return Task.FromResult(_currentPageHtml);
 
             string ExtractBody(string html)
@@ -917,68 +963,89 @@ img.has2btn[redanswertype='teacherNotes'] {
             {
                 if (string.IsNullOrEmpty(html)) return "";
                 var sb = new StringBuilder();
-                foreach (Match m in Regex.Matches(html, @"<style[^>]*>[\s\S]*?</style>", RegexOptions.IgnoreCase))
-                    sb.AppendLine(m.Value);
+                foreach (Match m in Regex.Matches(html, @"<style[^>]*>([\s\S]*?)</style>", RegexOptions.IgnoreCase))
+                    sb.AppendLine(m.Groups[1].Value);
                 return sb.ToString();
             }
 
-            string ExtractScripts(string html)
+            // Remove @font-face blocks so the shared font CSS emitted once isn't duplicated.
+            string StripFontFaces(string css)
             {
-                if (string.IsNullOrEmpty(html)) return "";
+                if (string.IsNullOrEmpty(css)) return "";
+                return Regex.Replace(css, @"@font-face\s*\{[^}]*\}", "", RegexOptions.IgnoreCase);
+            }
+
+            // Scope plain CSS rules so left/right pages don't collide. @-rules pass through.
+            string Scope(string css, string scope)
+            {
+                if (string.IsNullOrEmpty(css)) return "";
                 var sb = new StringBuilder();
-                foreach (Match m in Regex.Matches(html, @"<script[^>]*>[\s\S]*?</script>", RegexOptions.IgnoreCase))
-                    sb.AppendLine(m.Value);
+                foreach (var line in css.Split('\n'))
+                {
+                    var t = line.TrimEnd();
+                    if (t.Length == 0) { sb.Append('\n'); continue; }
+                    var trimmed = t.TrimStart();
+                    if (trimmed.StartsWith("@")) { sb.Append(t).Append('\n'); continue; }
+                    if (trimmed.StartsWith("/*")) { sb.Append(t).Append('\n'); continue; }
+
+                    var brace = t.IndexOf('{');
+                    if (brace < 0) { sb.Append(t).Append('\n'); continue; }
+
+                    var sel = t.Substring(0, brace).Trim();
+                    var rest = t.Substring(brace);
+                    if (string.IsNullOrEmpty(sel)) { sb.Append(t).Append('\n'); continue; }
+
+                    var newSel = string.Join(",", sel.Split(',')
+                        .Select(s => scope + " " + s.Trim())
+                        .Where(s => s.Length > scope.Length + 1));
+                    sb.Append(newSel).Append(' ').Append(rest).Append('\n');
+                }
                 return sb.ToString();
             }
 
-            string Wrap(string html)
-            {
-                return "<!DOCTYPE html><html><head><meta charset='UTF-8'>" +
-                       "<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes'>" +
-                       ExtractStyles(html) +
-                       "</head><body>" +
-                       ExtractBody(html) +
-                       ExtractScripts(html) +
-                       "</body></html>";
-            }
+            string leftBody = ExtractBody(_currentPageHtml);
+            string rightBody = ExtractBody(_nextPageHtml);
 
-            string leftWrapped = Wrap(leftHtml);
-            string rightWrapped = Wrap(rightHtml);
+            string leftCssRaw = ExtractStyles(_currentPageHtml);
+            string rightCssRaw = ExtractStyles(_nextPageHtml);
+
+            string leftCss = Scope(StripFontFaces(leftCssRaw), ".page-left");
+            string rightCss = Scope(StripFontFaces(rightCssRaw), ".page-right");
+
+            // Overlay CSS and the reader JS must live outside the scopes.
+            string overlayCss = OverlayCssTemplate;
 
             string surround = SurroundColor;
             string zoom = _currentZoom.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-            var sb = new StringBuilder();
+            var sb = new StringBuilder(leftBody.Length + rightBody.Length + leftCss.Length + rightCss.Length + _lastFontCss.Length + overlayCss.Length + ReaderJsTemplate.Length + 4096);
+
             sb.Append("<!DOCTYPE html><html><head><meta charset='UTF-8'>");
             sb.Append("<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes'>");
             sb.Append("<style>");
-            sb.Append("html,body{margin:0;padding:0;background:").Append(surround).Append(";}");
+            // Shared font CSS (with @font-face) once
+            sb.Append(_lastFontCss);
+            // Overlay CSS once
+            sb.Append(overlayCss);
+            // Outer layout
+            sb.Append("html,body{margin:0;padding:0;background:").Append(surround).Append(";overflow:auto;}");
             sb.Append("body{display:flex;justify-content:center;align-items:flex-start;min-height:100vh;}");
             sb.Append(".pair{display:flex;gap:8px;transform-origin:top center;transform:scale(").Append(zoom).Append(");}");
-            sb.Append(".page-frame{border:0;background:#fff;box-shadow:0 0 20px rgba(0,0,0,0.15);display:block;}");
+            sb.Append(".page-left,.page-right{position:relative;flex-shrink:0;background:#fff;box-shadow:0 0 20px rgba(0,0,0,0.15);overflow:hidden;width:").Append(CurrentPageWidth).Append("px;height:").Append(CurrentPageHeight).Append("px;}");
+            // Scoped page CSS
+            sb.Append(leftCss);
+            sb.Append(rightCss);
             sb.Append("</style></head><body>");
             sb.Append("<div class='pair'>");
-            sb.Append("<iframe class='page-frame' scrolling='no' style='width:").Append(CurrentPageWidth).Append("px;height:").Append(CurrentPageHeight).Append("px;' srcdoc=\"")
-              .Append(HtmlAttributeEncode(leftWrapped)).Append("\"></iframe>");
-            sb.Append("<iframe class='page-frame' scrolling='no' style='width:").Append(CurrentPageWidth).Append("px;height:").Append(CurrentPageHeight).Append("px;' srcdoc=\"")
-              .Append(HtmlAttributeEncode(rightWrapped)).Append("\"></iframe>");
-            sb.Append("</div></body></html>");
+            sb.Append("<div class='page-left'>").Append(leftBody).Append("</div>");
+            sb.Append("<div class='page-right'>").Append(rightBody).Append("</div>");
+            sb.Append("</div>");
+            sb.Append("<script>").Append(ReaderJsTemplate).Append("</script>");
+            sb.Append("</body></html>");
 
             return Task.FromResult(sb.ToString());
         }
 
-        private static string HtmlAttributeEncode(string s)
-        {
-            if (string.IsNullOrEmpty(s)) return "";
-            return s.Replace("&", "&amp;")
-                    .Replace("\"", "&quot;")
-                    .Replace("<", "&lt;")
-                    .Replace(">", "&gt;");
-        }
-
-        /// <summary>
-        /// Find a page by (section identifier, step number).
-        /// </summary>
         public int FindPageIndex(string section, int step)
         {
             if (step <= 0) return -1;
@@ -1143,10 +1210,17 @@ img.has2btn[redanswertype='teacherNotes'] {
 
                 string nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
 
-                string baseHtml = StripAnswerDivs(await ReadIfExists(Path.Combine(directory, nameWithoutExt + "_base.html")));
-                string oriHtml  = StripAnswerDivs(await ReadIfExists(Path.Combine(directory, nameWithoutExt + "_ori.html")));
-                string redHtml  = await ReadIfExists(Path.Combine(directory, nameWithoutExt + "_redAnswer.html"));
+                string redFilePath = Path.Combine(directory, nameWithoutExt + "_redAnswer.html");
+                bool hasRedFile = File.Exists(redFilePath);
+
+                string baseRaw = await ReadIfExists(Path.Combine(directory, nameWithoutExt + "_base.html"));
+                string oriRaw  = await ReadIfExists(Path.Combine(directory, nameWithoutExt + "_ori.html"));
+
+                string baseHtml = hasRedFile ? StripAnswerDivs(baseRaw) : baseRaw;
+                string oriHtml  = hasRedFile ? StripAnswerDivs(oriRaw)  : oriRaw;
+                string redHtml  = await ReadIfExists(redFilePath);
                 string fontCss  = await GetFontCssWithEmbeddedFonts(directory);
+                _lastFontCss = fontCss;
 
                 int pageWidth = 1024, pageHeight = 1344;
                 var rezMatch = Regex.Match(htmlContent,
