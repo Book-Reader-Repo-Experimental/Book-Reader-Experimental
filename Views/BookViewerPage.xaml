@@ -6,170 +6,68 @@
 
     <Grid RowDefinitions="Auto,Auto,*,Auto">
 
-        <!-- ================= NAV BAR ================= -->
         <Grid Grid.Row="0"
               BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}"
-              Padding="8,8"
-              ColumnDefinitions="Auto,*,Auto">
-
-            <Button Grid.Column="0"
-                    Text="‹"
-                    Clicked="OnBackClicked"
-                    Style="{StaticResource IconButton}"
-                    FontSize="24"
-                    Margin="4,0,0,0"/>
-
-            <Label x:Name="BookTitleLabel"
-                   Grid.Column="1"
-                   Text=""
-                   Style="{StaticResource NavTitle}"
-                   HorizontalTextAlignment="Center"
-                   LineBreakMode="TailTruncation"/>
-
+              Padding="8,8" ColumnDefinitions="Auto,*,Auto">
+            <Button Grid.Column="0" Text="‹" Clicked="OnBackClicked" Style="{StaticResource IconButton}" FontSize="24" Margin="4,0,0,0"/>
+            <Label x:Name="BookTitleLabel" Grid.Column="1" Text="" Style="{StaticResource NavTitle}" HorizontalTextAlignment="Center" LineBreakMode="TailTruncation"/>
             <BoxView Grid.Column="2" WidthRequest="40"/>
         </Grid>
 
-        <!-- ================= TOOLBAR ================= -->
-        <ScrollView Grid.Row="1"
-                    Orientation="Horizontal"
-                    HorizontalScrollBarVisibility="Never"
+        <ScrollView Grid.Row="1" Orientation="Horizontal" HorizontalScrollBarVisibility="Never"
                     BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}">
             <HorizontalStackLayout Padding="12,4,12,10" Spacing="8">
 
-                <!-- Navigation group -->
-                <Button x:Name="PrevButton"
-                        Text="‹"
-                        Clicked="OnPrevClicked"
-                        Style="{StaticResource IconButton}"
-                        FontSize="22"
-                        IsEnabled="False"/>
+                <Button x:Name="PrevButton" Text="‹" Clicked="OnPrevClicked" Style="{StaticResource IconButton}" FontSize="22" IsEnabled="False"/>
+                <Label x:Name="PageInfoLabel" Text="0 / 0" Style="{StaticResource Caption}" WidthRequest="56" FontSize="12"
+                       HorizontalTextAlignment="Center" VerticalTextAlignment="Center"/>
+                <Button x:Name="NextButton" Text="›" Clicked="OnNextClicked" Style="{StaticResource IconButton}" FontSize="22" IsEnabled="False"/>
 
-                <Label x:Name="PageInfoLabel"
-                       Text="0 / 0"
-                       Style="{StaticResource Caption}"
-                       WidthRequest="56"
-                       FontSize="12"
-                       HorizontalTextAlignment="Center"
-                       VerticalTextAlignment="Center"/>
+                <BoxView WidthRequest="1" HeightRequest="20" Color="{AppThemeBinding Light=#E5E5EA, Dark=#38383A}" VerticalOptions="Center" Margin="4,0"/>
 
-                <Button x:Name="NextButton"
-                        Text="›"
-                        Clicked="OnNextClicked"
-                        Style="{StaticResource IconButton}"
-                        FontSize="22"
-                        IsEnabled="False"/>
+                <Button x:Name="TeacherNotesButton" Text="✎ Notes" Clicked="OnTeacherNotesClicked" Style="{StaticResource TintedChip}" IsEnabled="False"/>
+                <Button x:Name="StudentAnswersButton" Text="✓ Answers" Clicked="OnStudentAnswersClicked" Style="{StaticResource TintedChip}" IsEnabled="False"/>
+                <Button x:Name="GridButton" Text="⊞ Grid" Clicked="OnGridClicked" Style="{StaticResource TintedChip}" IsEnabled="False"/>
+                <Button x:Name="SideBySideButton" Text="▯ 1 Page" Clicked="OnSideBySideClicked" Style="{StaticResource TintedChip}" IsEnabled="False"/>
 
-                <BoxView WidthRequest="1" HeightRequest="20"
-                         Color="{AppThemeBinding Light=#E5E5EA, Dark=#38383A}"
-                         VerticalOptions="Center" Margin="4,0"/>
+                <BoxView WidthRequest="1" HeightRequest="20" Color="{AppThemeBinding Light=#E5E5EA, Dark=#38383A}" VerticalOptions="Center" Margin="4,0"/>
 
-                <!-- View modes -->
-                <Button x:Name="TeacherNotesButton"
-                        Text="✎ Notes"
-                        Clicked="OnTeacherNotesClicked"
-                        Style="{StaticResource TintedChip}"
-                        IsEnabled="False"/>
+                <Button x:Name="DecryptButton" Text="🔒 Decrypt" Clicked="OnDecryptClicked" Style="{StaticResource TintedChip}" IsEnabled="False"/>
+                <Button x:Name="ExportPdfButton" Text="⇪ PDF" Clicked="OnExportPdfClicked" Style="{StaticResource TintedChip}" IsEnabled="False"/>
 
-                <Button x:Name="StudentAnswersButton"
-                        Text="✓ Answers"
-                        Clicked="OnStudentAnswersClicked"
-                        Style="{StaticResource TintedChip}"
-                        IsEnabled="False"/>
+                <BoxView WidthRequest="1" HeightRequest="20" Color="{AppThemeBinding Light=#E5E5EA, Dark=#38383A}" VerticalOptions="Center" Margin="4,0"/>
 
-                <Button x:Name="GridButton"
-                        Text="⊞ Grid"
-                        Clicked="OnGridClicked"
-                        Style="{StaticResource TintedChip}"
-                        IsEnabled="False"/>
-
-                <Button x:Name="SideBySideButton"
-                        Text="▯ 1 Page"
-                        Clicked="OnSideBySideClicked"
-                        Style="{StaticResource TintedChip}"
-                        IsEnabled="False"/>
-
-                <BoxView WidthRequest="1" HeightRequest="20"
-                         Color="{AppThemeBinding Light=#E5E5EA, Dark=#38383A}"
-                         VerticalOptions="Center" Margin="4,0"/>
-
-                <!-- Actions -->
-                <Button x:Name="DecryptButton"
-                        Text="🔒 Decrypt"
-                        Clicked="OnDecryptClicked"
-                        Style="{StaticResource TintedChip}"
-                        IsEnabled="False"/>
-
-                <Button x:Name="ExportPdfButton"
-                        Text="⇪ PDF"
-                        Clicked="OnExportPdfClicked"
-                        Style="{StaticResource TintedChip}"
-                        IsEnabled="False"/>
-
-                <BoxView WidthRequest="1" HeightRequest="20"
-                         Color="{AppThemeBinding Light=#E5E5EA, Dark=#38383A}"
-                         VerticalOptions="Center" Margin="4,0"/>
-
-                <!-- Zoom -->
-                <Frame CornerRadius="18"
-                       HasShadow="False"
+                <Frame CornerRadius="18" HasShadow="False"
                        BackgroundColor="{AppThemeBinding Light={StaticResource Elevated}, Dark={StaticResource ElevatedDark}}"
-                       Padding="2,0"
-                       HeightRequest="36"
-                       VerticalOptions="Center">
+                       Padding="2,0" HeightRequest="36" VerticalOptions="Center">
                     <HorizontalStackLayout Spacing="0">
-                        <Button x:Name="ZoomOutButton"
-                                Text="−"
-                                Clicked="OnZoomOutClicked"
-                                BackgroundColor="Transparent"
+                        <Button x:Name="ZoomOutButton" Text="−" Clicked="OnZoomOutClicked" BackgroundColor="Transparent"
                                 TextColor="{AppThemeBinding Light={StaticResource TextPrimary}, Dark={StaticResource TextPrimaryDark}}"
-                                FontSize="18"
-                                WidthRequest="32"
-                                HeightRequest="32"
-                                Padding="0"
-                                CornerRadius="16"/>
-                        <Label x:Name="ZoomLabel"
-                               Text="1.0x"
-                               Style="{StaticResource Caption}"
-                               WidthRequest="44"
-                               FontSize="12"
-                               HorizontalTextAlignment="Center"
-                               VerticalTextAlignment="Center"/>
-                        <Button x:Name="ZoomInButton"
-                                Text="+"
-                                Clicked="OnZoomInClicked"
-                                BackgroundColor="Transparent"
+                                FontSize="18" WidthRequest="32" HeightRequest="32" Padding="0" CornerRadius="16"/>
+                        <Label x:Name="ZoomLabel" Text="1.0x" Style="{StaticResource Caption}" WidthRequest="44" FontSize="12"
+                               HorizontalTextAlignment="Center" VerticalTextAlignment="Center"/>
+                        <Button x:Name="ZoomInButton" Text="+" Clicked="OnZoomInClicked" BackgroundColor="Transparent"
                                 TextColor="{AppThemeBinding Light={StaticResource TextPrimary}, Dark={StaticResource TextPrimaryDark}}"
-                                FontSize="18"
-                                WidthRequest="32"
-                                HeightRequest="32"
-                                Padding="0"
-                                CornerRadius="16"/>
+                                FontSize="18" WidthRequest="32" HeightRequest="32" Padding="0" CornerRadius="16"/>
                     </HorizontalStackLayout>
                 </Frame>
 
             </HorizontalStackLayout>
         </ScrollView>
 
-        <!-- ================= CONTENT ================= -->
-        <Grid Grid.Row="2"
-              BackgroundColor="{AppThemeBinding Light={StaticResource Canvas}, Dark={StaticResource CanvasDark}}">
+        <Grid Grid.Row="2" BackgroundColor="{AppThemeBinding Light={StaticResource Canvas}, Dark={StaticResource CanvasDark}}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition x:Name="LeftColumn" Width="*"/>
                 <ColumnDefinition x:Name="RightColumn" Width="0"/>
             </Grid.ColumnDefinitions>
-
             <WebView x:Name="ContentWebView" Grid.Column="0"/>
             <WebView x:Name="NextPageWebView" Grid.Column="1" IsVisible="False"/>
         </Grid>
 
-        <!-- ================= STATUS ================= -->
         <Grid Grid.Row="3"
               BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}"
               Padding="20,8">
-            <Label x:Name="StatusLabel"
-                   Text=""
-                   Style="{StaticResource Caption}"
-                   LineBreakMode="TailTruncation"/>
+            <Label x:Name="StatusLabel" Text="" Style="{StaticResource Caption}" LineBreakMode="TailTruncation"/>
         </Grid>
     </Grid>
 </ContentPage>
