@@ -1,12 +1,8 @@
 using Microsoft.Maui.Controls;
 using Microsoft.Maui.Storage;
 using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Text;
-using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using System.Xml;
 using Color = Microsoft.Maui.Graphics.Color;
 
 namespace BookViewer.Views;
@@ -17,17 +13,12 @@ public partial class BookViewerPage : ContentPage
     private bool _showTeacherNotes = false;
     private bool _showStudentAnswers = false;
     private string _currentContentHtml = "";
-    private string _currentTeacherFragment = "";
-    private string _currentStudentFragment = "";
     private bool _bookLoaded = false;
     private int _startFolio = 1;
     private string _targetSectionId = "";
 
     private static readonly object _logLock = new object();
     private static string _logFilePath = "";
-
-    private static string SurroundColor =>
-        Application.Current?.RequestedTheme == AppTheme.Dark ? "#1C1C1E" : "#E8E8E8";
 
     private string GetLogFilePath()
     {
@@ -36,9 +27,7 @@ public partial class BookViewerPage : ContentPage
             string documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
             string logFolder = Path.Combine(documentsPath, "BookViewer");
             if (!Directory.Exists(logFolder))
-            {
                 Directory.CreateDirectory(logFolder);
-            }
             _logFilePath = Path.Combine(logFolder, $"BookViewerPage_{DateTime.Now:yyyyMMdd_HHmmss}.log");
         }
         return _logFilePath;
@@ -49,27 +38,15 @@ public partial class BookViewerPage : ContentPage
         try
         {
             string logMessage = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} - {message}";
-            string logFile = GetLogFilePath();
-
-            lock (_logLock)
-            {
-                File.AppendAllText(logFile, logMessage + Environment.NewLine);
-            }
-
+            lock (_logLock) File.AppendAllText(GetLogFilePath(), logMessage + Environment.NewLine);
             System.Diagnostics.Debug.WriteLine(logMessage);
-
-            if (message.Length < 80)
+            Dispatcher.Dispatch(() =>
             {
-                Dispatcher.Dispatch(() => StatusLabel.Text = message);
-            }
-            else
-            {
-                Dispatcher.Dispatch(() => StatusLabel.Text = message.Substring(0, 77) + "...");
-            }
+                if (StatusLabel != null)
+                    StatusLabel.Text = message.Length < 80 ? message : message.Substring(0, 77) + "...";
+            });
         }
-        catch
-        {
-        }
+        catch { }
     }
 
     public BookViewerPage(string bookFolder, int startFolio)
@@ -82,55 +59,46 @@ public partial class BookViewerPage : ContentPage
         Log("=== BOOK VIEWER PAGE INITIALIZED ===");
         Log($"Book folder: {bookFolder}");
         Log($"Start folio: {_startFolio}");
-        Log($"Log file: {GetLogFilePath()}");
 
-        _bookService.OnPagesLoaded += (s, pages) =>
-        {
-            Dispatcher.Dispatch(() => UpdateUI());
-        };
+        _bookService.OnPagesLoaded += (s, pages) => Dispatcher.Dispatch(UpdateUI);
 
         _bookService.OnPageChanged += (s, content) =>
         {
             Dispatcher.Dispatch(() =>
             {
                 _currentContentHtml = content;
-                UpdateDisplay();
+                ContentWebView.Source = new HtmlWebViewSource { Html = content };
+                ContentWebView.IsVisible = true;
                 UpdateUI();
             });
         };
 
         _bookService.OnStatusChanged += (s, msg) =>
-            Dispatcher.Dispatch(() => StatusLabel.Text = msg);
+            Dispatcher.Dispatch(() => { if (StatusLabel != null) StatusLabel.Text = msg; });
 
         _bookService.OnBookLoaded += (s, title) =>
-            Dispatcher.Dispatch(() => BookTitleLabel.Text = title);
+            Dispatcher.Dispatch(() => { if (BookTitleLabel != null) BookTitleLabel.Text = title; });
 
         _bookService.OnTwoPageSpreadToggled += (s, enabled) =>
         {
             Dispatcher.Dispatch(() =>
             {
                 bool dark = Application.Current?.RequestedTheme == AppTheme.Dark;
-
                 SideBySideButton.Text = enabled ? "▮▮ 2 Pages" : "▯ 1 Page";
                 SideBySideButton.BackgroundColor = enabled
                     ? Color.FromArgb("#0A84FF")
                     : (dark ? Color.FromArgb("#2C2C2E") : Color.FromArgb("#F7F7F9"));
-                SideBySideButton.TextColor = enabled
-                    ? Colors.White
-                    : (dark ? Colors.White : Colors.Black);
-
-                StatusLabel.Text = enabled ? "Two-page spread" : "Single page";
-                UpdateDisplay();
+                SideBySideButton.TextColor = enabled ? Colors.White : (dark ? Colors.White : Colors.Black);
+                if (StatusLabel != null)
+                    StatusLabel.Text = enabled ? "Two-page spread" : "Single page";
+                UpdateTwoPageLayout();
             });
         };
 
-        _bookService.OnSideBySideToggled += (s, enabled) =>
-        {
-            Dispatcher.Dispatch(() => UpdateDisplay());
-        };
+        _bookService.OnSideBySideToggled += (s, enabled) => Dispatcher.Dispatch(UpdateTwoPageLayout);
 
         _bookService.OnZoomChanged += (s, zoom) =>
-            Dispatcher.Dispatch(() => ZoomLabel.Text = $"{zoom:F1}x");
+            Dispatcher.Dispatch(() => { if (ZoomLabel != null) ZoomLabel.Text = $"{zoom:F1}x"; });
 
         Loaded += async (s, e) =>
         {
@@ -171,18 +139,14 @@ public partial class BookViewerPage : ContentPage
                     }
 
                     if (idx >= 0 && idx < _bookService.PageFiles.Count)
-                    {
                         await _bookService.LoadPageAsync(idx);
-                    }
                 }
                 else if (_startFolio > 0)
                 {
                     int idx = _bookService.GetIndexForFolio(_startFolio);
                     if (idx < 0) idx = _startFolio - 1;
                     if (idx >= 0 && idx < _bookService.PageFiles.Count)
-                    {
                         await _bookService.LoadPageAsync(idx);
-                    }
                 }
             }
             else
@@ -198,7 +162,10 @@ public partial class BookViewerPage : ContentPage
         _targetSectionId = sectionId;
     }
 
-    private void UpdateDisplay()
+    // ============================================================
+    // Two-page layout (still supported via the right column)
+    // ============================================================
+    private void UpdateTwoPageLayout()
     {
         bool isTwoPage = _bookService.TwoPageSpread;
 
@@ -210,28 +177,35 @@ public partial class BookViewerPage : ContentPage
             ContentWebView.IsVisible = true;
 
             if (!string.IsNullOrEmpty(_bookService.NextPageHtml))
-            {
                 NextPageWebView.Source = new HtmlWebViewSource { Html = _bookService.NextPageHtml };
-            }
             else
-            {
-                NextPageWebView.Source = new HtmlWebViewSource { Html = $"<html><body style='background:{SurroundColor};'></body></html>" };
-            }
+                NextPageWebView.Source = new HtmlWebViewSource { Html = "<html><body style='background:#E8E8E8;'></body></html>" };
             NextPageWebView.IsVisible = true;
-
-            TeacherWebView.IsVisible = false;
-            StudentWebView.IsVisible = false;
         }
         else
         {
             RightColumn.Width = new GridLength(0);
             NextPageWebView.IsVisible = false;
-
             ContentWebView.Source = new HtmlWebViewSource { Html = _currentContentHtml };
             ContentWebView.IsVisible = true;
-            TeacherWebView.IsVisible = false;
-            StudentWebView.IsVisible = false;
         }
+    }
+
+    // ============================================================
+    // Toolbar handlers
+    // ============================================================
+    private void OnTeacherNotesClicked(object sender, EventArgs e)
+    {
+        _showTeacherNotes = !_showTeacherNotes;
+        _bookService.ShowAllTeacherNotes(_showTeacherNotes);
+        UpdateTeacherButton();
+    }
+
+    private void OnStudentAnswersClicked(object sender, EventArgs e)
+    {
+        _showStudentAnswers = !_showStudentAnswers;
+        _bookService.ShowAllStudentAnswers(_showStudentAnswers);
+        UpdateStudentButton();
     }
 
     private void UpdateTeacherButton()
@@ -256,26 +230,8 @@ public partial class BookViewerPage : ContentPage
         StudentAnswersButton.TextColor = _showStudentAnswers ? Colors.White : (dark ? Colors.White : Colors.Black);
     }
 
-    private void OnTeacherNotesClicked(object sender, EventArgs e)
-    {
-        _showTeacherNotes = !_showTeacherNotes;
-        _bookService.ShowAllTeacherNotes(_showTeacherNotes);
-        UpdateTeacherButton();
-        StatusLabel.Text = _showTeacherNotes ? "Notes ON" : "Notes OFF";
-    }
-
-    private void OnStudentAnswersClicked(object sender, EventArgs e)
-    {
-        _showStudentAnswers = !_showStudentAnswers;
-        _bookService.ShowAllStudentAnswers(_showStudentAnswers);
-        UpdateStudentButton();
-        StatusLabel.Text = _showStudentAnswers ? "Answers ON" : "Answers OFF";
-    }
-
     private async void OnBackClicked(object sender, EventArgs e)
-    {
-        await Navigation.PopAsync();
-    }
+        => await Navigation.PopAsync();
 
     private async void OnExportPdfClicked(object sender, EventArgs e)
     {
@@ -287,22 +243,15 @@ public partial class BookViewerPage : ContentPage
 
         try
         {
-            var includeAnswers = await DisplayAlert("Export Options",
-                "Include answers in the PDF?",
-                "Yes", "No");
-
+            var includeAnswers = await DisplayAlert("Export Options", "Include answers in the PDF?", "Yes", "No");
             bool includeTeacherNotes = false;
             bool includeStudentAnswers = false;
 
             if (includeAnswers)
             {
-                includeTeacherNotes = await DisplayAlert("Answer Type",
-                    "Include Teacher Notes?", "Yes", "No");
-                includeStudentAnswers = await DisplayAlert("Answer Type",
-                    "Include Student Answers?", "Yes", "No");
-
-                if (!includeTeacherNotes && !includeStudentAnswers)
-                    includeAnswers = false;
+                includeTeacherNotes = await DisplayAlert("Answer Type", "Include Teacher Notes?", "Yes", "No");
+                includeStudentAnswers = await DisplayAlert("Answer Type", "Include Student Answers?", "Yes", "No");
+                if (!includeTeacherNotes && !includeStudentAnswers) includeAnswers = false;
             }
 
             var bookTitle = _bookService.BookTitle;
@@ -319,18 +268,18 @@ public partial class BookViewerPage : ContentPage
 
             pdfService.RenderPageToImageAsync = async (html) =>
             {
-            #if IOS
+#if IOS
                 return await BookViewer.Platforms.iOS.WebViewCapture.CaptureHtmlAsync(html, 1024, 1309);
-            #elif MACCATALYST
+#elif MACCATALYST
                 return await BookViewer.Platforms.MacCatalyst.WebViewCapture.CaptureHtmlAsync(html, 1024, 1309);
-            #elif ANDROID
+#elif ANDROID
                 return await BookViewer.Platforms.Android.WebViewCapture.CaptureHtmlAsync(html, 1024, 1309);
-            #elif WINDOWS
+#elif WINDOWS
                 return await BookViewer.Platforms.Windows.WebViewCapture.CaptureHtmlAsync(html, 1024, 1309);
-            #else
+#else
                 await Task.CompletedTask;
                 return null;
-            #endif
+#endif
             };
 
             pdfService.OnProgress += (s, progress) =>
@@ -341,15 +290,13 @@ public partial class BookViewerPage : ContentPage
             pdfService.OnError += (s, error) => tcs.TrySetException(new Exception(error));
 
             await pdfService.ExportBookAsPdfAsync(outputPath, includeAnswers, includeTeacherNotes, includeStudentAnswers);
-
             var resultPath = await tcs.Task;
 
             ExportPdfButton.IsEnabled = true;
             StatusLabel.Text = "PDF export complete!";
 
             var openNow = await DisplayAlert("Export Complete",
-                $"PDF saved to:\n{resultPath}\n\nOpen it now?",
-                "Open", "Later");
+                $"PDF saved to:\n{resultPath}\n\nOpen it now?", "Open", "Later");
 
             if (openNow)
             {
@@ -376,10 +323,7 @@ public partial class BookViewerPage : ContentPage
             _bookService.CurrentPageIndex,
             (pageIndex) =>
             {
-                Dispatcher.Dispatch(async () =>
-                {
-                    await _bookService.LoadPageAsync(pageIndex);
-                });
+                Dispatcher.Dispatch(async () => await _bookService.LoadPageAsync(pageIndex));
             });
 
         await Navigation.PushAsync(gridPage);
@@ -414,10 +358,7 @@ public partial class BookViewerPage : ContentPage
             else if (_bookService.CurrentPageIndex > 0)
                 _ = _bookService.LoadPageAsync(0);
         }
-        else
-        {
-            _bookService.NavigatePrevious();
-        }
+        else _bookService.NavigatePrevious();
     }
 
     private void OnNextClicked(object sender, EventArgs e)
@@ -430,26 +371,14 @@ public partial class BookViewerPage : ContentPage
             else if (_bookService.CurrentPageIndex < _bookService.PageFiles.Count - 1)
                 _ = _bookService.LoadPageAsync(_bookService.PageFiles.Count - 1);
         }
-        else
-        {
-            _bookService.NavigateNext();
-        }
+        else _bookService.NavigateNext();
     }
 
     private void OnSideBySideClicked(object sender, EventArgs e)
-    {
-        _bookService.ToggleTwoPageSpread();
-    }
+        => _bookService.ToggleTwoPageSpread();
 
-    private void OnZoomInClicked(object sender, EventArgs e)
-    {
-        _bookService.ZoomIn();
-    }
-
-    private void OnZoomOutClicked(object sender, EventArgs e)
-    {
-        _bookService.ZoomOut();
-    }
+    private void OnZoomInClicked(object sender, EventArgs e) => _bookService.ZoomIn();
+    private void OnZoomOutClicked(object sender, EventArgs e) => _bookService.ZoomOut();
 
     private void UpdateUI()
     {
