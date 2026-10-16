@@ -34,6 +34,7 @@ namespace BookViewer
         private readonly Dictionary<int, string> _folioToStepFile = new();
         private readonly Dictionary<string, Dictionary<int, string>> _sectionFolioMap = new();
         private readonly Dictionary<string, int> _sectionFirstIndex = new();
+        private readonly Dictionary<string, string> _unitFirstSection = new();
 
         private static readonly object _logLock = new object();
         private static string _logFilePath = "";
@@ -44,44 +45,45 @@ namespace BookViewer
         private static string SurroundColor =>
             Application.Current?.RequestedTheme == AppTheme.Dark ? "#1C1C1E" : "#E8E8E8";
 
-                private const string OverlayCssTemplate = @"
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        html, body { width: 100%; height: 100%; overflow: auto; background: #E8E8E8; -webkit-font-smoothing: antialiased; }
-        body { display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; }
-        .page-wrapper { display: flex; justify-content: center; align-items: flex-start; }
-        .page-container { position: relative; flex-shrink: 0; background: #ffffff; box-shadow: 0 0 20px rgba(0,0,0,0.15); overflow: hidden; transform-origin: top center; }
-        #rez { position: relative; }
-        .bgcls { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
-        img.bgcls { width: 100%; height: 100%; }
-        pane { display: block; position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
-        pane.base > *, pane.redAnswer > *, pane.ori > * { position: absolute; }
-        .redbtn { cursor: pointer; opacity: .85; }
-        .hideBtn { display: none; }
-        .tbred { color: #E40477 !important; }
-        .tbnote { color: #E40477 !important; }
-        .tbnote * { color: #E40477 !important; }
-        .hsgbtn { cursor: pointer; }
-        pane.redAnswer { pointer-events: none; }
-        pane.redAnswer .tbred { pointer-events: none; }
-        hsg { pointer-events: auto; }
-        img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes'], img.has2btn[redanswertype='teacherNotes'] { pointer-events: auto !important; cursor: pointer !important; }
-        .copyright { display: none !important; }
-        
-        /* Hide the grey author-tool panel next to the move button */
-        tohide, tohide *, splitpane tohide, splitpane tohide * {
-            display: none !important;
-            visibility: hidden !important;
-        }
-        .btn_h, .btn_h_m { display: none !important; }
-        
-        /* Teacher-note toggle buttons render red */
-        img.redbtn[redanswertype='teacherNotes'],
-        img.hsgbtn[redanswertype='teacherNotes'],
-        img.has2btn[redanswertype='teacherNotes'] {
-            filter: invert(15%) sepia(99%) saturate(7000%) hue-rotate(315deg) brightness(90%) contrast(120%);
-            -webkit-filter: invert(15%) sepia(99%) saturate(7000%) hue-rotate(315deg) brightness(90%) contrast(120%);
-        }
-        ";
+        private const string OverlayCssTemplate = @"
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: auto; background: #E8E8E8; -webkit-font-smoothing: antialiased; }
+body { display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; }
+.page-wrapper { display: flex; justify-content: center; align-items: flex-start; }
+.page-container { position: relative; flex-shrink: 0; background: #ffffff; box-shadow: 0 0 20px rgba(0,0,0,0.15); overflow: hidden; transform-origin: top center; }
+#rez { position: relative; }
+.bgcls { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+img.bgcls { width: 100%; height: 100%; }
+pane { display: block; position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+pane.base > *, pane.redAnswer > *, pane.ori > * { position: absolute; }
+.redbtn { cursor: pointer; opacity: .85; }
+.hideBtn { display: none; }
+.tbred { color: #E40477 !important; }
+.tbnote { color: #E40477 !important; }
+.tbnote * { color: #E40477 !important; }
+.hsgbtn { cursor: pointer; }
+pane.redAnswer { pointer-events: none; }
+pane.redAnswer .tbred { pointer-events: none; }
+hsg { pointer-events: auto; }
+img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes'], img.has2btn[redanswertype='teacherNotes'] { pointer-events: auto !important; cursor: pointer !important; }
+.copyright { display: none !important; }
+
+/* Hide the grey author-tool panel next to the move button */
+tohide, tohide *, splitpane tohide, splitpane tohide * {
+    display: none !important;
+    visibility: hidden !important;
+}
+.btn_h, .btn_h_m { display: none !important; }
+
+/* Teacher-note toggle buttons render red */
+img.redbtn[redanswertype='teacherNotes'],
+img.hsgbtn[redanswertype='teacherNotes'],
+img.has2btn[redanswertype='teacherNotes'] {
+    filter: invert(15%) sepia(99%) saturate(7000%) hue-rotate(315deg) brightness(90%) contrast(120%);
+    -webkit-filter: invert(15%) sepia(99%) saturate(7000%) hue-rotate(315deg) brightness(90%) contrast(120%);
+}
+";
+
         private const string ReaderJsTemplate = @"
         window.__readerRedAnswersVisible = false;
         window.__readerNotesVisible = false;
@@ -487,6 +489,7 @@ namespace BookViewer
         window.CH_delHandS = function(){};
         window.CH_showIcon = function(){};
         ";
+
         private string GetLogFilePath()
         {
             if (string.IsNullOrEmpty(_logFilePath))
@@ -524,6 +527,7 @@ namespace BookViewer
         public event EventHandler<bool> OnSideBySideToggled;
         public event EventHandler<bool> OnTwoPageSpreadToggled;
         public event EventHandler<double> OnZoomChanged;
+        public event EventHandler<string> OnNextPageChanged;
 
         public List<string> PageFiles => _pageFiles;
         public int CurrentPageIndex => _currentPageIndex;
@@ -560,7 +564,13 @@ namespace BookViewer
         public void ResetZoom() => SetZoom(1.0);
 
         public void ToggleSideBySide() { _sideBySideMode = !_sideBySideMode; OnSideBySideToggled?.Invoke(this, _sideBySideMode); if (_currentPageIndex >= 0) _ = LoadPageAsync(_currentPageIndex); }
-        public void ToggleTwoPageSpread() { _twoPageSpread = !_twoPageSpread; _sideBySideMode = _twoPageSpread; OnTwoPageSpreadToggled?.Invoke(this, _twoPageSpread); if (_currentPageIndex >= 0) _ = LoadPageAsync(_currentPageIndex); }
+        public void ToggleTwoPageSpread()
+        {
+            _twoPageSpread = !_twoPageSpread;
+            _sideBySideMode = _twoPageSpread;
+            OnTwoPageSpreadToggled?.Invoke(this, _twoPageSpread);
+            if (_currentPageIndex >= 0) _ = LoadPageAsync(_currentPageIndex);
+        }
 
         public int GetIndexForStepFile(string stepFile)
         {
@@ -581,6 +591,18 @@ namespace BookViewer
             return -1;
         }
         public int GetFirstIndexOfSection(string sectionId) { if (string.IsNullOrEmpty(sectionId)) return -1; return _sectionFirstIndex.TryGetValue(sectionId, out int i) ? i : -1; }
+
+        public string GetFirstSectionFolderForUnit(string unit)
+        {
+            if (string.IsNullOrEmpty(unit)) return null;
+            if (_unitFirstSection.TryGetValue(unit, out var s)) return s;
+            foreach (var kv in _unitFirstSection)
+            {
+                var m = Regex.Match(kv.Key, @"\d+");
+                if (m.Success && m.Value == unit) return kv.Value;
+            }
+            return null;
+        }
 
         public async Task<bool> LoadBookAsync(string folderPath)
         {
@@ -626,6 +648,11 @@ namespace BookViewer
                 if (bookXmlDecrypted) await DecryptBookFilesAsync(folderPath);
 
                 _pageFiles.Clear();
+                _stepFileToIndex.Clear();
+                _folioToStepFile.Clear();
+                _sectionFolioMap.Clear();
+                _sectionFirstIndex.Clear();
+                _unitFirstSection.Clear();
 
                 var stepsFiles = Directory.GetFiles(folderPath, "steps_*.html", SearchOption.AllDirectories)
                     .Concat(Directory.GetFiles(folderPath, "step_*.html", SearchOption.AllDirectories))
@@ -641,11 +668,6 @@ namespace BookViewer
                         .ThenBy(x => x.Path)
                         .Select(x => x.Path))
                     .ToList();
-
-                _stepFileToIndex.Clear();
-                _folioToStepFile.Clear();
-                _sectionFolioMap.Clear();
-                _sectionFirstIndex.Clear();
 
                 for (int i = 0; i < _pageFiles.Count; i++)
                 {
@@ -692,6 +714,25 @@ namespace BookViewer
                                 }
                         }
                     }
+
+                    var unitDetailNodes = bookDoc.SelectNodes("//unitdetail");
+                    if (unitDetailNodes != null)
+                    {
+                        foreach (XmlNode un in unitDetailNodes)
+                        {
+                            var unitId = un.Attributes?["id"]?.Value ?? "";
+                            if (string.IsNullOrEmpty(unitId)) continue;
+
+                            var secNodes = un.SelectNodes(".//section");
+                            if (secNodes != null && secNodes.Count > 0)
+                            {
+                                var firstSec = secNodes[0].Attributes?["id"]?.Value ?? "";
+                                if (!string.IsNullOrEmpty(firstSec))
+                                    _unitFirstSection[unitId] = firstSec;
+                            }
+                        }
+                    }
+                    Log($"[unit-map] built {_unitFirstSection.Count} unit→section mappings");
                 }
                 catch (Exception ex) { Log($"Error parsing book.xml: {ex.Message}"); }
 
@@ -835,6 +876,7 @@ namespace BookViewer
                 else _nextPageHtml = "";
 
                 OnPageChanged?.Invoke(this, processedHtml);
+                OnNextPageChanged?.Invoke(this, _nextPageHtml);
                 OnStatusChanged?.Invoke(this, $"Viewing: {fileName} ({index + 1}/{_pageFiles.Count})");
                 OnPagesLoaded?.Invoke(this, _pageFiles);
             }
@@ -846,10 +888,96 @@ namespace BookViewer
         }
 
         /// <summary>
+        /// Builds a single HTML document that displays the current page and the
+        /// next page side by side, scrolling as one unit. Each page is embedded
+        /// in its own iframe (via srcdoc) so their CSS and JS cannot collide.
+        /// </summary>
+        public Task<string> BuildTwoPageHtmlAsync()
+        {
+            if (_currentPageIndex < 0 || _pageFiles.Count == 0)
+                return Task.FromResult(_currentPageHtml);
+
+            if (!_twoPageSpread || _currentPageIndex + 1 >= _pageFiles.Count)
+                return Task.FromResult(_currentPageHtml);
+
+            string leftHtml = _currentPageHtml;
+            string rightHtml = _nextPageHtml;
+
+            if (string.IsNullOrEmpty(rightHtml))
+                return Task.FromResult(_currentPageHtml);
+
+            string ExtractBody(string html)
+            {
+                if (string.IsNullOrEmpty(html)) return "";
+                var m = Regex.Match(html, @"<body[^>]*>([\s\S]*?)</body>", RegexOptions.IgnoreCase);
+                return m.Success ? m.Groups[1].Value : html;
+            }
+
+            string ExtractStyles(string html)
+            {
+                if (string.IsNullOrEmpty(html)) return "";
+                var sb = new StringBuilder();
+                foreach (Match m in Regex.Matches(html, @"<style[^>]*>[\s\S]*?</style>", RegexOptions.IgnoreCase))
+                    sb.AppendLine(m.Value);
+                return sb.ToString();
+            }
+
+            string ExtractScripts(string html)
+            {
+                if (string.IsNullOrEmpty(html)) return "";
+                var sb = new StringBuilder();
+                foreach (Match m in Regex.Matches(html, @"<script[^>]*>[\s\S]*?</script>", RegexOptions.IgnoreCase))
+                    sb.AppendLine(m.Value);
+                return sb.ToString();
+            }
+
+            string Wrap(string html)
+            {
+                return "<!DOCTYPE html><html><head><meta charset='UTF-8'>" +
+                       "<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes'>" +
+                       ExtractStyles(html) +
+                       "</head><body>" +
+                       ExtractBody(html) +
+                       ExtractScripts(html) +
+                       "</body></html>";
+            }
+
+            string leftWrapped = Wrap(leftHtml);
+            string rightWrapped = Wrap(rightHtml);
+
+            string surround = SurroundColor;
+            string zoom = _currentZoom.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+            var sb = new StringBuilder();
+            sb.Append("<!DOCTYPE html><html><head><meta charset='UTF-8'>");
+            sb.Append("<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes'>");
+            sb.Append("<style>");
+            sb.Append("html,body{margin:0;padding:0;background:").Append(surround).Append(";}");
+            sb.Append("body{display:flex;justify-content:center;align-items:flex-start;min-height:100vh;}");
+            sb.Append(".pair{display:flex;gap:8px;transform-origin:top center;transform:scale(").Append(zoom).Append(");}");
+            sb.Append(".page-frame{border:0;background:#fff;box-shadow:0 0 20px rgba(0,0,0,0.15);display:block;}");
+            sb.Append("</style></head><body>");
+            sb.Append("<div class='pair'>");
+            sb.Append("<iframe class='page-frame' scrolling='no' style='width:").Append(CurrentPageWidth).Append("px;height:").Append(CurrentPageHeight).Append("px;' srcdoc=\"")
+              .Append(HtmlAttributeEncode(leftWrapped)).Append("\"></iframe>");
+            sb.Append("<iframe class='page-frame' scrolling='no' style='width:").Append(CurrentPageWidth).Append("px;height:").Append(CurrentPageHeight).Append("px;' srcdoc=\"")
+              .Append(HtmlAttributeEncode(rightWrapped)).Append("\"></iframe>");
+            sb.Append("</div></body></html>");
+
+            return Task.FromResult(sb.ToString());
+        }
+
+        private static string HtmlAttributeEncode(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            return s.Replace("&", "&amp;")
+                    .Replace("\"", "&quot;")
+                    .Replace("<", "&lt;")
+                    .Replace(">", "&gt;");
+        }
+
+        /// <summary>
         /// Find a page by (section identifier, step number).
-        /// The section can be a folder name (e.g. "s_1"), a section id from book.xml,
-        /// or just a number. Matches pages where the parent folder corresponds to
-        /// the section and the file is steps_N.html (or step_N.html).
         /// </summary>
         public int FindPageIndex(string section, int step)
         {
@@ -876,7 +1004,6 @@ namespace BookViewer
                 }
             }
 
-            // PASS 1: match folder + filename
             for (int i = 0; i < _pageFiles.Count; i++)
             {
                 var name = Path.GetFileNameWithoutExtension(_pageFiles[i]);
@@ -890,7 +1017,6 @@ namespace BookViewer
                 return i;
             }
 
-            // PASS 2: match folder only — pick closest step
             if (acceptableFolders.Count > 0)
             {
                 int bestIdx = -1;
@@ -917,7 +1043,6 @@ namespace BookViewer
                 }
             }
 
-            // PASS 3: filename-only fallback
             for (int i = 0; i < _pageFiles.Count; i++)
             {
                 var name = Path.GetFileNameWithoutExtension(_pageFiles[i]);
