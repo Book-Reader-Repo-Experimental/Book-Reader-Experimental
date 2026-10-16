@@ -44,25 +44,15 @@ namespace BookViewer
         private static string SurroundColor =>
             Application.Current?.RequestedTheme == AppTheme.Dark ? "#1C1C1E" : "#E8E8E8";
 
-        // ============================================================
-        // Static CSS — inserted into the overlay HTML.
-        // Kept as a verbatim const (non-interpolated) so C# never tries
-        // to parse the braces and quotes inside.
-        // ============================================================
         private const string OverlayCssTemplate = @"
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body {
-        width: 100%; height: 100%; overflow: auto;
-        -webkit-font-smoothing: antialiased;
-    }
+    html, body { width: 100%; height: 100%; overflow: auto; -webkit-font-smoothing: antialiased; }
     body { display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; }
     .page-wrapper { display: flex; justify-content: center; align-items: flex-start; }
     .page-container {
-        position: relative;
-        flex-shrink: 0; background: #ffffff;
+        position: relative; flex-shrink: 0; background: #ffffff;
         box-shadow: 0 0 20px rgba(0,0,0,0.15);
-        overflow: hidden; border-radius: 2px;
-        transform-origin: top center;
+        overflow: hidden; border-radius: 2px; transform-origin: top center;
     }
     .background-img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
     .content-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; }
@@ -78,52 +68,35 @@ namespace BookViewer
 
     .answer-layer {
         position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-        z-index: 20; pointer-events: none; overflow: visible;
-        display: none;
+        z-index: 20; pointer-events: none; overflow: visible; display: none;
     }
     .answer-layer.active { display: block; }
     .answer-layer > * { position: absolute !important; }
 
     .answer-layer .tbnote,
     .answer-layer .tbred,
-    .answer-layer .sa {
-        display: none;
-    }
+    .answer-layer .sa { display: none; }
     .answer-layer .tbnote.ans-on,
     .answer-layer .tbred.ans-on,
-    .answer-layer .sa.ans-on {
-        display: block !important;
-    }
+    .answer-layer .sa.ans-on { display: block !important; }
 
     .answer-layer .tbnote { background: rgba(255,235,150,0.55); border: 3px solid #3498db; border-radius: 4px; padding: 3px; }
     .answer-layer .tbred,
     .answer-layer .sa { background: rgba(255,235,150,0.55); border: 3px solid #2ecc71; border-radius: 4px; padding: 3px; }
 
-    .item-btns {
-        position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-        z-index: 30; pointer-events: none;
-    }
+    .item-btns { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 30; pointer-events: none; }
     .item-btn {
-        position: absolute;
-        width: 22px; height: 22px;
-        background: #FFEE99;
-        border: 1px solid #C80;
-        border-radius: 4px;
-        font-size: 11px; font-weight: bold;
-        color: #A00;
+        position: absolute; width: 22px; height: 22px;
+        background: #FFEE99; border: 1px solid #C80; border-radius: 4px;
+        font-size: 11px; font-weight: bold; color: #A00;
         display: flex; align-items: center; justify-content: center;
-        cursor: pointer;
-        pointer-events: auto;
-        box-shadow: 0 1px 3px rgba(0,0,0,.3);
-        user-select: none;
+        cursor: pointer; pointer-events: auto;
+        box-shadow: 0 1px 3px rgba(0,0,0,.3); user-select: none;
     }
     .item-btn:hover { background: #FFE44D; }
     .item-btn.on { background: #CC0000; color: #fff; border-color: #900; }
 ";
 
-        // ============================================================
-        // Static JS — inserted into the overlay HTML.
-        // ============================================================
         private const string OverlayJsTemplate = @"
 (function() {
     window.__setNotes = function(on) {
@@ -167,7 +140,6 @@ namespace BookViewer
             var baseLeft = parseFloat(icon.style.left) || 0;
             var baseTop  = parseFloat(icon.style.top)  || 0;
             var children = g.querySelectorAll('hastext[linkname]');
-
             if (children.length <= 1) return;
 
             var i = 0;
@@ -275,23 +247,12 @@ namespace BookViewer
             try
             {
                 string logMessage = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} - {message}";
-                string logFile = GetLogFilePath();
-
-                lock (_logLock)
-                {
-                    File.AppendAllText(logFile, logMessage + Environment.NewLine);
-                }
-
+                lock (_logLock) File.AppendAllText(GetLogFilePath(), logMessage + Environment.NewLine);
                 System.Diagnostics.Debug.WriteLine(logMessage);
-
-                if (message.Length < 80)
-                    OnStatusChanged?.Invoke(this, message);
-                else
-                    OnStatusChanged?.Invoke(this, message.Substring(0, 77) + "...");
+                if (message.Length < 80) OnStatusChanged?.Invoke(this, message);
+                else OnStatusChanged?.Invoke(this, message.Substring(0, 77) + "...");
             }
-            catch
-            {
-            }
+            catch { }
         }
 
         public event EventHandler<List<string>> OnPagesLoaded;
@@ -319,9 +280,6 @@ namespace BookViewer
         public Dictionary<int, string> FolioToStepFile => _folioToStepFile;
         public Dictionary<string, int> StepFileToIndex => _stepFileToIndex;
 
-        // ============================================================
-        // Answer/Notes visibility — four entry points, two pairs of aliases.
-        // ============================================================
         public void SetShowTeacherNotes(bool show)
         {
             _showTeacherNotes = show;
@@ -386,8 +344,7 @@ namespace BookViewer
         {
             if (string.IsNullOrEmpty(stepFile)) return -1;
             var name = Path.GetFileNameWithoutExtension(stepFile);
-            if (_stepFileToIndex.TryGetValue(name, out int idx))
-                return idx;
+            if (_stepFileToIndex.TryGetValue(name, out int idx)) return idx;
             return -1;
         }
 
@@ -401,28 +358,22 @@ namespace BookViewer
         public int GetIndexForSectionFolio(string sectionId, int folio)
         {
             if (string.IsNullOrEmpty(sectionId)) return -1;
-
             if (_sectionFolioMap.TryGetValue(sectionId, out var folioMap))
             {
                 if (folioMap.TryGetValue(folio, out var stepFile))
                 {
                     var composite = sectionId + "/" + stepFile;
-                    if (_stepFileToIndex.TryGetValue(composite, out int idx))
-                        return idx;
-
-                    if (_stepFileToIndex.TryGetValue(stepFile, out int idx2))
-                        return idx2;
+                    if (_stepFileToIndex.TryGetValue(composite, out int idx)) return idx;
+                    if (_stepFileToIndex.TryGetValue(stepFile, out int idx2)) return idx2;
                 }
             }
-
             return -1;
         }
 
         public int GetFirstIndexOfSection(string sectionId)
         {
             if (string.IsNullOrEmpty(sectionId)) return -1;
-            if (_sectionFirstIndex.TryGetValue(sectionId, out int idx))
-                return idx;
+            if (_sectionFirstIndex.TryGetValue(sectionId, out int idx)) return idx;
             return -1;
         }
 
@@ -431,78 +382,51 @@ namespace BookViewer
             try
             {
                 Log($"=== LOADING BOOK from: {folderPath} ===");
-                Log($"BookService log file: {GetLogFilePath()}");
                 _currentBookPath = folderPath;
 
                 _tempFolder = Path.Combine(FileSystem.CacheDirectory, "BookViewer", $"temp_{Guid.NewGuid().ToString().Substring(0, 8)}");
                 Directory.CreateDirectory(_tempFolder);
-                Log($"Temp folder: {_tempFolder}");
 
                 var bookXmlPath = Path.Combine(folderPath, "book.xml");
-
                 if (!File.Exists(bookXmlPath))
                 {
-                    Log($"ERROR: book.xml not found at: {bookXmlPath}");
                     OnStatusChanged?.Invoke(this, "book.xml not found");
                     return false;
                 }
 
                 var folderName = Path.GetFileName(folderPath);
                 var bookIdMatch = Regex.Match(folderName, @"book_(\d+)");
-                if (bookIdMatch.Success)
-                {
-                    _currentBookUid = bookIdMatch.Groups[1].Value;
-                    Log($"Extracted book ID from folder: {_currentBookUid}");
-                }
+                if (bookIdMatch.Success) _currentBookUid = bookIdMatch.Groups[1].Value;
 
                 var content = await File.ReadAllTextAsync(bookXmlPath);
-                Log($"book.xml loaded, size: {content.Length} bytes");
-                Log($"book.xml IsEncrypted check: {_decryptionService.IsEncrypted(content)}");
 
                 if (string.IsNullOrEmpty(_currentBookUid))
                 {
                     var uidMatch = Regex.Match(content, @"id=""([^""]+)""");
-                    if (uidMatch.Success)
-                    {
-                        _currentBookUid = uidMatch.Groups[1].Value;
-                        Log($"Extracted Book UID from book.xml: {_currentBookUid}");
-                    }
+                    if (uidMatch.Success) _currentBookUid = uidMatch.Groups[1].Value;
                 }
 
                 bool bookXmlDecrypted = false;
                 if (_decryptionService.IsEncrypted(content))
                 {
-                    Log("book.xml IS encrypted → decrypting book.xml");
                     if (string.IsNullOrEmpty(_currentBookUid))
                     {
-                        Log("ERROR: Could not find book UID for decryption");
                         OnStatusChanged?.Invoke(this, "Could not decrypt book.xml - UID not found");
                         return false;
                     }
-
                     content = _decryptionService.DecryptBookFile(content, _currentBookUid);
-                    Log($"book.xml decrypted, size: {content.Length} bytes");
                     await File.WriteAllTextAsync(bookXmlPath, content);
                     bookXmlDecrypted = true;
-                }
-                else
-                {
-                    Log("book.xml is NOT encrypted → skipping book.xml decryption");
                 }
 
                 _bookTitle = "Unknown Book";
                 var titleMatch = Regex.Match(content, @"name=""([^""]+)""");
                 if (titleMatch.Success) _bookTitle = titleMatch.Groups[1].Value;
-                Log($"Book title: {_bookTitle}");
-                Log($"Book UID: {_currentBookUid}");
 
                 OnBookLoaded?.Invoke(this, _bookTitle);
 
                 if (bookXmlDecrypted)
-                {
-                    Log("book.xml was decrypted → running DecryptBookFilesAsync");
                     await DecryptBookFilesAsync(folderPath);
-                }
 
                 _pageFiles.Clear();
 
@@ -512,20 +436,14 @@ namespace BookViewer
                     .Distinct()
                     .ToList();
 
-                Log($"Found {stepsFiles.Count} step files");
-
                 _pageFiles = stepsFiles
                     .GroupBy(f => Path.GetDirectoryName(f) ?? "")
                     .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
-                    .SelectMany(g =>
-                        g.Select(f => new { Path = f, Index = ParseStepIndex(Path.GetFileName(f)) })
-                         .OrderBy(x => x.Index >= 0 ? x.Index : int.MaxValue)
-                         .ThenBy(x => x.Path)
-                         .Select(x => x.Path)
-                    )
+                    .SelectMany(g => g.Select(f => new { Path = f, Index = ParseStepIndex(Path.GetFileName(f)) })
+                        .OrderBy(x => x.Index >= 0 ? x.Index : int.MaxValue)
+                        .ThenBy(x => x.Path)
+                        .Select(x => x.Path))
                     .ToList();
-
-                Log($"Sorted {_pageFiles.Count} page files");
 
                 _stepFileToIndex.Clear();
                 _folioToStepFile.Clear();
@@ -537,23 +455,17 @@ namespace BookViewer
                     var name = Path.GetFileNameWithoutExtension(_pageFiles[i]);
                     var parentDir = Path.GetFileName(Path.GetDirectoryName(_pageFiles[i]) ?? "");
                     var composite = parentDir + "/" + name;
-
-                    if (!_stepFileToIndex.ContainsKey(composite))
-                        _stepFileToIndex[composite] = i;
-
-                    if (!_stepFileToIndex.ContainsKey(name))
-                        _stepFileToIndex[name] = i;
+                    if (!_stepFileToIndex.ContainsKey(composite)) _stepFileToIndex[composite] = i;
+                    if (!_stepFileToIndex.ContainsKey(name)) _stepFileToIndex[name] = i;
                 }
 
                 try
                 {
                     var bookDoc = new XmlDocument();
                     var xmlText = await File.ReadAllTextAsync(bookXmlPath);
-
                     var trimmedXml = xmlText.TrimStart();
                     if (!trimmedXml.StartsWith("<book") && !trimmedXml.StartsWith("<?xml") && !trimmedXml.StartsWith("<root"))
                         xmlText = $"<root>{xmlText}</root>";
-
                     bookDoc.LoadXml(xmlText);
 
                     var sectionNodes = bookDoc.SelectNodes("//sectiondetails/sectiondetail");
@@ -580,21 +492,14 @@ namespace BookViewer
                                     var folioStr = p.Attributes?["folio"]?.Value ?? "";
                                     var file = p.Attributes?["file"]?.Value ?? "";
                                     if (int.TryParse(folioStr, out int folio) && !string.IsNullOrEmpty(file))
-                                    {
                                         if (!_folioToStepFile.ContainsKey(folio))
                                             _folioToStepFile[folio] = file;
-                                    }
                                 }
                             }
                         }
                     }
-
-                    Log($"book.xml: {_sectionFirstIndex.Count} sections mapped, {_folioToStepFile.Count} folios");
                 }
-                catch (Exception ex)
-                {
-                    Log($"Error parsing book.xml: {ex.Message}");
-                }
+                catch (Exception ex) { Log($"Error parsing book.xml: {ex.Message}"); }
 
                 var sectionFolders = Directory.GetDirectories(folderPath, "s_*");
                 foreach (var sectionDir in sectionFolders)
@@ -602,26 +507,19 @@ namespace BookViewer
                     var sectionId = Path.GetFileName(sectionDir);
                     var pagesXmlPath = Path.Combine(sectionDir, "pages.xml");
                     if (!File.Exists(pagesXmlPath)) continue;
-
                     try
                     {
                         var pagesContent = await File.ReadAllTextAsync(pagesXmlPath);
-
                         var trimmed = pagesContent.TrimStart();
                         if (trimmed.StartsWith("<?xml"))
                         {
                             var idx = pagesContent.IndexOf("?>");
-                            if (idx >= 0)
-                                pagesContent = pagesContent.Substring(idx + 2);
+                            if (idx >= 0) pagesContent = pagesContent.Substring(idx + 2);
                             trimmed = pagesContent.TrimStart();
                         }
-
-                        if (!trimmed.StartsWith("<pages"))
-                            pagesContent = $"<pages>{pagesContent}</pages>";
-
+                        if (!trimmed.StartsWith("<pages")) pagesContent = $"<pages>{pagesContent}</pages>";
                         var pagesDoc = new XmlDocument();
                         pagesDoc.LoadXml(pagesContent);
-
                         var folioMap = new Dictionary<int, string>();
                         var pageNodes = pagesDoc.SelectNodes("//page");
                         if (pageNodes != null)
@@ -634,40 +532,30 @@ namespace BookViewer
                                     folioMap[folio] = file;
                             }
                         }
-
                         _sectionFolioMap[sectionId] = folioMap;
                     }
-                    catch (Exception ex)
-                    {
-                        Log($"Error parsing {pagesXmlPath}: {ex.Message}");
-                    }
+                    catch (Exception ex) { Log($"Error parsing {pagesXmlPath}: {ex.Message}"); }
                 }
-
-                Log($"Built section folio map: {_sectionFolioMap.Count} sections");
 
                 OnPagesLoaded?.Invoke(this, _pageFiles);
 
                 if (_pageFiles.Count > 0)
                 {
                     _currentPageIndex = 0;
-                    Log($"Loading first page: {Path.GetFileName(_pageFiles[0])}");
                     await LoadPageAsync(0);
                 }
                 else
                 {
-                    Log("No page files found!");
                     OnStatusChanged?.Invoke(this, "No pages found in this book");
                     return false;
                 }
 
                 OnStatusChanged?.Invoke(this, $"Loaded: {_bookTitle} ({_pageFiles.Count} pages)");
-                Log($"=== BOOK LOADED SUCCESSFULLY ===");
                 return true;
             }
             catch (Exception ex)
             {
                 Log($"ERROR loading book: {ex.Message}");
-                Log($"Stack trace: {ex.StackTrace}");
                 OnStatusChanged?.Invoke(this, $"Error: {ex.Message}");
                 return false;
             }
@@ -677,18 +565,12 @@ namespace BookViewer
         {
             try
             {
-                Log($"=== DECRYPT BOOK FILES START: {folderPath} ===");
-
                 var htmlFiles = Directory.GetFiles(folderPath, "*.html", SearchOption.AllDirectories).ToList();
                 var xmlFiles = Directory.GetFiles(folderPath, "*.xml", SearchOption.AllDirectories).ToList();
                 var htmFiles = Directory.GetFiles(folderPath, "*.htm", SearchOption.AllDirectories).ToList();
 
                 int bookKey = _decryptionService.CalculateKey(_currentBookUid);
-
-                int decryptedCount = 0;
-                int alreadyDecryptedCount = 0;
-                int htmlDecryptedCount = 0;
-                int htmlSkippedCount = 0;
+                int decryptedCount = 0, alreadyDecryptedCount = 0, htmlDecryptedCount = 0, htmlSkippedCount = 0;
 
                 var allXmlAndHtmFiles = new List<string>();
                 allXmlAndHtmFiles.AddRange(xmlFiles);
@@ -700,22 +582,12 @@ namespace BookViewer
                     {
                         var fileName = Path.GetFileName(file);
                         var fileContent = await File.ReadAllTextAsync(file);
-                        bool isEncrypted = _decryptionService.IsEncrypted(fileContent);
-
-                        if (!isEncrypted)
-                        {
-                            alreadyDecryptedCount++;
-                            continue;
-                        }
-
+                        if (!_decryptionService.IsEncrypted(fileContent)) { alreadyDecryptedCount++; continue; }
                         string decryptedContent = _decryptionService.DecryptXmlOrHtm(fileContent, fileName);
                         await File.WriteAllTextAsync(file, decryptedContent);
                         decryptedCount++;
                     }
-                    catch (Exception ex)
-                    {
-                        Log($"Error decrypting {Path.GetFileName(file)}: {ex.Message}");
-                    }
+                    catch (Exception ex) { Log($"Error decrypting {Path.GetFileName(file)}: {ex.Message}"); }
                 }
 
                 foreach (var file in htmlFiles)
@@ -724,33 +596,20 @@ namespace BookViewer
                     {
                         var fileName = Path.GetFileName(file);
                         var fileContent = await File.ReadAllTextAsync(file);
-
                         bool isDecrypted = fileContent.Contains("<") && fileContent.Contains(">") &&
                                            (fileContent.Contains("</") || fileContent.Contains("/>")) &&
                                            (fileContent.Contains("class=") || fileContent.Contains("<div") || fileContent.Contains("id="));
-
-                        if (isDecrypted)
-                        {
-                            htmlSkippedCount++;
-                            continue;
-                        }
-
+                        if (isDecrypted) { htmlSkippedCount++; continue; }
                         string decryptedContent = _decryptionService.DecryptWithKey(fileContent, bookKey);
                         await File.WriteAllTextAsync(file, decryptedContent);
                         htmlDecryptedCount++;
                     }
-                    catch (Exception ex)
-                    {
-                        Log($"Error decrypting {Path.GetFileName(file)}: {ex.Message}");
-                    }
+                    catch (Exception ex) { Log($"Error decrypting {Path.GetFileName(file)}: {ex.Message}"); }
                 }
 
-                Log($"Decrypt summary: XML/HTM {decryptedCount} decrypted, {alreadyDecryptedCount} plain; HTML {htmlDecryptedCount} decrypted, {htmlSkippedCount} plain");
+                Log($"Decrypt: XML/HTM {decryptedCount} decrypted, {alreadyDecryptedCount} plain; HTML {htmlDecryptedCount} decrypted, {htmlSkippedCount} plain");
             }
-            catch (Exception ex)
-            {
-                Log($"ERROR in DecryptBookFilesAsync: {ex.Message}");
-            }
+            catch (Exception ex) { Log($"ERROR in DecryptBookFilesAsync: {ex.Message}"); }
         }
 
         public async Task DecryptBookAsync()
@@ -760,7 +619,6 @@ namespace BookViewer
                 OnStatusChanged?.Invoke(this, "No book loaded");
                 return;
             }
-
             OnStatusChanged?.Invoke(this, "Decrypting book files...");
             await DecryptBookFilesAsync(_currentBookPath);
             OnStatusChanged?.Invoke(this, "Decryption complete! Reloading book...");
@@ -775,12 +633,10 @@ namespace BookViewer
             try
             {
                 var m = Regex.Match(fileName ?? "", @"^steps?_(\d+)\.html$", RegexOptions.IgnoreCase);
-                if (m.Success && int.TryParse(m.Groups[1].Value, out int idx))
-                    return idx;
+                if (m.Success && int.TryParse(m.Groups[1].Value, out int idx)) return idx;
 
                 m = Regex.Match(fileName ?? "", @"(\d+)");
-                if (m.Success && int.TryParse(m.Groups[1].Value, out int idx3))
-                    return idx3;
+                if (m.Success && int.TryParse(m.Groups[1].Value, out int idx3)) return idx3;
             }
             catch { }
             return -1;
@@ -806,10 +662,7 @@ namespace BookViewer
                     var nextContent = await File.ReadAllTextAsync(nextFilePath);
                     _nextPageHtml = await ProcessHtmlContent(nextContent, nextFilePath);
                 }
-                else
-                {
-                    _nextPageHtml = "";
-                }
+                else _nextPageHtml = "";
 
                 OnPageChanged?.Invoke(this, processedHtml);
                 OnStatusChanged?.Invoke(this, $"Viewing: {fileName} ({index + 1}/{_pageFiles.Count})");
@@ -835,8 +688,7 @@ namespace BookViewer
                     string contentHtml = await ExtractContentFromHtmlFile(filePath, fileName, directory);
                     string fontCss = await GetFontCssWithEmbeddedFonts(directory);
 
-                    int pageWidth = 1024;
-                    int pageHeight = 1309;
+                    int pageWidth = 1024, pageHeight = 1309;
 
                     var rezMatch = Regex.Match(htmlContent,
                         @"id\s*=\s*[""']rez[""'][^>]*style\s*=\s*[""'][^""']*width\s*:\s*(\d+)px[^""']*height\s*:\s*(\d+)px",
@@ -846,29 +698,12 @@ namespace BookViewer
                     {
                         if (int.TryParse(rezMatch.Groups[1].Value, out int w)) pageWidth = w;
                         if (int.TryParse(rezMatch.Groups[2].Value, out int h)) pageHeight = h;
-                        Log($"Detected page size from #rez: {pageWidth}x{pageHeight}");
-                    }
-                    else
-                    {
-                        var bgMatch = Regex.Match(htmlContent,
-                            @"class\s*=\s*[""']bgcls[""'][^>]*style\s*=\s*[""'][^""']*width\s*:\s*(\d+)px[^""']*height\s*:\s*(\d+)px",
-                            RegexOptions.IgnoreCase);
-                        if (bgMatch.Success)
-                        {
-                            if (int.TryParse(bgMatch.Groups[1].Value, out int w)) pageWidth = w;
-                            if (int.TryParse(bgMatch.Groups[2].Value, out int h)) pageHeight = h;
-                            Log($"Detected page size from .bgcls: {pageWidth}x{pageHeight}");
-                        }
-                        else
-                        {
-                            Log("Could not detect page size, using default 1024x1309");
-                        }
                     }
 
                     CurrentPageWidth = pageWidth;
                     CurrentPageHeight = pageHeight;
 
-                    return BuildOverlayHtml(bgImage, contentHtml, fileName, fontCss, pageWidth, pageHeight);
+                    return await BuildOverlayHtmlAsync(bgImage, contentHtml, fileName, fontCss, pageWidth, pageHeight);
                 }
 
                 return htmlContent;
@@ -883,7 +718,6 @@ namespace BookViewer
         private async Task<string> ExtractContentFromHtmlFile(string filePath, string fileName, string directory)
         {
             string nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
-            string contentHtml = "";
 
             string oriHtmlPath = Path.Combine(directory, nameWithoutExt + "_ori.html");
             if (File.Exists(oriHtmlPath))
@@ -902,14 +736,12 @@ namespace BookViewer
             try
             {
                 string fallbackContent = await File.ReadAllTextAsync(filePath);
-                contentHtml = ExtractContentFromHtml(fallbackContent);
+                return ExtractContentFromHtml(fallbackContent);
             }
             catch
             {
-                contentHtml = "<div style='padding:20px;color:#666;font-size:24px;'>Content not available</div>";
+                return "<div style='padding:20px;color:#666;font-size:24px;'>Content not available</div>";
             }
-
-            return contentHtml;
         }
 
         private string ExtractContentFromHtml(string htmlContent)
@@ -929,56 +761,41 @@ namespace BookViewer
                 if (parasNode == null) return "";
 
                 var sb = new StringBuilder();
-
                 foreach (XmlNode child in parasNode.ChildNodes)
                 {
                     if (child.Name != "para") continue;
-
                     var text = child.InnerText;
                     if (string.IsNullOrEmpty(text)) continue;
-
                     text = System.Security.SecurityElement.Escape(text) ?? text;
 
                     var style = child.Attributes?["style"]?.Value ?? "";
-                    var x     = child.Attributes?["x"]?.Value;
-                    var y     = child.Attributes?["y"]?.Value;
-                    var w     = child.Attributes?["width"]?.Value;
-                    var h     = child.Attributes?["height"]?.Value;
+                    var x = child.Attributes?["x"]?.Value;
+                    var y = child.Attributes?["y"]?.Value;
+                    var w = child.Attributes?["width"]?.Value;
+                    var h = child.Attributes?["height"]?.Value;
                     var align = child.Attributes?["textalign"]?.Value;
-
                     bool hasCoords = !string.IsNullOrEmpty(x) && !string.IsNullOrEmpty(y);
 
                     var pos = new StringBuilder();
                     if (!string.IsNullOrEmpty(style)) pos.Append(style).Append(';');
-
                     if (hasCoords)
                     {
                         pos.Append("position:absolute;");
                         pos.Append("left:").Append(x).Append("px;");
                         pos.Append("top:").Append(y).Append("px;");
                     }
-
                     if (!string.IsNullOrEmpty(w)) pos.Append("width:").Append(w).Append("px;");
                     if (!string.IsNullOrEmpty(h)) pos.Append("height:").Append(h).Append("px;");
                     if (!string.IsNullOrEmpty(align)) pos.Append("text-align:").Append(align).Append(';');
-
                     if (string.IsNullOrEmpty(align)) pos.Append("text-align:left;");
 
                     var cls = hasCoords ? "para para-abs" : "para para-flow";
-
                     sb.Append("<div class='").Append(cls).Append("' style=\"")
-                      .Append(pos.ToString())
-                      .Append("\">")
-                      .Append(text)
-                      .Append("</div>");
+                      .Append(pos.ToString()).Append("\">").Append(text).Append("</div>");
                 }
-
                 return sb.ToString();
             }
-            catch
-            {
-                return "";
-            }
+            catch { return ""; }
         }
 
         public async Task<string> GetRedAnswerContentAsync(string filePath, string answerType)
@@ -1011,9 +828,7 @@ namespace BookViewer
                         };
 
                     foreach (var alt in altPatterns)
-                    {
                         if (File.Exists(alt)) { redAnswerPath = alt; break; }
-                    }
                 }
 
                 if (!File.Exists(redAnswerPath)) return "";
@@ -1029,38 +844,25 @@ namespace BookViewer
                 var divMatches = Regex.Matches(content,
                     @"<div[^>]*class\s*=\s*[""'][^""']*" + classPattern + @"[^""']*[""'][^>]*>[\s\S]*?</div>",
                     RegexOptions.IgnoreCase);
-
-                foreach (Match match in divMatches)
-                    sb.AppendLine(match.Value);
+                foreach (Match match in divMatches) sb.AppendLine(match.Value);
 
                 var svgMatches = Regex.Matches(content,
                     @"<svg[^>]*class\s*=\s*[""'][^""']*" + classPattern + @"[^""']*[""'][^>]*>[\s\S]*?</svg>",
                     RegexOptions.IgnoreCase);
-
-                foreach (Match match in svgMatches)
-                    sb.AppendLine(match.Value);
+                foreach (Match match in svgMatches) sb.AppendLine(match.Value);
 
                 return sb.ToString();
             }
-            catch
-            {
-                return "";
-            }
+            catch { return ""; }
         }
 
-        /// <summary>
-        /// Assigns a unique data-ans-id to every tbnote/tbred wrapper so JS can toggle
-        /// each item individually. Preserves the original name attribute for grouping.
-        /// </summary>
         public static string AnnotateAnswerItems(string fragment)
         {
             if (string.IsNullOrEmpty(fragment)) return fragment;
 
             var sb = new StringBuilder();
-            var regex = new Regex(@"<div[^>]*class\s*=\s*[""']([^""']*?)[""'][^>]*>",
-                                  RegexOptions.IgnoreCase);
-            int idx = 0;
-            int lastPos = 0;
+            var regex = new Regex(@"<div[^>]*class\s*=\s*[""']([^""']*?)[""'][^>]*>", RegexOptions.IgnoreCase);
+            int idx = 0, lastPos = 0;
 
             foreach (Match m in regex.Matches(fragment))
             {
@@ -1070,24 +872,17 @@ namespace BookViewer
 
                 if (cls.Contains("tbnote") || cls.Contains("tbred"))
                 {
-                    if (tag.Contains("data-ans-id="))
-                    {
-                        sb.Append(tag);
-                    }
+                    if (tag.Contains("data-ans-id=")) sb.Append(tag);
                     else
                     {
                         string id = "ans_" + idx++;
                         sb.Append(tag.Substring(0, tag.Length - 1) + " data-ans-id=\"" + id + "\">");
                     }
                 }
-                else
-                {
-                    sb.Append(tag);
-                }
+                else sb.Append(tag);
 
                 lastPos = m.Index + m.Value.Length;
             }
-
             sb.Append(fragment.Substring(lastPos));
             return sb.ToString();
         }
@@ -1102,17 +897,13 @@ namespace BookViewer
             {
                 var imagePath = Path.Combine(imagesPath, $"steps_{stepNumber}.jpg");
                 if (File.Exists(imagePath)) return ConvertImageToBase64HighQuality(imagePath);
-
                 imagePath = Path.Combine(imagesPath, $"steps_{stepNumber}.png");
                 if (File.Exists(imagePath)) return ConvertImageToBase64HighQuality(imagePath);
-
                 imagePath = Path.Combine(imagesPath, $"step_{stepNumber}.jpg");
                 if (File.Exists(imagePath)) return ConvertImageToBase64HighQuality(imagePath);
-
                 imagePath = Path.Combine(imagesPath, $"step_{stepNumber}.png");
                 if (File.Exists(imagePath)) return ConvertImageToBase64HighQuality(imagePath);
             }
-
             return GetPlaceholderImage();
         }
 
@@ -1120,20 +911,17 @@ namespace BookViewer
         {
             try
             {
-                if (_fontCache.TryGetValue(directory, out var cached))
-                    return cached;
+                if (_fontCache.TryGetValue(directory, out var cached)) return cached;
 
                 string fontCss = "";
                 string fontCssPath = "";
 
                 var fontCssFiles = Directory.GetFiles(directory, "*_font.css");
-                if (fontCssFiles.Length > 0)
-                    fontCssPath = fontCssFiles[0];
+                if (fontCssFiles.Length > 0) fontCssPath = fontCssFiles[0];
                 else
                 {
                     var rootFontCss = Path.Combine(_currentBookPath, "font.css");
-                    if (File.Exists(rootFontCss))
-                        fontCssPath = rootFontCss;
+                    if (File.Exists(rootFontCss)) fontCssPath = rootFontCss;
                 }
 
                 if (!string.IsNullOrEmpty(fontCssPath) && File.Exists(fontCssPath))
@@ -1141,8 +929,7 @@ namespace BookViewer
                     fontCss = await File.ReadAllTextAsync(fontCssPath);
 
                     string fontsFolder = Path.Combine(_currentBookPath, "FONTS");
-                    if (!Directory.Exists(fontsFolder))
-                        fontsFolder = Path.Combine(_currentBookPath, "fonts");
+                    if (!Directory.Exists(fontsFolder)) fontsFolder = Path.Combine(_currentBookPath, "fonts");
 
                     Dictionary<string, string> fontFileIndex = null;
                     if (Directory.Exists(fontsFolder))
@@ -1151,42 +938,28 @@ namespace BookViewer
                         foreach (var f in Directory.GetFiles(fontsFolder, "*.*", SearchOption.AllDirectories))
                         {
                             var ext = Path.GetExtension(f).ToLowerInvariant();
-                            if (ext != ".ttf" && ext != ".otf" && ext != ".woff" && ext != ".woff2")
-                                continue;
-
+                            if (ext != ".ttf" && ext != ".otf" && ext != ".woff" && ext != ".woff2") continue;
                             var justName = Path.GetFileName(f);
                             var justStem = Path.GetFileNameWithoutExtension(f);
                             var noSpace = justStem.Replace(" ", "").Replace("-", "").Replace("_", "");
-
                             if (!fontFileIndex.ContainsKey(justName)) fontFileIndex[justName] = f;
                             if (!fontFileIndex.ContainsKey(justStem)) fontFileIndex[justStem] = f;
                             if (!fontFileIndex.ContainsKey(noSpace)) fontFileIndex[noSpace] = f;
                         }
                     }
 
-                    var fontFaceMatches = Regex.Matches(
-                        fontCss,
-                        @"@font-face\s*\{(?<body>.*?)\}",
+                    var fontFaceMatches = Regex.Matches(fontCss, @"@font-face\s*\{(?<body>.*?)\}",
                         RegexOptions.Singleline | RegexOptions.IgnoreCase);
-
-                    int totalFaces = fontFaceMatches.Count;
-                    int embeddedCount = 0;
 
                     foreach (Match match in fontFaceMatches)
                     {
                         var fontFaceContent = match.Groups[1].Value;
                         var urlMatches = Regex.Matches(fontFaceContent, @"url\(['""]?([^)'""]+)['""]?\)");
-                        bool faceWasEmbedded = false;
 
                         foreach (Match urlMatch in urlMatches)
                         {
                             var rawPath = urlMatch.Groups[1].Value;
-                            var cleanPath = rawPath
-                                .Replace("../FONTS/", "")
-                                .Replace("../fonts/", "")
-                                .Replace("./", "")
-                                .Trim();
-
+                            var cleanPath = rawPath.Replace("../FONTS/", "").Replace("../fonts/", "").Replace("./", "").Trim();
                             string fullFontPath = null;
 
                             if (fontFileIndex != null)
@@ -1194,7 +967,6 @@ namespace BookViewer
                                 var justName = Path.GetFileName(cleanPath);
                                 var justStem = Path.GetFileNameWithoutExtension(cleanPath);
                                 var noSpace = justStem.Replace(" ", "").Replace("-", "").Replace("_", "");
-
                                 if (fontFileIndex.TryGetValue(justName, out var p1)) fullFontPath = p1;
                                 else if (fontFileIndex.TryGetValue(justStem, out var p2)) fullFontPath = p2;
                                 else if (fontFileIndex.TryGetValue(noSpace, out var p3)) fullFontPath = p3;
@@ -1213,64 +985,27 @@ namespace BookViewer
                                     ".woff2" => "font/woff2",
                                     _ => "font/ttf"
                                 };
-
                                 var dataUri = $"data:{mimeType};base64,{fontBase64}";
-
                                 fontCss = fontCss.Replace($"url('{rawPath}')", $"url('{dataUri}')");
                                 fontCss = fontCss.Replace($"url(\"{rawPath}\")", $"url('{dataUri}')");
                                 fontCss = fontCss.Replace($"url({rawPath})", $"url('{dataUri}')");
-
-                                faceWasEmbedded = true;
-                                Log($"Embedded font: {Path.GetFileName(fullFontPath)} ({fontBytes.Length} bytes)");
-                            }
-                            else
-                            {
-                                Log($"Font file NOT FOUND: '{rawPath}' in {fontsFolder}");
                             }
                         }
-                        if (faceWasEmbedded)
-                            embeddedCount++;
                     }
 
-                    Log($"Font embedding summary: {embeddedCount} of {totalFaces} @font-face rules embedded");
-
-                    fontCss += @"
-
-@font-face {
-    font-family: 'CJKLocked';
-    src: local('PingFang TC'), local('PingFang SC'), local('Heiti TC'),
-         local('Microsoft JhengHei'), local('Microsoft YaHei'),
-         local('Noto Sans CJK TC'), local('Noto Sans CJK SC'),
-         local('Noto Serif CJK TC'), local('Noto Serif CJK SC');
-    ascent-override: 100%;
-    descent-override: 0%;
-    line-gap-override: 0%;
-}
-body, .para, .base-content, .content-overlay {
-    font-family: 'CJKLocked', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
-}
-";
+                    fontCss += "\n@font-face { font-family: 'CJKLocked'; "
+                             + "src: local('PingFang TC'), local('PingFang SC'), local('Heiti TC'), "
+                             + "local('Microsoft JhengHei'), local('Microsoft YaHei'), "
+                             + "local('Noto Sans CJK TC'), local('Noto Sans CJK SC'); "
+                             + "ascent-override: 100%; descent-override: 0%; line-gap-override: 0%; }\n"
+                             + "body, .para, .base-content, .content-overlay { "
+                             + "font-family: 'CJKLocked', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif; }\n";
 
                     _fontCache[directory] = fontCss;
                     return fontCss;
                 }
 
                 fontCss = await GenerateFontCssFromFiles();
-                fontCss += @"
-
-@font-face {
-    font-family: 'CJKLocked';
-    src: local('PingFang TC'), local('PingFang SC'), local('Heiti TC'),
-         local('Microsoft JhengHei'), local('Microsoft YaHei'),
-         local('Noto Sans CJK TC'), local('Noto Sans CJK SC');
-    ascent-override: 100%;
-    descent-override: 0%;
-    line-gap-override: 0%;
-}
-body, .para, .base-content, .content-overlay {
-    font-family: 'CJKLocked', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
-}
-";
                 _fontCache[directory] = fontCss;
                 return fontCss;
             }
@@ -1287,8 +1022,7 @@ body, .para, .base-content, .content-overlay {
             {
                 string fontCss = "";
                 var fontsFolder = Path.Combine(_currentBookPath, "FONTS");
-                if (!Directory.Exists(fontsFolder))
-                    fontsFolder = Path.Combine(_currentBookPath, "fonts");
+                if (!Directory.Exists(fontsFolder)) fontsFolder = Path.Combine(_currentBookPath, "fonts");
                 if (!Directory.Exists(fontsFolder)) return "";
 
                 var fontExtensions = new[] { ".ttf", ".otf", ".woff", ".woff2" };
@@ -1348,7 +1082,6 @@ body, .para, .base-content, .content-overlay {
             try
             {
                 if (_imageCache.TryGetValue(imagePath, out var cached)) return cached;
-
                 var bytes = File.ReadAllBytes(imagePath);
                 var extension = Path.GetExtension(imagePath).ToLower();
                 var mimeType = extension switch
@@ -1361,22 +1094,18 @@ body, .para, .base-content, .content-overlay {
                     ".svg" => "image/svg+xml",
                     _ => "image/jpeg"
                 };
-
                 var base64 = Convert.ToBase64String(bytes);
                 var result = $"data:{mimeType};base64,{base64}";
                 _imageCache[imagePath] = result;
                 return result;
             }
-            catch
-            {
-                return GetPlaceholderImage();
-            }
+            catch { return GetPlaceholderImage(); }
         }
 
         // ============================================================
-        // BuildOverlayHtml — StringBuilder assembly, no $@"..." interpolation
+        // BuildOverlayHtmlAsync — async, awaits GetRedAnswerContentAsync.
         // ============================================================
-        private string BuildOverlayHtml(string bgImage, string contentHtml, string fileName, string fontCss,
+        private async Task<string> BuildOverlayHtmlAsync(string bgImage, string contentHtml, string fileName, string fontCss,
             int pageWidth, int pageHeight)
         {
             if (string.IsNullOrEmpty(bgImage)) bgImage = GetPlaceholderImage();
@@ -1391,12 +1120,17 @@ body, .para, .base-content, .content-overlay {
                 ? _pageFiles[_currentPageIndex]
                 : "";
 
-            var teacherRaw = _showTeacherNotes && !string.IsNullOrEmpty(filePath)
-                ? GetRedAnswerContentAsync(filePath, "teacherNotes").GetAwaiter().GetResult()
-                : "";
-            var studentRaw = _showStudentAnswers && !string.IsNullOrEmpty(filePath)
-                ? GetRedAnswerContentAsync(filePath, "studentAnswers").GetAwaiter().GetResult()
-                : "";
+            string teacherRaw = "";
+            string studentRaw = "";
+
+            if (!string.IsNullOrEmpty(filePath))
+            {
+                if (_showTeacherNotes)
+                    teacherRaw = await GetRedAnswerContentAsync(filePath, "teacherNotes");
+                if (_showStudentAnswers)
+                    studentRaw = await GetRedAnswerContentAsync(filePath, "studentAnswers");
+            }
+
             var teacherFrag = AnnotateAnswerItems(teacherRaw);
             var studentFrag = AnnotateAnswerItems(studentRaw);
 
