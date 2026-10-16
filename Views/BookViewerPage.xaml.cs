@@ -3,6 +3,7 @@ using Microsoft.Maui.Storage;
 using System;
 using System.IO;
 using System.Threading.Tasks;
+using System.Web;
 using Color = Microsoft.Maui.Graphics.Color;
 
 namespace BookViewer.Views;
@@ -41,7 +42,11 @@ public partial class BookViewerPage : ContentPage
         {
             lock (_logLock) File.AppendAllText(GetLogFilePath(), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} - {message}\n");
             System.Diagnostics.Debug.WriteLine(message);
-            Dispatcher.Dispatch(() => { if (StatusLabel != null) StatusLabel.Text = message.Length < 80 ? message : message.Substring(0, 77) + "..."; });
+            Dispatcher.Dispatch(() =>
+            {
+                if (StatusLabel != null)
+                    StatusLabel.Text = message.Length < 80 ? message : message.Substring(0, 77) + "...";
+            });
         }
         catch { }
     }
@@ -66,8 +71,11 @@ public partial class BookViewerPage : ContentPage
             });
         };
 
-        _bookService.OnStatusChanged += (s, msg) => Dispatcher.Dispatch(() => { if (StatusLabel != null) StatusLabel.Text = msg; });
-        _bookService.OnBookLoaded += (s, title) => Dispatcher.Dispatch(() => { if (BookTitleLabel != null) BookTitleLabel.Text = title; });
+        _bookService.OnStatusChanged += (s, msg) =>
+            Dispatcher.Dispatch(() => { if (StatusLabel != null) StatusLabel.Text = msg; });
+
+        _bookService.OnBookLoaded += (s, title) =>
+            Dispatcher.Dispatch(() => { if (BookTitleLabel != null) BookTitleLabel.Text = title; });
 
         _bookService.OnTwoPageSpreadToggled += (s, enabled) =>
         {
@@ -75,14 +83,21 @@ public partial class BookViewerPage : ContentPage
             {
                 bool dark = Application.Current?.RequestedTheme == AppTheme.Dark;
                 SideBySideButton.Text = enabled ? "▮▮ 2 Pages" : "▯ 1 Page";
-                SideBySideButton.BackgroundColor = enabled ? Color.FromArgb("#0A84FF") : (dark ? Color.FromArgb("#2C2C2E") : Color.FromArgb("#F7F7F9"));
+                SideBySideButton.BackgroundColor = enabled
+                    ? Color.FromArgb("#0A84FF")
+                    : (dark ? Color.FromArgb("#2C2C2E") : Color.FromArgb("#F7F7F9"));
                 SideBySideButton.TextColor = enabled ? Colors.White : (dark ? Colors.White : Colors.Black);
                 UpdateTwoPageLayout();
             });
         };
 
         _bookService.OnSideBySideToggled += (s, enabled) => Dispatcher.Dispatch(UpdateTwoPageLayout);
-        _bookService.OnZoomChanged += (s, zoom) => Dispatcher.Dispatch(() => { if (ZoomLabel != null) ZoomLabel.Text = $"{zoom:F1}x"; });
+
+        _bookService.OnZoomChanged += (s, zoom) =>
+            Dispatcher.Dispatch(() => { if (ZoomLabel != null) ZoomLabel.Text = $"{zoom:F1}x"; });
+
+        // Catch bookviewer:// bridge URLs from the splitpane buttons
+        ContentWebView.Navigating += OnWebViewNavigating;
 
         Loaded += async (s, e) =>
         {
@@ -118,13 +133,59 @@ public partial class BookViewerPage : ContentPage
                     if (idx >= 0 && idx < _bookService.PageFiles.Count) await _bookService.LoadPageAsync(idx);
                 }
             }
-            else await DisplayAlert("Error", "Failed to load book", "OK");
+            else
+            {
+                await DisplayAlert("Error", "Failed to load book", "OK");
+            }
         };
     }
 
-    public BookViewerPage(string bookFolder, string sectionId, int startFolio) : this(bookFolder, startFolio)
+    public BookViewerPage(string bookFolder, string sectionId, int startFolio)
+        : this(bookFolder, startFolio)
     {
         _targetSectionId = sectionId;
+    }
+
+    private async void OnWebViewNavigating(object sender, WebNavigatingEventArgs e)
+    {
+        if (string.IsNullOrEmpty(e.Url)) return;
+        if (!e.Url.StartsWith("bookviewer://")) return;
+
+        e.Cancel = true;
+        try
+        {
+            var uri = new Uri(e.Url);
+            var q = HttpUtility.ParseQueryString(uri.Query);
+
+            if (uri.Host == "splitpane-open")
+            {
+                var bookUid = q["bookUID"];
+                var section = q["section"] ?? "";
+                var step = q["step"] ?? "";
+
+                if (string.IsNullOrEmpty(bookUid)) return;
+
+                var targetFolder = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                    "BookViewer", "Books", "book_" + bookUid);
+
+                if (!Directory.Exists(targetFolder))
+                {
+                    await DisplayAlert("Not found", $"Book folder not found:\nbook_{bookUid}", "OK");
+                    return;
+                }
+
+                int folio = 1;
+                if (int.TryParse(step, out int s) && s > 0) folio = s;
+
+                var viewer = new BookViewerPage(targetFolder, section, folio);
+                await Navigation.PushAsync(viewer);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"bridge nav error: {ex.Message}");
+        }
     }
 
     private void UpdateTwoPageLayout()
@@ -146,7 +207,6 @@ public partial class BookViewerPage : ContentPage
         }
     }
 
-    // Toolbar: Notes / Answers — bulk toggle via EvaluateJavaScriptAsync
     private async void OnTeacherNotesClicked(object sender, EventArgs e)
     {
         _showTeacherNotes = !_showTeacherNotes;
@@ -159,8 +219,8 @@ public partial class BookViewerPage : ContentPage
     {
         _showStudentAnswers = !_showStudentAnswers;
         UpdateStudentButton();
-        try { await ContentWebView.EvaluateJavaScriptAsync($"window.__setAnswers({(_showStudentAnswers ? "true" : "false")})"); }
-        catch (Exception ex) { Log($"setAnswers err: {ex.Message}"); }
+        try { await ContentWebView.EvaluateJavaScriptAsync($"window.__setRedAnswers({(_showStudentAnswers ? "true" : "false")})"); }
+        catch (Exception ex) { Log($"setRedAnswers err: {ex.Message}"); }
     }
 
     private void UpdateTeacherButton()
