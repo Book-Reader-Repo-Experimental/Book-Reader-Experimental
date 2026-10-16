@@ -62,14 +62,39 @@ public partial class BookViewerPage : ContentPage
 
         _bookService.OnPagesLoaded += (s, pages) => Dispatcher.Dispatch(UpdateUI);
 
-        _bookService.OnPageChanged += (s, content) =>
+        _bookService.OnPageChanged += async (s, content) =>
         {
+            _currentContentHtml = content;
+
+            if (_bookService.TwoPageSpread)
+            {
+                var combined = await _bookService.BuildTwoPageHtmlAsync();
+                Dispatcher.Dispatch(() =>
+                {
+                    ContentWebView.Source = new HtmlWebViewSource { Html = combined };
+                    ContentWebView.IsVisible = true;
+                    UpdateUI();
+                });
+            }
+            else
+            {
+                Dispatcher.Dispatch(() =>
+                {
+                    ContentWebView.Source = new HtmlWebViewSource { Html = content };
+                    ContentWebView.IsVisible = true;
+                    UpdateUI();
+                });
+            }
+        };
+
+        _bookService.OnNextPageChanged += async (s, html) =>
+        {
+            if (!_bookService.TwoPageSpread) return;
+            var combined = await _bookService.BuildTwoPageHtmlAsync();
             Dispatcher.Dispatch(() =>
             {
-                _currentContentHtml = content;
-                ContentWebView.Source = new HtmlWebViewSource { Html = content };
+                ContentWebView.Source = new HtmlWebViewSource { Html = combined };
                 ContentWebView.IsVisible = true;
-                UpdateUI();
             });
         };
 
@@ -89,11 +114,11 @@ public partial class BookViewerPage : ContentPage
                     ? Color.FromArgb("#0A84FF")
                     : (dark ? Color.FromArgb("#2C2C2E") : Color.FromArgb("#F7F7F9"));
                 SideBySideButton.TextColor = enabled ? Colors.White : (dark ? Colors.White : Colors.Black);
-                UpdateTwoPageLayout();
+                _ = UpdateTwoPageLayoutAsync();
             });
         };
 
-        _bookService.OnSideBySideToggled += (s, enabled) => Dispatcher.Dispatch(UpdateTwoPageLayout);
+        _bookService.OnSideBySideToggled += (s, enabled) => Dispatcher.Dispatch(async () => await UpdateTwoPageLayoutAsync());
 
         _bookService.OnZoomChanged += (s, zoom) =>
             Dispatcher.Dispatch(() => { if (ZoomLabel != null) ZoomLabel.Text = $"{zoom:F1}x"; });
@@ -124,12 +149,6 @@ public partial class BookViewerPage : ContentPage
             UpdateTeacherButton();
             UpdateStudentButton();
 
-            // ============================================================
-            // Target navigation — order matters
-            //   1. section + step  ← the splitpane move-button path
-            //   2. section only
-            //   3. folio
-            // ============================================================
             Log($"Loaded. targetSection='{_targetSectionId}' targetStep={_targetStep} startFolio={_startFolio} totalPages={_bookService.PageFiles.Count}");
 
             if (!string.IsNullOrEmpty(_targetSectionId) && _targetStep > 0)
@@ -141,7 +160,6 @@ public partial class BookViewerPage : ContentPage
                     await _bookService.LoadPageAsync(idx);
                     return;
                 }
-                // fallback: first page of section
                 int first = _bookService.GetFirstIndexOfSection(_targetSectionId);
                 Log($"GetFirstIndexOfSection('{_targetSectionId}') -> {first}");
                 if (first >= 0 && first < _bookService.PageFiles.Count)
@@ -231,11 +249,23 @@ public partial class BookViewerPage : ContentPage
                 var unit = q["unit"] ?? "";
                 var stepStr = q["step"] ?? "";
 
-                if (string.IsNullOrEmpty(section) && !string.IsNullOrEmpty(unit))
-                    section = unit;
-
                 int step = 0;
                 int.TryParse(stepStr, out step);
+
+                if (string.IsNullOrEmpty(section) && !string.IsNullOrEmpty(unit))
+                {
+                    var mapped = _bookService.GetFirstSectionFolderForUnit(unit);
+                    if (!string.IsNullOrEmpty(mapped))
+                    {
+                        section = mapped;
+                        Log($"[splitpane] mapped unit '{unit}' -> section '{section}'");
+                    }
+                    else
+                    {
+                        Log($"[splitpane] no unit→section mapping for unit '{unit}'");
+                        section = unit;
+                    }
+                }
 
                 Log($"splitpane-open bookUID='{bookUid}' section='{section}' unit='{unit}' step='{step}'");
 
@@ -333,39 +363,53 @@ public partial class BookViewerPage : ContentPage
         catch { CloseAssessment(); }
     }
 
-    private void UpdateTwoPageLayout()
+    private async Task UpdateTwoPageLayoutAsync()
     {
         if (_bookService.TwoPageSpread)
         {
-            RightColumn.Width = new GridLength(1, GridUnitType.Star);
-            ContentWebView.Source = new HtmlWebViewSource { Html = _currentContentHtml };
+            var combined = await _bookService.BuildTwoPageHtmlAsync();
+            ContentWebView.Source = new HtmlWebViewSource { Html = combined };
             ContentWebView.IsVisible = true;
-            NextPageWebView.Source = new HtmlWebViewSource { Html = _bookService.NextPageHtml ?? "" };
-            NextPageWebView.IsVisible = true;
         }
         else
         {
-            RightColumn.Width = new GridLength(0);
-            NextPageWebView.IsVisible = false;
             ContentWebView.Source = new HtmlWebViewSource { Html = _currentContentHtml };
             ContentWebView.IsVisible = true;
         }
+
+        // The second WebView is no longer used; the pair is embedded in the
+        // single ContentWebView. Keep it collapsed.
+        NextPageWebView.IsVisible = false;
+        RightColumn.Width = new GridLength(0);
+        UpdateUI();
     }
 
     private async void OnTeacherNotesClicked(object sender, EventArgs e)
     {
         _showTeacherNotes = !_showTeacherNotes;
         UpdateTeacherButton();
-        try { await ContentWebView.EvaluateJavaScriptAsync($"window.__setNotes({(_showTeacherNotes ? "true" : "false")})"); }
-        catch (Exception ex) { Log($"setNotes err: {ex.Message}"); }
+
+        var js = $"window.__setNotes({(_showTeacherNotes ? "true" : "false")})";
+        try { await ContentWebView.EvaluateJavaScriptAsync(js); } catch (Exception ex) { Log($"setNotes err: {ex.Message}"); }
+
+        if (_bookService.TwoPageSpread)
+        {
+            try { await NextPageWebView.EvaluateJavaScriptAsync(js); } catch { }
+        }
     }
 
     private async void OnStudentAnswersClicked(object sender, EventArgs e)
     {
         _showStudentAnswers = !_showStudentAnswers;
         UpdateStudentButton();
-        try { await ContentWebView.EvaluateJavaScriptAsync($"window.__setRedAnswers({(_showStudentAnswers ? "true" : "false")})"); }
-        catch (Exception ex) { Log($"setRedAnswers err: {ex.Message}"); }
+
+        var js = $"window.__setRedAnswers({(_showStudentAnswers ? "true" : "false")})";
+        try { await ContentWebView.EvaluateJavaScriptAsync(js); } catch (Exception ex) { Log($"setRedAnswers err: {ex.Message}"); }
+
+        if (_bookService.TwoPageSpread)
+        {
+            try { await NextPageWebView.EvaluateJavaScriptAsync(js); } catch { }
+        }
     }
 
     private void UpdateTeacherButton()
@@ -492,9 +536,15 @@ public partial class BookViewerPage : ContentPage
     {
         var total = _bookService.PageFiles.Count;
         var current = _bookService.CurrentPageIndex + 1;
+
         PrevButton.IsEnabled = _bookService.CurrentPageIndex > 0 && total > 0;
         NextButton.IsEnabled = _bookService.CurrentPageIndex < total - 1 && total > 0;
-        PageInfoLabel.Text = total > 0 ? $"{current} / {total}" : "0 / 0";
+
+        if (_bookService.TwoPageSpread && _bookService.CurrentPageIndex + 1 < total)
+            PageInfoLabel.Text = $"{current}\u2013{current + 1} / {total}";
+        else
+            PageInfoLabel.Text = total > 0 ? $"{current} / {total}" : "0 / 0";
+
         ZoomLabel.Text = $"{_bookService.CurrentZoom:F1}x";
     }
 }
