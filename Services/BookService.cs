@@ -267,9 +267,15 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
           showExerciseView: function(id, poolType){
             var el = document.getElementById(id);
             if (!el) return;
+            // Try to read the question-group id from the sibling <a> element
+            var gid = '';
+            var a = document.getElementById('BY_assessmentQuestion_' + id);
+            if (a) gid = (a.innerText || '').trim();
             try {
-              window.location.href = 'bookviewer://assessment-open?id=' + encodeURIComponent(id)
-                                  + '&poolType=' + encodeURIComponent(poolType || '');
+              window.location.href = 'bookviewer://assessment-open'
+                + '?id=' + encodeURIComponent(id)
+                + '&poolType=' + encodeURIComponent(poolType || '')
+                + '&group=' + encodeURIComponent(gid);
             } catch(e){}
           },
           closeExerciseView: function(){
@@ -663,6 +669,99 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
             {
                 Log($"ERROR loading page: {ex.Message}");
                 OnStatusChanged?.Invoke(this, $"Error loading page: {ex.Message}");
+            }
+        }
+
+        // ============================================================
+        // Find the pool HTML for a given question group id.
+        // Looks under:
+        //   <bookRoot>/ola/<groupId>.html
+        //   <bookRoot>/pools/<groupId>.html
+        //   <bookRoot>/pools/<groupId>/index.html
+        //   <bookRoot>/ola/<groupId>/index.html
+        //   plus any <bookRoot>/s_*/ola/<groupId>.html
+        // ============================================================
+        public string FindPoolFile(string groupId)
+        {
+            if (string.IsNullOrEmpty(groupId) || string.IsNullOrEmpty(_currentBookPath))
+                return null;
+        
+            var candidates = new List<string>
+            {
+                Path.Combine(_currentBookPath, "ola", groupId + ".html"),
+                Path.Combine(_currentBookPath, "pools", groupId + ".html"),
+                Path.Combine(_currentBookPath, "pools", groupId, "index.html"),
+                Path.Combine(_currentBookPath, "ola", groupId, "index.html"),
+                Path.Combine(_currentBookPath, "ola", "q" + groupId + ".html"),
+                Path.Combine(_currentBookPath, "ola", "question_" + groupId + ".html"),
+            };
+        
+            if (Directory.Exists(_currentBookPath))
+            {
+                foreach (var s in Directory.GetDirectories(_currentBookPath, "s_*"))
+                {
+                    candidates.Add(Path.Combine(s, "ola", groupId + ".html"));
+                    candidates.Add(Path.Combine(s, "pools", groupId + ".html"));
+                    candidates.Add(Path.Combine(s, "ola", groupId, "index.html"));
+                }
+            }
+        
+            foreach (var c in candidates)
+                if (File.Exists(c)) { Log($"[pool] found {groupId} at {c}"); return c; }
+        
+            // Last-ditch: search recursively
+            try
+            {
+                var hits = Directory.GetFiles(_currentBookPath, groupId + ".html", SearchOption.AllDirectories);
+                if (hits.Length > 0) { Log($"[pool] found via search: {hits[0]}"); return hits[0]; }
+        
+                hits = Directory.GetFiles(_currentBookPath, "*" + groupId + "*.html", SearchOption.AllDirectories);
+                if (hits.Length > 0) { Log($"[pool] fuzzy match: {hits[0]}"); return hits[0]; }
+            }
+            catch { }
+        
+            Log($"[pool] not found: {groupId}");
+            return null;
+        }
+        
+        // ============================================================
+        // Build the pool HTML for display in the overlay.
+        // Reads the pool file, inlines every referenced asset
+        // (images, svgs, css) as base64 data URIs so the WebView
+        // renders it from HtmlWebViewSource.
+        // ============================================================
+        public async Task<string> BuildPoolHtmlAsync(string poolFilePath, string groupId)
+        {
+            try
+            {
+                var raw = await File.ReadAllTextAsync(poolFilePath);
+                var poolDir = Path.GetDirectoryName(poolFilePath) ?? _currentBookPath;
+        
+                // If the file already looks like a full HTML document, inline its assets
+                // and use it directly. Otherwise wrap it in a minimal document.
+                if (!Regex.IsMatch(raw, @"<html", RegexOptions.IgnoreCase))
+                {
+                    raw = "<!DOCTYPE html><html><head>" +
+                          "<meta charset='UTF-8'>" +
+                          "<meta name='viewport' content='width=device-width, initial-scale=1.0'>" +
+                          "<style>body{margin:0;padding:16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}</style>" +
+                          "</head><body>" + raw + "</body></html>";
+                }
+        
+                raw = InlineAllAssets(raw, poolDir);
+        
+                // Inject a tiny script that posts back to MAUI when the activity completes
+                raw = raw.Replace("</body>",
+                    "<script>" +
+                    "window.__assessment_complete = function(){ window.location.href='bookviewer://assessment-complete'; };" +
+                    "</script></body>");
+        
+                return raw;
+            }
+            catch (Exception ex)
+            {
+                Log($"BuildPoolHtmlAsync err: {ex.Message}");
+                return "<html><body>Error loading activity</body></html>";
             }
         }
 
