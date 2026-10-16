@@ -329,14 +329,7 @@ namespace BookViewer
             if (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count)
                 _ = LoadPageAsync(_currentPageIndex);
         }
-
-        public void SetShowStudentAnswers(bool show)
-        {
-            _showStudentAnswers = show;
-            if (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count)
-                _ = LoadPageAsync(_currentPageIndex);
-        }
-
+        
         public bool IsFileEncrypted(string content) => _decryptionService.IsEncrypted(content);
         public string DecryptFile(string content, string fileName) => _decryptionService.DecryptWithFileName(content, fileName);
 
