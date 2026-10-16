@@ -45,41 +45,43 @@ namespace BookViewer
             Application.Current?.RequestedTheme == AppTheme.Dark ? "#1C1C1E" : "#E8E8E8";
 
         private const string OverlayCssTemplate = @"
-* { margin: 0; padding: 0; box-sizing: border-box; }
-html, body { width: 100%; height: 100%; overflow: auto; background: #E8E8E8; -webkit-font-smoothing: antialiased; }
-body { display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; }
-.page-wrapper { display: flex; justify-content: center; align-items: flex-start; }
-.page-container { position: relative; flex-shrink: 0; background: #ffffff; box-shadow: 0 0 20px rgba(0,0,0,0.15); overflow: hidden; transform-origin: top center; }
-#rez { position: relative; }
-.bgcls { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
-img.bgcls { width: 100%; height: 100%; }
-pane { display: block; position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
-pane.base > *, pane.redAnswer > *, pane.ori > * { position: absolute; }
-.redbtn { cursor: pointer; opacity: .85; }
-.hideBtn { display: none; }
-.tbred { color: #E40477 !important; }
-.tbnote { color: #E40477 !important; }
-.tbnote * { color: #E40477 !important; }
-.hsgbtn { cursor: pointer; }
-pane.redAnswer { pointer-events: none; }
-pane.redAnswer .tbred { pointer-events: none; }
-hsg { pointer-events: auto; }
-img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes'], img.has2btn[redanswertype='teacherNotes'] { pointer-events: auto !important; cursor: pointer !important; }
-.copyright { display: none !important; }
-
-/* Force teacher-note overlay art to render red */
-img.redbtn[redanswertype='teacherNotes'],
-img.hsgbtn[redanswertype='teacherNotes'],
-img.has2btn[redanswertype='teacherNotes'] {
-    filter: invert(15%) sepia(99%) saturate(7000%) hue-rotate(315deg) brightness(90%) contrast(120%);
-    -webkit-filter: invert(15%) sepia(99%) saturate(7000%) hue-rotate(315deg) brightness(90%) contrast(120%);
-}
-
-/* Teacher-note text color inside <hsg> popups */
-hsg[redanswertype='teacherNotes'] { color: #E40477 !important; }
-hsg[redanswertype='teacherNotes'] * { color: #E40477 !important; }
-";
-
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 100%; height: 100%; overflow: auto; background: #E8E8E8; -webkit-font-smoothing: antialiased; }
+        body { display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; }
+        .page-wrapper { display: flex; justify-content: center; align-items: flex-start; }
+        .page-container { position: relative; flex-shrink: 0; background: #ffffff; box-shadow: 0 0 20px rgba(0,0,0,0.15); overflow: hidden; transform-origin: top center; }
+        #rez { position: relative; }
+        .bgcls { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        img.bgcls { width: 100%; height: 100%; }
+        pane { display: block; position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        pane.base > *, pane.redAnswer > *, pane.ori > * { position: absolute; }
+        .redbtn { cursor: pointer; opacity: .85; }
+        .hideBtn { display: none; }
+        .tbred { color: #E40477 !important; }
+        .tbnote { color: #E40477 !important; }
+        .tbnote * { color: #E40477 !important; }
+        .hsgbtn { cursor: pointer; }
+        pane.redAnswer { pointer-events: none; }
+        pane.redAnswer .tbred { pointer-events: none; }
+        hsg { pointer-events: auto; }
+        img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes'], img.has2btn[redanswertype='teacherNotes'] { pointer-events: auto !important; cursor: pointer !important; }
+        .copyright { display: none !important; }
+        
+        /* Hide the splitpane author-tool panel (grey box with move/delete + Book UID / Section / Step fields) */
+        tohide,
+        tohide *,
+        splitpane tohide,
+        splitpane tohide * {
+            display: none !important;
+            visibility: hidden !important;
+            width: 0 !important;
+            height: 0 !important;
+            overflow: hidden !important;
+        }
+        
+        /* Fallback: hide the author-tool anchors by class, in case they escape <tohide> */
+        .btn_h, .btn_h_m { display: none !important; visibility: hidden !important; }
+        ";
         private const string ReaderJsTemplate = @"
         window.__readerRedAnswersVisible = false;
         window.__readerNotesVisible = false;
