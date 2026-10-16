@@ -39,7 +39,7 @@ namespace BookViewer
         private static string _logFilePath = "";
 
         public int CurrentPageWidth { get; private set; } = 1024;
-        public int CurrentPageHeight { get; private set; } = 1309;
+        public int CurrentPageHeight { get; private set; } = 1344;
 
         private static string SurroundColor =>
             Application.Current?.RequestedTheme == AppTheme.Dark ? "#1C1C1E" : "#E8E8E8";
@@ -66,25 +66,27 @@ namespace BookViewer
         text-rendering: geometricPrecision; -webkit-font-smoothing: antialiased;
     }
 
-    .answer-layer {
-        position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-        z-index: 20; pointer-events: none; overflow: visible; display: none;
+    /* Answer / note content sits directly on the page; hidden until toggled on */
+    .tbnote, .tbred, .sa {
+        display: none;
+        position: absolute !important;
+        pointer-events: none;
     }
-    .answer-layer.active { display: block; }
-    .answer-layer > * { position: absolute !important; }
+    .tbnote.ans-on, .tbred.ans-on, .sa.ans-on { display: block !important; }
 
-    .answer-layer .tbnote,
-    .answer-layer .tbred,
-    .answer-layer .sa { display: none; }
-    .answer-layer .tbnote.ans-on,
-    .answer-layer .tbred.ans-on,
-    .answer-layer .sa.ans-on { display: block !important; }
+    .tbnote { background: rgba(255,235,150,0.55); border: 3px solid #3498db; border-radius: 4px; padding: 3px; }
+    .tbred, .sa { background: rgba(255,235,150,0.55); border: 3px solid #2ecc71; border-radius: 4px; padding: 3px; }
 
-    .answer-layer .tbnote { background: rgba(255,235,150,0.55); border: 3px solid #3498db; border-radius: 4px; padding: 3px; }
-    .answer-layer .tbred,
-    .answer-layer .sa { background: rgba(255,235,150,0.55); border: 3px solid #2ecc71; border-radius: 4px; padding: 3px; }
+    /* The hsg group panels and toggle icons are shown/hidden by JS */
+    hsg { display: none; }
+    img.hsgbtn, img.redbtn, img.has2btn {
+        pointer-events: auto !important;
+        cursor: pointer !important;
+        z-index: 500 !important;
+    }
 
-    .item-btns { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 30; pointer-events: none; }
+    /* Item buttons */
+    .item-btns { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 600; pointer-events: none; }
     .item-btn {
         position: absolute; width: 22px; height: 22px;
         background: #FFEE99; border: 1px solid #C80; border-radius: 4px;
@@ -97,149 +99,169 @@ namespace BookViewer
     .item-btn.on { background: #CC0000; color: #fff; border-color: #900; }
 ";
 
+        // ============================================================
+        // JS — mirrors the web-reader behavior:
+        //   __toggleByName(lid, on)         → shows/hides matching .tbnote/.tbred
+        //   __setNotes(on) / __setAnswers(on) → bulk toggle
+        //   group icon click                 → toggles its own group
+        //   per-item button click            → toggles one item
+        // ============================================================
         private const string OverlayJsTemplate = @"
-        (function() {
-            function showItem(id, on) {
-                var el = document.querySelector('[data-ans-id=""' + id + '""]');
-                if (!el) return;
-                if (on) el.classList.add('ans-on'); else el.classList.remove('ans-on');
+(function() {
+    function log(m) { try { console.log('[reader] ' + m); } catch(e) {} }
+
+    function findItemsByLinkname(lid) {
+        var out = [];
+        var all = document.querySelectorAll('.tbnote, .tbred, .sa');
+        for (var i = 0; i < all.length; i++) {
+            if (all[i].querySelector('[name=""' + lid + '""]')) out.push(all[i]);
+        }
+        return out;
+    }
+
+    window.__toggleByName = function(lid, on) {
+        var items = findItemsByLinkname(lid);
+        log('toggleByName ' + lid + ' -> ' + items.length + ' items, on=' + on);
+        for (var i = 0; i < items.length; i++) {
+            if (on) items[i].classList.add('ans-on');
+            else items[i].classList.remove('ans-on');
+        }
+        return items.length;
+    };
+
+    window.__setNotes = function(on) {
+        var items = document.querySelectorAll('.tbnote');
+        for (var i = 0; i < items.length; i++) {
+            if (on) items[i].classList.add('ans-on'); else items[i].classList.remove('ans-on');
+        }
+    };
+
+    window.__setAnswers = function(on) {
+        var items = document.querySelectorAll('.tbred, .sa');
+        for (var i = 0; i < items.length; i++) {
+            if (on) items[i].classList.add('ans-on'); else items[i].classList.remove('ans-on');
+        }
+    };
+
+    window.__toggleItem = function(itemId) {
+        var el = document.querySelector('[data-ans-id=""' + itemId + '""]');
+        if (!el) return;
+        var on = el.classList.toggle('ans-on');
+        var btn = document.querySelector('.item-btn[data-target=""' + itemId + '""]');
+        if (btn) btn.classList.toggle('on', on);
+    };
+
+    function wireGroupIcons() {
+        var groups = document.querySelectorAll('hsg[id][name]');
+        log('wireGroupIcons: ' + groups.length + ' groups');
+        groups.forEach(function(g) {
+            var icon = document.getElementById(g.id + '_img');
+            if (!icon) return;
+            icon.style.display = '';
+            icon.style.visibility = 'visible';
+            icon.style.pointerEvents = 'auto';
+            icon.style.cursor = 'pointer';
+
+            if (icon.__wired) return;
+            icon.__wired = true;
+
+            // Replace the inline onclick with a listener that also syncs per-item buttons
+            var onclickStr = icon.getAttribute('onclick') || '';
+            var fn = null;
+            if (onclickStr) {
+                try { fn = new Function('event', onclickStr + '; return false;'); } catch(e) {}
             }
-        
-            window.__toggleItem = function(id) {
-                var el = document.querySelector('[data-ans-id=""' + id + '""]');
-                if (!el) return;
-                var on = el.classList.toggle('ans-on');
-                var btn = document.querySelector('.item-btn[data-target=""' + id + '""]');
-                if (btn) btn.classList.toggle('on', on);
-            };
-        
-            // ---- Toggle by linkname (used by group icons) ----
-            function toggleGroup(g) {
-                var icon = document.getElementById(g.id + '_img');
-                var isOn = g.getAttribute('on') === 'true';
-                var turnOn = !isOn;
-                g.setAttribute('on', turnOn ? 'true' : 'false');
-        
+            icon.removeAttribute('onclick');
+
+            icon.addEventListener('click', function(ev) {
+                ev.stopPropagation();
+                if (fn) { try { fn.call(icon, ev); } catch(e) { log('icon fn err ' + e.message); } }
+                else {
+                    var turnOn = g.getAttribute('on') !== 'true';
+                    g.setAttribute('on', turnOn ? 'true' : 'false');
+                    g.querySelectorAll('hastext[linkname]').forEach(function(h) {
+                        var lid = h.getAttribute('linkname');
+                        if (lid) window.__toggleByName(lid, turnOn);
+                    });
+                }
+                // Sync any per-item buttons belonging to this group
                 g.querySelectorAll('hastext[linkname]').forEach(function(h) {
                     var lid = h.getAttribute('linkname');
                     if (!lid) return;
-                    var all = document.querySelectorAll('[data-ans-id]');
-                    for (var k = 0; k < all.length; k++) {
-                        var inner = all[k].querySelector('[name=""' + lid + '""]');
-                        if (!inner) continue;
-                        if (!all[k].getAttribute('data-lnk')) all[k].setAttribute('data-lnk', lid);
-                        if (turnOn) all[k].classList.add('ans-on');
-                        else all[k].classList.remove('ans-on');
-                        var id = all[k].getAttribute('data-ans-id');
-                        var btn = document.querySelector('.item-btn[data-target=""' + id + '""]');
-                        if (btn) btn.classList.toggle('on', turnOn);
-                    }
+                    var items = findItemsByLinkname(lid);
+                    if (!items.length) return;
+                    var itemId = items[0].getAttribute('data-ans-id');
+                    if (!itemId) return;
+                    var on = items[0].classList.contains('ans-on');
+                    var btn = document.querySelector('.item-btn[data-target=""' + itemId + '""]');
+                    if (btn) btn.classList.toggle('on', on);
                 });
-        
-                if (icon) {
-                    var src = icon.getAttribute('src') || '';
-                    if (turnOn) icon.setAttribute('src', src.replace('teacherNotes.svg','teacherNotes_o.svg').replace('redlayerAll.svg','redlayerNone.svg'));
-                    else icon.setAttribute('src', src.replace('teacherNotes_o.svg','teacherNotes.svg').replace('redlayerNone.svg','redlayerAll.svg'));
+            }, true);
+        });
+    }
+
+    function buildButtons() {
+        var container = document.getElementById('itemBtns');
+        if (!container) return;
+        container.innerHTML = '';
+
+        var groups = document.querySelectorAll('hsg[id][name]');
+        log('buildButtons: ' + groups.length + ' groups');
+
+        groups.forEach(function(g) {
+            var icon = document.getElementById(g.id + '_img');
+            if (!icon) return;
+            var baseLeft = parseFloat(icon.style.left) || 0;
+            var baseTop  = parseFloat(icon.style.top)  || 0;
+            var children = g.querySelectorAll('hastext[linkname]');
+            log('  group ' + g.id + ' children=' + children.length);
+
+            var i = 0;
+            children.forEach(function(h) {
+                var lid = h.getAttribute('linkname');
+                if (!lid) return;
+                var items = findItemsByLinkname(lid);
+                if (!items.length) { log('    no items for ' + lid); return; }
+
+                // Tag every matched item with data-ans-id (once)
+                if (!items[0].getAttribute('data-ans-id')) {
+                    items[0].setAttribute('data-ans-id', 'ans_' + g.id + '_' + i);
                 }
-            }
-        
-            // ---- Make group icons visible + clickable, and wire them ----
-            function wireGroupIcons() {
-                document.querySelectorAll('hsg[id][name]').forEach(function(g) {
-                    var icon = document.getElementById(g.id + '_img');
-                    if (!icon) return;
-                    icon.style.cursor = 'pointer';
-                    icon.style.pointerEvents = 'auto';
-                    icon.style.display = '';
-                    icon.style.zIndex = '9999';
-                    if (!icon.__clickBound) {
-                        icon.__clickBound = true;
-                        // Capture the original onclick and re-bind as an event listener
-                        var onclickStr = icon.getAttribute('onclick') || '';
-                        if (onclickStr) {
-                            try {
-                                var fn = new Function('event', onclickStr + '; return false;');
-                                icon.removeAttribute('onclick');
-                                icon.addEventListener('click', function(ev) {
-                                    ev.stopPropagation();
-                                    try { fn.call(icon, ev); } catch(e) { console.log('[icon click] err', e.message); }
-                                }, true);
-                            } catch(e) { console.log('[icon click] compile err', e.message); }
-                        } else {
-                            icon.addEventListener('click', function(ev) {
-                                ev.stopPropagation();
-                                toggleGroup(g);
-                            }, true);
-                        }
-                    }
-                });
-            }
-        
-            // ---- Build per-item buttons next to each group icon ----
-            function buildButtons() {
-                var container = document.getElementById('itemBtns');
-                if (!container) return;
-                container.innerHTML = '';
-        
-                var groups = document.querySelectorAll('hsg[id][name]');
-                groups.forEach(function(g) {
-                    var icon = document.getElementById(g.id + '_img');
-                    if (!icon) return;
-                    var baseLeft = parseFloat(icon.style.left) || 0;
-                    var baseTop  = parseFloat(icon.style.top)  || 0;
-                    var children = g.querySelectorAll('hastext[linkname]');
-        
-                    var i = 0;
-                    children.forEach(function(h) {
-                        var lid = h.getAttribute('linkname');
-                        if (!lid) return;
-        
-                        // Find the matching item(s) in the layer
-                        var matched = null;
-                        var all = document.querySelectorAll('[data-ans-id]');
-                        for (var k = 0; k < all.length; k++) {
-                            var inner = all[k].querySelector('[name=""' + lid + '""]');
-                            if (inner) { matched = all[k]; if (!matched.getAttribute('data-lnk')) matched.setAttribute('data-lnk', lid); break; }
-                        }
-                        if (!matched) return;
-                        var id = matched.getAttribute('data-ans-id');
-        
-                        var labelEl = h.querySelector('a.s');
-                        var label = labelEl ? (labelEl.textContent || '').trim().substring(0, 3) : String(i + 1);
-                        if (!label) label = String(i + 1);
-        
-                        var btn = document.createElement('div');
-                        btn.className = 'item-btn';
-                        btn.setAttribute('data-target', id);
-                        btn.title = labelEl ? labelEl.textContent : lid;
-                        btn.textContent = label;
-                        btn.style.left = (baseLeft - 30) + 'px';
-                        btn.style.top  = (baseTop + i * 24) + 'px';
-                        (function(capturedId) {
-                            btn.addEventListener('click', function(ev) {
-                                ev.stopPropagation();
-                                window.__toggleItem(capturedId);
-                            });
-                        })(id);
-                        container.appendChild(btn);
-                        i++;
-                    });
-                });
-            }
-        
-            function init() {
-                wireGroupIcons();
-                buildButtons();
-            }
-        
-            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
-            else init();
-            setTimeout(init, 200);
-            setTimeout(init, 800);
-        })();
-        ";
+                var itemId = items[0].getAttribute('data-ans-id');
 
+                var labelEl = h.querySelector('a.s');
+                var label = labelEl ? (labelEl.textContent || '').trim().substring(0, 3) : String(i + 1);
+                if (!label) label = String(i + 1);
 
+                var btn = document.createElement('div');
+                btn.className = 'item-btn';
+                btn.setAttribute('data-target', itemId);
+                btn.title = labelEl ? labelEl.textContent : lid;
+                btn.textContent = label;
+                btn.style.left = (baseLeft - 30) + 'px';
+                btn.style.top  = (baseTop + i * 24) + 'px';
+                btn.addEventListener('click', function(ev) {
+                    ev.stopPropagation();
+                    window.__toggleItem(itemId);
+                });
+                container.appendChild(btn);
+                i++;
+            });
+        });
+    }
+
+    function init() {
+        log('init');
+        wireGroupIcons();
+        buildButtons();
+    }
+
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
+    setTimeout(init, 200);
+    setTimeout(init, 800);
+})();
+";
 
         private string GetLogFilePath()
         {
@@ -251,10 +273,7 @@ namespace BookViewer
                     Directory.CreateDirectory(logFolder);
                     _logFilePath = Path.Combine(logFolder, $"BookService_{DateTime.Now:yyyyMMdd_HHmmss}.log");
                 }
-                catch
-                {
-                    _logFilePath = Path.Combine(Path.GetTempPath(), $"BookService_{DateTime.Now:yyyyMMdd_HHmmss}.log");
-                }
+                catch { _logFilePath = Path.Combine(Path.GetTempPath(), $"BookService_{DateTime.Now:yyyyMMdd_HHmmss}.log"); }
             }
             return _logFilePath;
         }
@@ -268,8 +287,7 @@ namespace BookViewer
                 string logMessage = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} - {message}";
                 lock (_logLock) File.AppendAllText(GetLogFilePath(), logMessage + Environment.NewLine);
                 System.Diagnostics.Debug.WriteLine(logMessage);
-                if (message.Length < 80) OnStatusChanged?.Invoke(this, message);
-                else OnStatusChanged?.Invoke(this, message.Substring(0, 77) + "...");
+                OnStatusChanged?.Invoke(this, message.Length < 80 ? message : message.Substring(0, 77) + "...");
             }
             catch { }
         }
@@ -313,19 +331,8 @@ namespace BookViewer
                 _ = LoadPageAsync(_currentPageIndex);
         }
 
-        public void ShowAllTeacherNotes(bool show)
-        {
-            _showTeacherNotes = show;
-            if (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count)
-                _ = LoadPageAsync(_currentPageIndex);
-        }
-
-        public void ShowAllStudentAnswers(bool show)
-        {
-            _showStudentAnswers = show;
-            if (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count)
-                _ = LoadPageAsync(_currentPageIndex);
-        }
+        public void ShowAllTeacherNotes(bool show) { _showTeacherNotes = show; if (_currentPageIndex >= 0) _ = LoadPageAsync(_currentPageIndex); }
+        public void ShowAllStudentAnswers(bool show) { _showStudentAnswers = show; if (_currentPageIndex >= 0) _ = LoadPageAsync(_currentPageIndex); }
 
         public bool IsFileEncrypted(string content) => _decryptionService.IsEncrypted(content);
         public string DecryptFile(string content, string fileName) => _decryptionService.DecryptWithFileName(content, fileName);
@@ -346,8 +353,7 @@ namespace BookViewer
         {
             _sideBySideMode = !_sideBySideMode;
             OnSideBySideToggled?.Invoke(this, _sideBySideMode);
-            if (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count)
-                _ = LoadPageAsync(_currentPageIndex);
+            if (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count) _ = LoadPageAsync(_currentPageIndex);
         }
 
         public void ToggleTwoPageSpread()
@@ -355,23 +361,19 @@ namespace BookViewer
             _twoPageSpread = !_twoPageSpread;
             _sideBySideMode = _twoPageSpread;
             OnTwoPageSpreadToggled?.Invoke(this, _twoPageSpread);
-            if (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count)
-                _ = LoadPageAsync(_currentPageIndex);
+            if (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count) _ = LoadPageAsync(_currentPageIndex);
         }
 
         public int GetIndexForStepFile(string stepFile)
         {
             if (string.IsNullOrEmpty(stepFile)) return -1;
             var name = Path.GetFileNameWithoutExtension(stepFile);
-            if (_stepFileToIndex.TryGetValue(name, out int idx)) return idx;
-            return -1;
+            return _stepFileToIndex.TryGetValue(name, out int idx) ? idx : -1;
         }
 
         public int GetIndexForFolio(int folio)
         {
-            if (_folioToStepFile.TryGetValue(folio, out var stepFile))
-                return GetIndexForStepFile(stepFile);
-            return -1;
+            return _folioToStepFile.TryGetValue(folio, out var stepFile) ? GetIndexForStepFile(stepFile) : -1;
         }
 
         public int GetIndexForSectionFolio(string sectionId, int folio)
@@ -392,8 +394,7 @@ namespace BookViewer
         public int GetFirstIndexOfSection(string sectionId)
         {
             if (string.IsNullOrEmpty(sectionId)) return -1;
-            if (_sectionFirstIndex.TryGetValue(sectionId, out int idx)) return idx;
-            return -1;
+            return _sectionFirstIndex.TryGetValue(sectionId, out int idx) ? idx : -1;
         }
 
         public async Task<bool> LoadBookAsync(string folderPath)
@@ -407,11 +408,7 @@ namespace BookViewer
                 Directory.CreateDirectory(_tempFolder);
 
                 var bookXmlPath = Path.Combine(folderPath, "book.xml");
-                if (!File.Exists(bookXmlPath))
-                {
-                    OnStatusChanged?.Invoke(this, "book.xml not found");
-                    return false;
-                }
+                if (!File.Exists(bookXmlPath)) { OnStatusChanged?.Invoke(this, "book.xml not found"); return false; }
 
                 var folderName = Path.GetFileName(folderPath);
                 var bookIdMatch = Regex.Match(folderName, @"book_(\d+)");
@@ -428,11 +425,7 @@ namespace BookViewer
                 bool bookXmlDecrypted = false;
                 if (_decryptionService.IsEncrypted(content))
                 {
-                    if (string.IsNullOrEmpty(_currentBookUid))
-                    {
-                        OnStatusChanged?.Invoke(this, "Could not decrypt book.xml - UID not found");
-                        return false;
-                    }
+                    if (string.IsNullOrEmpty(_currentBookUid)) { OnStatusChanged?.Invoke(this, "No UID"); return false; }
                     content = _decryptionService.DecryptBookFile(content, _currentBookUid);
                     await File.WriteAllTextAsync(bookXmlPath, content);
                     bookXmlDecrypted = true;
@@ -441,11 +434,9 @@ namespace BookViewer
                 _bookTitle = "Unknown Book";
                 var titleMatch = Regex.Match(content, @"name=""([^""]+)""");
                 if (titleMatch.Success) _bookTitle = titleMatch.Groups[1].Value;
-
                 OnBookLoaded?.Invoke(this, _bookTitle);
 
-                if (bookXmlDecrypted)
-                    await DecryptBookFilesAsync(folderPath);
+                if (bookXmlDecrypted) await DecryptBookFilesAsync(folderPath);
 
                 _pageFiles.Clear();
 
@@ -542,7 +533,6 @@ namespace BookViewer
                         var folioMap = new Dictionary<int, string>();
                         var pageNodes = pagesDoc.SelectNodes("//page");
                         if (pageNodes != null)
-                        {
                             foreach (XmlNode pageNode in pageNodes)
                             {
                                 var folioStr = pageNode.Attributes?["folio"]?.Value ?? "";
@@ -550,7 +540,6 @@ namespace BookViewer
                                 if (int.TryParse(folioStr, out int folio) && !string.IsNullOrEmpty(file))
                                     folioMap[folio] = file;
                             }
-                        }
                         _sectionFolioMap[sectionId] = folioMap;
                     }
                     catch (Exception ex) { Log($"Error parsing {pagesXmlPath}: {ex.Message}"); }
@@ -563,11 +552,7 @@ namespace BookViewer
                     _currentPageIndex = 0;
                     await LoadPageAsync(0);
                 }
-                else
-                {
-                    OnStatusChanged?.Invoke(this, "No pages found in this book");
-                    return false;
-                }
+                else { OnStatusChanged?.Invoke(this, "No pages found"); return false; }
 
                 OnStatusChanged?.Invoke(this, $"Loaded: {_bookTitle} ({_pageFiles.Count} pages)");
                 return true;
@@ -589,7 +574,6 @@ namespace BookViewer
                 var htmFiles = Directory.GetFiles(folderPath, "*.htm", SearchOption.AllDirectories).ToList();
 
                 int bookKey = _decryptionService.CalculateKey(_currentBookUid);
-                int decryptedCount = 0, alreadyDecryptedCount = 0, htmlDecryptedCount = 0, htmlSkippedCount = 0;
 
                 var allXmlAndHtmFiles = new List<string>();
                 allXmlAndHtmFiles.AddRange(xmlFiles);
@@ -601,10 +585,8 @@ namespace BookViewer
                     {
                         var fileName = Path.GetFileName(file);
                         var fileContent = await File.ReadAllTextAsync(file);
-                        if (!_decryptionService.IsEncrypted(fileContent)) { alreadyDecryptedCount++; continue; }
-                        string decryptedContent = _decryptionService.DecryptXmlOrHtm(fileContent, fileName);
-                        await File.WriteAllTextAsync(file, decryptedContent);
-                        decryptedCount++;
+                        if (!_decryptionService.IsEncrypted(fileContent)) continue;
+                        await File.WriteAllTextAsync(file, _decryptionService.DecryptXmlOrHtm(fileContent, fileName));
                     }
                     catch (Exception ex) { Log($"Error decrypting {Path.GetFileName(file)}: {ex.Message}"); }
                 }
@@ -618,29 +600,20 @@ namespace BookViewer
                         bool isDecrypted = fileContent.Contains("<") && fileContent.Contains(">") &&
                                            (fileContent.Contains("</") || fileContent.Contains("/>")) &&
                                            (fileContent.Contains("class=") || fileContent.Contains("<div") || fileContent.Contains("id="));
-                        if (isDecrypted) { htmlSkippedCount++; continue; }
-                        string decryptedContent = _decryptionService.DecryptWithKey(fileContent, bookKey);
-                        await File.WriteAllTextAsync(file, decryptedContent);
-                        htmlDecryptedCount++;
+                        if (isDecrypted) continue;
+                        await File.WriteAllTextAsync(file, _decryptionService.DecryptWithKey(fileContent, bookKey));
                     }
                     catch (Exception ex) { Log($"Error decrypting {Path.GetFileName(file)}: {ex.Message}"); }
                 }
-
-                Log($"Decrypt: XML/HTM {decryptedCount} decrypted, {alreadyDecryptedCount} plain; HTML {htmlDecryptedCount} decrypted, {htmlSkippedCount} plain");
             }
-            catch (Exception ex) { Log($"ERROR in DecryptBookFilesAsync: {ex.Message}"); }
+            catch (Exception ex) { Log($"ERROR DecryptBookFilesAsync: {ex.Message}"); }
         }
 
         public async Task DecryptBookAsync()
         {
-            if (string.IsNullOrEmpty(_currentBookPath))
-            {
-                OnStatusChanged?.Invoke(this, "No book loaded");
-                return;
-            }
+            if (string.IsNullOrEmpty(_currentBookPath)) { OnStatusChanged?.Invoke(this, "No book loaded"); return; }
             OnStatusChanged?.Invoke(this, "Decrypting book files...");
             await DecryptBookFilesAsync(_currentBookPath);
-            OnStatusChanged?.Invoke(this, "Decryption complete! Reloading book...");
             await LoadBookAsync(_currentBookPath);
         }
 
@@ -653,7 +626,6 @@ namespace BookViewer
             {
                 var m = Regex.Match(fileName ?? "", @"^steps?_(\d+)\.html$", RegexOptions.IgnoreCase);
                 if (m.Success && int.TryParse(m.Groups[1].Value, out int idx)) return idx;
-
                 m = Regex.Match(fileName ?? "", @"(\d+)");
                 if (m.Success && int.TryParse(m.Groups[1].Value, out int idx3)) return idx3;
             }
@@ -664,7 +636,6 @@ namespace BookViewer
         public async Task LoadPageAsync(int index)
         {
             if (index < 0 || index >= _pageFiles.Count) return;
-
             try
             {
                 _currentPageIndex = index;
@@ -707,12 +678,13 @@ namespace BookViewer
                     string contentHtml = await ExtractContentFromHtmlFile(filePath, fileName, directory);
                     string fontCss = await GetFontCssWithEmbeddedFonts(directory);
 
-                    int pageWidth = 1024, pageHeight = 1309;
+                    // Extract the hsg group markup + toggle icons from the skeleton
+                    string hsgMarkup = ExtractHsgMarkup(htmlContent);
 
+                    int pageWidth = 1024, pageHeight = 1344;
                     var rezMatch = Regex.Match(htmlContent,
                         @"id\s*=\s*[""']rez[""'][^>]*style\s*=\s*[""'][^""']*width\s*:\s*(\d+)px[^""']*height\s*:\s*(\d+)px",
                         RegexOptions.IgnoreCase);
-
                     if (rezMatch.Success)
                     {
                         if (int.TryParse(rezMatch.Groups[1].Value, out int w)) pageWidth = w;
@@ -722,7 +694,7 @@ namespace BookViewer
                     CurrentPageWidth = pageWidth;
                     CurrentPageHeight = pageHeight;
 
-                    return await BuildOverlayHtmlAsync(bgImage, contentHtml, fileName, fontCss, pageWidth, pageHeight);
+                    return await BuildOverlayHtmlAsync(bgImage, contentHtml, hsgMarkup, fileName, fontCss, pageWidth, pageHeight);
                 }
 
                 return htmlContent;
@@ -734,40 +706,49 @@ namespace BookViewer
             }
         }
 
+        /// <summary>
+        /// Pull every &lt;hsg&gt; group, every has2btn/redbtn/hsgbtn marker, and every
+        /// splitpane/assessment block out of the raw skeleton so we can re-inject them.
+        /// </summary>
+        private string ExtractHsgMarkup(string skeletonHtml)
+        {
+            if (string.IsNullOrEmpty(skeletonHtml)) return "";
+
+            var sb = new StringBuilder();
+
+            // hsg groups — capture opening tag, children, closing tag
+            var hsgMatches = Regex.Matches(skeletonHtml,
+                @"<hsg\b[^>]*>[\s\S]*?</hsg>",
+                RegexOptions.IgnoreCase);
+            foreach (Match m in hsgMatches) sb.AppendLine(m.Value);
+
+            // Toggle marker images (self-closing or plain <img>)
+            var imgMatches = Regex.Matches(skeletonHtml,
+                @"<img\b[^>]*\bclass\s*=\s*[""'][^""']*\b(hsgbtn|redbtn|has2btn)\b[^""']*[""'][^>]*>",
+                RegexOptions.IgnoreCase);
+            foreach (Match m in imgMatches) sb.AppendLine(m.Value);
+
+            return sb.ToString();
+        }
+
         private async Task<string> ExtractContentFromHtmlFile(string filePath, string fileName, string directory)
         {
             string nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
 
             string oriHtmlPath = Path.Combine(directory, nameWithoutExt + "_ori.html");
-            if (File.Exists(oriHtmlPath))
-            {
-                string oriContent = await File.ReadAllTextAsync(oriHtmlPath);
-                return ExtractContentFromHtml(oriContent);
-            }
+            if (File.Exists(oriHtmlPath)) return ExtractContentFromHtml(await File.ReadAllTextAsync(oriHtmlPath));
 
             string paraXmlPath = Path.Combine(directory, nameWithoutExt + "_para.xml");
-            if (File.Exists(paraXmlPath))
-            {
-                string paraContent = await File.ReadAllTextAsync(paraXmlPath);
-                return ExtractContentFromParaXml(paraContent);
-            }
+            if (File.Exists(paraXmlPath)) return ExtractContentFromParaXml(await File.ReadAllTextAsync(paraXmlPath));
 
-            try
-            {
-                string fallbackContent = await File.ReadAllTextAsync(filePath);
-                return ExtractContentFromHtml(fallbackContent);
-            }
-            catch
-            {
-                return "<div style='padding:20px;color:#666;font-size:24px;'>Content not available</div>";
-            }
+            try { return ExtractContentFromHtml(await File.ReadAllTextAsync(filePath)); }
+            catch { return "<div style='padding:20px;color:#666;font-size:24px;'>Content not available</div>"; }
         }
 
         private string ExtractContentFromHtml(string htmlContent)
         {
             var bodyMatch = Regex.Match(htmlContent, @"<body[^>]*>([\s\S]*?)</body>", RegexOptions.IgnoreCase);
-            if (!bodyMatch.Success) return htmlContent;
-            return bodyMatch.Groups[1].Value;
+            return bodyMatch.Success ? bodyMatch.Groups[1].Value : htmlContent;
         }
 
         private string ExtractContentFromParaXml(string paraXmlContent)
@@ -806,11 +787,8 @@ namespace BookViewer
                     if (!string.IsNullOrEmpty(w)) pos.Append("width:").Append(w).Append("px;");
                     if (!string.IsNullOrEmpty(h)) pos.Append("height:").Append(h).Append("px;");
                     if (!string.IsNullOrEmpty(align)) pos.Append("text-align:").Append(align).Append(';');
-                    if (string.IsNullOrEmpty(align)) pos.Append("text-align:left;");
 
-                    var cls = hasCoords ? "para para-abs" : "para para-flow";
-                    sb.Append("<div class='").Append(cls).Append("' style=\"")
-                      .Append(pos.ToString()).Append("\">").Append(text).Append("</div>");
+                    sb.Append("<div class='para' style=\"").Append(pos.ToString()).Append("\">").Append(text).Append("</div>");
                 }
                 return sb.ToString();
             }
@@ -828,32 +806,20 @@ namespace BookViewer
 
                 if (!File.Exists(redAnswerPath))
                 {
-                    string[] altPatterns = answerType == "teacherNotes"
-                        ? new[]
-                        {
-                            Path.Combine(directory, fileName + "_teacherNotes.html"),
-                            Path.Combine(directory, fileName + "_teacher.html"),
-                            Path.Combine(directory, "teacherNotes.html"),
-                            Path.Combine(directory, "teacher.html")
-                        }
-                        : new[]
-                        {
-                            Path.Combine(directory, fileName + "_studentAnswers.html"),
-                            Path.Combine(directory, fileName + "_studentAnswer.html"),
-                            Path.Combine(directory, fileName + "_student.html"),
-                            Path.Combine(directory, "studentAnswers.html"),
-                            Path.Combine(directory, "studentAnswer.html"),
-                            Path.Combine(directory, "redAnswer.html")
-                        };
-
-                    foreach (var alt in altPatterns)
-                        if (File.Exists(alt)) { redAnswerPath = alt; break; }
+                    string[] alts = answerType == "teacherNotes"
+                        ? new[] { Path.Combine(directory, fileName + "_teacherNotes.html"),
+                                  Path.Combine(directory, fileName + "_teacher.html"),
+                                  Path.Combine(directory, "teacherNotes.html") }
+                        : new[] { Path.Combine(directory, fileName + "_studentAnswers.html"),
+                                  Path.Combine(directory, fileName + "_studentAnswer.html"),
+                                  Path.Combine(directory, "studentAnswers.html"),
+                                  Path.Combine(directory, "redAnswer.html") };
+                    foreach (var a in alts) if (File.Exists(a)) { redAnswerPath = a; break; }
                 }
 
                 if (!File.Exists(redAnswerPath)) return "";
 
                 string content = await File.ReadAllTextAsync(redAnswerPath);
-
                 var bodyMatch = Regex.Match(content, @"<body[^>]*>([\s\S]*?)</body>", RegexOptions.IgnoreCase);
                 if (bodyMatch.Success) content = bodyMatch.Groups[1].Value;
 
@@ -861,49 +827,18 @@ namespace BookViewer
                 var sb = new StringBuilder();
 
                 var divMatches = Regex.Matches(content,
-                    @"<div[^>]*class\s*=\s*[""'][^""']*" + classPattern + @"[^""']*[""'][^>]*>[\s\S]*?</div>",
+                    @"<div\b[^>]*\bclass\s*=\s*[""'][^""']*\b" + classPattern + @"\b[^""']*[""'][^>]*>[\s\S]*?</div>",
                     RegexOptions.IgnoreCase);
-                foreach (Match match in divMatches) sb.AppendLine(match.Value);
+                foreach (Match m in divMatches) sb.AppendLine(m.Value);
 
                 var svgMatches = Regex.Matches(content,
-                    @"<svg[^>]*class\s*=\s*[""'][^""']*" + classPattern + @"[^""']*[""'][^>]*>[\s\S]*?</svg>",
+                    @"<svg\b[^>]*\bclass\s*=\s*[""'][^""']*\b" + classPattern + @"\b[^""']*[""'][^>]*>[\s\S]*?</svg>",
                     RegexOptions.IgnoreCase);
-                foreach (Match match in svgMatches) sb.AppendLine(match.Value);
+                foreach (Match m in svgMatches) sb.AppendLine(m.Value);
 
                 return sb.ToString();
             }
             catch { return ""; }
-        }
-
-        public static string AnnotateAnswerItems(string fragment)
-        {
-            if (string.IsNullOrEmpty(fragment)) return fragment;
-
-            var sb = new StringBuilder();
-            var regex = new Regex(@"<div[^>]*class\s*=\s*[""']([^""']*?)[""'][^>]*>", RegexOptions.IgnoreCase);
-            int idx = 0, lastPos = 0;
-
-            foreach (Match m in regex.Matches(fragment))
-            {
-                sb.Append(fragment.Substring(lastPos, m.Index - lastPos));
-                var cls = m.Groups[1].Value;
-                var tag = m.Value;
-
-                if (cls.Contains("tbnote") || cls.Contains("tbred"))
-                {
-                    if (tag.Contains("data-ans-id=")) sb.Append(tag);
-                    else
-                    {
-                        string id = "ans_" + idx++;
-                        sb.Append(tag.Substring(0, tag.Length - 1) + " data-ans-id=\"" + id + "\">");
-                    }
-                }
-                else sb.Append(tag);
-
-                lastPos = m.Index + m.Value.Length;
-            }
-            sb.Append(fragment.Substring(lastPos));
-            return sb.ToString();
         }
 
         public string GetStepBackgroundImage(string filePath)
@@ -914,14 +849,11 @@ namespace BookViewer
             var imagesPath = Path.Combine(directory, "images");
             if (Directory.Exists(imagesPath))
             {
-                var imagePath = Path.Combine(imagesPath, $"steps_{stepNumber}.jpg");
-                if (File.Exists(imagePath)) return ConvertImageToBase64HighQuality(imagePath);
-                imagePath = Path.Combine(imagesPath, $"steps_{stepNumber}.png");
-                if (File.Exists(imagePath)) return ConvertImageToBase64HighQuality(imagePath);
-                imagePath = Path.Combine(imagesPath, $"step_{stepNumber}.jpg");
-                if (File.Exists(imagePath)) return ConvertImageToBase64HighQuality(imagePath);
-                imagePath = Path.Combine(imagesPath, $"step_{stepNumber}.png");
-                if (File.Exists(imagePath)) return ConvertImageToBase64HighQuality(imagePath);
+                foreach (var name in new[] { $"steps_{stepNumber}.jpg", $"steps_{stepNumber}.png", $"step_{stepNumber}.jpg", $"step_{stepNumber}.png" })
+                {
+                    var p = Path.Combine(imagesPath, name);
+                    if (File.Exists(p)) return ConvertImageToBase64HighQuality(p);
+                }
             }
             return GetPlaceholderImage();
         }
@@ -939,8 +871,8 @@ namespace BookViewer
                 if (fontCssFiles.Length > 0) fontCssPath = fontCssFiles[0];
                 else
                 {
-                    var rootFontCss = Path.Combine(_currentBookPath, "font.css");
-                    if (File.Exists(rootFontCss)) fontCssPath = rootFontCss;
+                    var root = Path.Combine(_currentBookPath, "font.css");
+                    if (File.Exists(root)) fontCssPath = root;
                 }
 
                 if (!string.IsNullOrEmpty(fontCssPath) && File.Exists(fontCssPath))
@@ -950,72 +882,58 @@ namespace BookViewer
                     string fontsFolder = Path.Combine(_currentBookPath, "FONTS");
                     if (!Directory.Exists(fontsFolder)) fontsFolder = Path.Combine(_currentBookPath, "fonts");
 
-                    Dictionary<string, string> fontFileIndex = null;
+                    Dictionary<string, string> fontIndex = null;
                     if (Directory.Exists(fontsFolder))
                     {
-                        fontFileIndex = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                        fontIndex = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                         foreach (var f in Directory.GetFiles(fontsFolder, "*.*", SearchOption.AllDirectories))
                         {
                             var ext = Path.GetExtension(f).ToLowerInvariant();
                             if (ext != ".ttf" && ext != ".otf" && ext != ".woff" && ext != ".woff2") continue;
                             var justName = Path.GetFileName(f);
-                            var justStem = Path.GetFileNameWithoutExtension(f);
-                            var noSpace = justStem.Replace(" ", "").Replace("-", "").Replace("_", "");
-                            if (!fontFileIndex.ContainsKey(justName)) fontFileIndex[justName] = f;
-                            if (!fontFileIndex.ContainsKey(justStem)) fontFileIndex[justStem] = f;
-                            if (!fontFileIndex.ContainsKey(noSpace)) fontFileIndex[noSpace] = f;
+                            var stem = Path.GetFileNameWithoutExtension(f);
+                            var noSpace = stem.Replace(" ", "").Replace("-", "").Replace("_", "");
+                            if (!fontIndex.ContainsKey(justName)) fontIndex[justName] = f;
+                            if (!fontIndex.ContainsKey(stem)) fontIndex[stem] = f;
+                            if (!fontIndex.ContainsKey(noSpace)) fontIndex[noSpace] = f;
                         }
                     }
 
-                    var fontFaceMatches = Regex.Matches(fontCss, @"@font-face\s*\{(?<body>.*?)\}",
-                        RegexOptions.Singleline | RegexOptions.IgnoreCase);
-
-                    foreach (Match match in fontFaceMatches)
+                    foreach (Match match in Regex.Matches(fontCss, @"@font-face\s*\{(?<body>.*?)\}", RegexOptions.Singleline | RegexOptions.IgnoreCase))
                     {
-                        var fontFaceContent = match.Groups[1].Value;
-                        var urlMatches = Regex.Matches(fontFaceContent, @"url\(['""]?([^)'""]+)['""]?\)");
-
-                        foreach (Match urlMatch in urlMatches)
+                        var body = match.Groups[1].Value;
+                        foreach (Match urlMatch in Regex.Matches(body, @"url\(['""]?([^)'""]+)['""]?\)"))
                         {
                             var rawPath = urlMatch.Groups[1].Value;
                             var cleanPath = rawPath.Replace("../FONTS/", "").Replace("../fonts/", "").Replace("./", "").Trim();
                             string fullFontPath = null;
 
-                            if (fontFileIndex != null)
+                            if (fontIndex != null)
                             {
                                 var justName = Path.GetFileName(cleanPath);
-                                var justStem = Path.GetFileNameWithoutExtension(cleanPath);
-                                var noSpace = justStem.Replace(" ", "").Replace("-", "").Replace("_", "");
-                                if (fontFileIndex.TryGetValue(justName, out var p1)) fullFontPath = p1;
-                                else if (fontFileIndex.TryGetValue(justStem, out var p2)) fullFontPath = p2;
-                                else if (fontFileIndex.TryGetValue(noSpace, out var p3)) fullFontPath = p3;
+                                var stem = Path.GetFileNameWithoutExtension(cleanPath);
+                                var noSpace = stem.Replace(" ", "").Replace("-", "").Replace("_", "");
+                                if (fontIndex.TryGetValue(justName, out var p1)) fullFontPath = p1;
+                                else if (fontIndex.TryGetValue(stem, out var p2)) fullFontPath = p2;
+                                else if (fontIndex.TryGetValue(noSpace, out var p3)) fullFontPath = p3;
                             }
 
                             if (!string.IsNullOrEmpty(fullFontPath) && File.Exists(fullFontPath))
                             {
-                                var fontBytes = File.ReadAllBytes(fullFontPath);
-                                var fontBase64 = Convert.ToBase64String(fontBytes);
+                                var bytes = File.ReadAllBytes(fullFontPath);
+                                var b64 = Convert.ToBase64String(bytes);
                                 var ext = Path.GetExtension(fullFontPath).ToLower();
-                                var mimeType = ext switch
-                                {
-                                    ".ttf" => "font/ttf",
-                                    ".otf" => "font/otf",
-                                    ".woff" => "font/woff",
-                                    ".woff2" => "font/woff2",
-                                    _ => "font/ttf"
-                                };
-                                var dataUri = $"data:{mimeType};base64,{fontBase64}";
-                                fontCss = fontCss.Replace($"url('{rawPath}')", $"url('{dataUri}')");
-                                fontCss = fontCss.Replace($"url(\"{rawPath}\")", $"url('{dataUri}')");
-                                fontCss = fontCss.Replace($"url({rawPath})", $"url('{dataUri}')");
+                                var mime = ext switch { ".ttf" => "font/ttf", ".otf" => "font/otf", ".woff" => "font/woff", ".woff2" => "font/woff2", _ => "font/ttf" };
+                                var dataUri = $"data:{mime};base64,{b64}";
+                                fontCss = fontCss.Replace($"url('{rawPath}')", $"url('{dataUri}')")
+                                                 .Replace($"url(\"{rawPath}\")", $"url('{dataUri}')")
+                                                 .Replace($"url({rawPath})", $"url('{dataUri}')");
                             }
                         }
                     }
 
                     fontCss += "\n@font-face { font-family: 'CJKLocked'; "
-                             + "src: local('PingFang TC'), local('PingFang SC'), local('Heiti TC'), "
-                             + "local('Microsoft JhengHei'), local('Microsoft YaHei'), "
-                             + "local('Noto Sans CJK TC'), local('Noto Sans CJK SC'); "
+                             + "src: local('PingFang TC'), local('Microsoft JhengHei'), local('Noto Sans CJK TC'); "
                              + "ascent-override: 100%; descent-override: 0%; line-gap-override: 0%; }\n"
                              + "body, .para, .base-content, .content-overlay { "
                              + "font-family: 'CJKLocked', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif; }\n";
@@ -1023,78 +941,13 @@ namespace BookViewer
                     _fontCache[directory] = fontCss;
                     return fontCss;
                 }
-
-                fontCss = await GenerateFontCssFromFiles();
-                _fontCache[directory] = fontCss;
-                return fontCss;
             }
-            catch (Exception ex)
-            {
-                Log($"Error loading fonts: {ex.Message}");
-                return "";
-            }
-        }
-
-        private async Task<string> GenerateFontCssFromFiles()
-        {
-            try
-            {
-                string fontCss = "";
-                var fontsFolder = Path.Combine(_currentBookPath, "FONTS");
-                if (!Directory.Exists(fontsFolder)) fontsFolder = Path.Combine(_currentBookPath, "fonts");
-                if (!Directory.Exists(fontsFolder)) return "";
-
-                var fontExtensions = new[] { ".ttf", ".otf", ".woff", ".woff2" };
-                var fontFiles = new List<string>();
-                foreach (var ext in fontExtensions)
-                    fontFiles.AddRange(Directory.GetFiles(fontsFolder, "*" + ext));
-
-                foreach (var fontFile in fontFiles)
-                {
-                    try
-                    {
-                        var fontName = Path.GetFileNameWithoutExtension(fontFile);
-                        var fontBytes = File.ReadAllBytes(fontFile);
-                        var fontBase64 = Convert.ToBase64String(fontBytes);
-                        var ext = Path.GetExtension(fontFile).ToLower();
-                        var format = ext switch
-                        {
-                            ".ttf" => "truetype",
-                            ".otf" => "opentype",
-                            ".woff" => "woff",
-                            ".woff2" => "woff2",
-                            _ => "truetype"
-                        };
-                        var mimeType = ext switch
-                        {
-                            ".ttf" => "font/ttf",
-                            ".otf" => "font/otf",
-                            ".woff" => "font/woff",
-                            ".woff2" => "font/woff2",
-                            _ => "font/ttf"
-                        };
-                        var dataUri = $"data:{mimeType};base64,{fontBase64}";
-
-                        fontCss += "\n@font-face {\n"
-                                 + "    font-family: '" + fontName + "';\n"
-                                 + "    src: url('" + dataUri + "') format('" + format + "');\n"
-                                 + "    font-weight: normal;\n"
-                                 + "    font-style: normal;\n"
-                                 + "    ascent-override: 100%;\n"
-                                 + "    descent-override: 0%;\n"
-                                 + "    line-gap-override: 0%;\n"
-                                 + "}\n";
-                    }
-                    catch { }
-                }
-
-                return fontCss;
-            }
-            catch { return ""; }
+            catch (Exception ex) { Log($"Font error: {ex.Message}"); }
+            return "";
         }
 
         private string GetPlaceholderImage()
-            => "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1024' height='1309'%3E%3Crect width='1024' height='1309' fill='%23ffffff'/%3E%3C/svg%3E";
+            => "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1024' height='1344'%3E%3Crect width='1024' height='1344' fill='%23ffffff'/%3E%3C/svg%3E";
 
         private string ConvertImageToBase64HighQuality(string imagePath)
         {
@@ -1113,33 +966,26 @@ namespace BookViewer
                     ".svg" => "image/svg+xml",
                     _ => "image/jpeg"
                 };
-                var base64 = Convert.ToBase64String(bytes);
-                var result = $"data:{mimeType};base64,{base64}";
+                var result = $"data:{mimeType};base64,{Convert.ToBase64String(bytes)}";
                 _imageCache[imagePath] = result;
                 return result;
             }
             catch { return GetPlaceholderImage(); }
         }
 
-        // ============================================================
-        // BuildOverlayHtmlAsync — async, awaits GetRedAnswerContentAsync.
-        // ============================================================
-        private async Task<string> BuildOverlayHtmlAsync(string bgImage, string contentHtml, string fileName, string fontCss,
-            int pageWidth, int pageHeight)
+        private async Task<string> BuildOverlayHtmlAsync(string bgImage, string contentHtml, string hsgMarkup,
+            string fileName, string fontCss, int pageWidth, int pageHeight)
         {
             if (string.IsNullOrEmpty(bgImage)) bgImage = GetPlaceholderImage();
             if (string.IsNullOrEmpty(contentHtml))
                 contentHtml = "<div style='padding:20px;color:#666;font-size:24px;'>Content not available</div>";
-        
+
             double zoom = _currentZoom;
             string surround = SurroundColor;
             string zoomStr = zoom.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        
-            string filePath = (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count)
-                ? _pageFiles[_currentPageIndex]
-                : "";
-        
-            // Always load BOTH layers — individual items start hidden anyway.
+
+            string filePath = (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count) ? _pageFiles[_currentPageIndex] : "";
+
             string teacherRaw = "";
             string studentRaw = "";
             if (!string.IsNullOrEmpty(filePath))
@@ -1147,16 +993,7 @@ namespace BookViewer
                 teacherRaw = await GetRedAnswerContentAsync(filePath, "teacherNotes");
                 studentRaw = await GetRedAnswerContentAsync(filePath, "studentAnswers");
             }
-        
-            var teacherFrag = AnnotateAnswerItems(teacherRaw);
-            var studentFrag = AnnotateAnswerItems(studentRaw);
-        
-            // Layers always active; items inside start hidden (no 'ans-on' class).
-            string teacherWrapper = string.IsNullOrEmpty(teacherFrag) ? "" :
-                "<div class='answer-layer teacher-layer active'>" + teacherFrag + "</div>";
-            string studentWrapper = string.IsNullOrEmpty(studentFrag) ? "" :
-                "<div class='answer-layer student-layer active'>" + studentFrag + "</div>";
-        
+
             var sb = new StringBuilder();
             sb.Append("<!DOCTYPE html>\n<html>\n<head>\n");
             sb.Append("<meta charset='UTF-8'>\n");
@@ -1173,54 +1010,30 @@ namespace BookViewer
             sb.Append("<img class='background-img' src='").Append(bgImage).Append("' alt='' />\n");
             sb.Append("<div class='content-overlay'>\n");
             sb.Append("<div class='base-content'>").Append(contentHtml).Append("</div>\n");
-            sb.Append(studentWrapper);
-            sb.Append(teacherWrapper);
+            sb.Append(studentRaw);
+            sb.Append(teacherRaw);
+            sb.Append(hsgMarkup);
             sb.Append("<div class='item-btns' id='itemBtns'></div>\n");
             sb.Append("</div>\n</div>\n</div>\n");
-            sb.Append("<script>\n");
-            sb.Append(OverlayJsTemplate);
-            sb.Append("</script>\n</body>\n</html>");
-        
+            sb.Append("<script>\n").Append(OverlayJsTemplate).Append("\n</script>\n</body>\n</html>");
             return sb.ToString();
         }
 
-        public async Task<string> BuildPageHtmlForRenderAsync(
-            string filePath,
-            bool includeAnswers,
-            bool includeTeacherNotes,
-            bool includeStudentAnswers)
+        public async Task<string> BuildPageHtmlForRenderAsync(string filePath, bool includeAnswers, bool includeTeacherNotes, bool includeStudentAnswers)
         {
-            bool prevTeacher = _showTeacherNotes;
-            bool prevStudent = _showStudentAnswers;
+            bool prevT = _showTeacherNotes, prevS = _showStudentAnswers;
             _showTeacherNotes = includeAnswers && includeTeacherNotes;
             _showStudentAnswers = includeAnswers && includeStudentAnswers;
-
             try
             {
                 var rawHtml = await File.ReadAllTextAsync(filePath);
                 return await ProcessHtmlContent(rawHtml, filePath);
             }
-            finally
-            {
-                _showTeacherNotes = prevTeacher;
-                _showStudentAnswers = prevStudent;
-            }
+            finally { _showTeacherNotes = prevT; _showStudentAnswers = prevS; }
         }
 
-        public void NavigatePrevious()
-        {
-            if (_currentPageIndex > 0) _ = LoadPageAsync(_currentPageIndex - 1);
-        }
-
-        public void NavigateNext()
-        {
-            if (_currentPageIndex < _pageFiles.Count - 1) _ = LoadPageAsync(_currentPageIndex + 1);
-        }
-
-        public void ToggleAnswers(bool show)
-        {
-            OnToggleAnswersRequested?.Invoke(this, show);
-            OnStatusChanged?.Invoke(this, show ? "Answers shown" : "Answers hidden");
-        }
+        public void NavigatePrevious() { if (_currentPageIndex > 0) _ = LoadPageAsync(_currentPageIndex - 1); }
+        public void NavigateNext() { if (_currentPageIndex < _pageFiles.Count - 1) _ = LoadPageAsync(_currentPageIndex + 1); }
+        public void ToggleAnswers(bool show) { OnToggleAnswersRequested?.Invoke(this, show); OnStatusChanged?.Invoke(this, show ? "Answers shown" : "Answers hidden"); }
     }
 }
