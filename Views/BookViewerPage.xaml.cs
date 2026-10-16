@@ -124,13 +124,29 @@ public partial class BookViewerPage : ContentPage
             UpdateTeacherButton();
             UpdateStudentButton();
 
+            // ============================================================
+            // Target navigation — order matters
+            //   1. section + step  ← the splitpane move-button path
+            //   2. section only
+            //   3. folio
+            // ============================================================
+            Log($"Loaded. targetSection='{_targetSectionId}' targetStep={_targetStep} startFolio={_startFolio} totalPages={_bookService.PageFiles.Count}");
+
             if (!string.IsNullOrEmpty(_targetSectionId) && _targetStep > 0)
             {
                 int idx = _bookService.FindPageIndex(_targetSectionId, _targetStep);
-                if (idx < 0) idx = _bookService.GetFirstIndexOfSection(_targetSectionId);
+                Log($"FindPageIndex('{_targetSectionId}', {_targetStep}) -> {idx}");
                 if (idx >= 0 && idx < _bookService.PageFiles.Count)
                 {
                     await _bookService.LoadPageAsync(idx);
+                    return;
+                }
+                // fallback: first page of section
+                int first = _bookService.GetFirstIndexOfSection(_targetSectionId);
+                Log($"GetFirstIndexOfSection('{_targetSectionId}') -> {first}");
+                if (first >= 0 && first < _bookService.PageFiles.Count)
+                {
+                    await _bookService.LoadPageAsync(first);
                     return;
                 }
             }
@@ -140,6 +156,7 @@ public partial class BookViewerPage : ContentPage
                 int idx = _bookService.GetFirstIndexOfSection(_targetSectionId);
                 if (idx < 0 && _startFolio > 0)
                     idx = _bookService.GetIndexForSectionFolio(_targetSectionId, _startFolio);
+                Log($"section-only lookup -> {idx}");
                 if (idx >= 0 && idx < _bookService.PageFiles.Count)
                 {
                     await _bookService.LoadPageAsync(idx);
@@ -150,12 +167,15 @@ public partial class BookViewerPage : ContentPage
             if (_startFolio > 0)
             {
                 int idx = _bookService.GetIndexForFolio(_startFolio);
+                Log($"GetIndexForFolio({_startFolio}) -> {idx}");
                 if (idx >= 0 && idx < _bookService.PageFiles.Count)
                 {
                     await _bookService.LoadPageAsync(idx);
                     return;
                 }
             }
+
+            Log("No target matched — leaving on page 0");
         };
     }
 
@@ -174,16 +194,37 @@ public partial class BookViewerPage : ContentPage
 
     private async void OnWebViewNavigating(object sender, WebNavigatingEventArgs e)
     {
-        if (string.IsNullOrEmpty(e.Url)) return;
-        if (!e.Url.StartsWith("bookviewer://")) return;
+        var url = e.Url;
+        if (string.IsNullOrEmpty(url)) return;
+
+        bool isBridge = url.StartsWith("bookviewer://") || url.Contains("about:blank#");
+        if (!isBridge) return;
 
         e.Cancel = true;
+
+        string host, query;
+        if (url.StartsWith("bookviewer://"))
+        {
+            var uri = new Uri(url);
+            host = uri.Host;
+            query = uri.Query;
+        }
+        else
+        {
+            var hash = url.IndexOf('#');
+            var rest = hash >= 0 ? url.Substring(hash + 1) : url;
+            var qIdx = rest.IndexOf('?');
+            if (qIdx >= 0) { host = rest.Substring(0, qIdx); query = rest.Substring(qIdx); }
+            else { host = rest; query = ""; }
+        }
+
+        Log($"bridge nav: host='{host}' query='{query}'");
+
         try
         {
-            var uri = new Uri(e.Url);
-            var q = HttpUtility.ParseQueryString(uri.Query);
+            var q = HttpUtility.ParseQueryString(query);
 
-            if (uri.Host == "splitpane-open")
+            if (host == "splitpane-open")
             {
                 var bookUid = q["bookUID"];
                 var section = q["section"] ?? "";
@@ -195,6 +236,9 @@ public partial class BookViewerPage : ContentPage
 
                 int step = 0;
                 int.TryParse(stepStr, out step);
+
+                Log($"splitpane-open bookUID='{bookUid}' section='{section}' unit='{unit}' step='{step}'");
+
                 if (string.IsNullOrEmpty(bookUid)) return;
 
                 var targetFolder = Path.Combine(
@@ -210,18 +254,18 @@ public partial class BookViewerPage : ContentPage
                 var viewer = new BookViewerPage(targetFolder, section, step, 0);
                 await Navigation.PushAsync(viewer);
             }
-            else if (uri.Host == "assessment-open")
+            else if (host == "assessment-open")
             {
-                // Interactive activity — open the pool HTML in the overlay
                 var elId = q["id"] ?? "";
                 var poolType = q["poolType"] ?? "ASSESSMENT";
-                await OpenAssessmentAsync(elId, poolType);
+                var groupFromUrl = q["group"] ?? "";
+                await OpenAssessmentAsync(elId, poolType, groupFromUrl);
             }
-            else if (uri.Host == "assessment-close")
+            else if (host == "assessment-close" || host == "assessment-complete")
             {
                 CloseAssessment();
             }
-            else if (uri.Host == "splitpane-delete")
+            else if (host == "splitpane-delete")
             {
                 Log("splitpane delete " + q["bookUID"]);
             }
@@ -232,21 +276,18 @@ public partial class BookViewerPage : ContentPage
         }
     }
 
-    // ============================================================
-    // Assessment / interactive activity overlay
-    // ============================================================
-
-    private async Task OpenAssessmentAsync(string elId, string poolType)
+    private async Task OpenAssessmentAsync(string elId, string poolType, string groupFromUrl = null)
     {
         try
         {
-            // Read the group # out of the current page's HTML by matching
-            //   <a id="BY_assessmentQuestion_<elId>" ...>1373</a>
-            var groupId = "";
-            var m = Regex.Match(_currentContentHtml ?? "",
-                @"id=""BY_assessmentQuestion_" + Regex.Escape(elId) + @"""[^>]*>([^<]+)<",
-                RegexOptions.IgnoreCase);
-            if (m.Success) groupId = m.Groups[1].Value.Trim();
+            var groupId = groupFromUrl;
+            if (string.IsNullOrEmpty(groupId))
+            {
+                var m = Regex.Match(_currentContentHtml ?? "",
+                    @"id=""BY_assessmentQuestion_" + Regex.Escape(elId) + @"""[^>]*>([^<]+)<",
+                    RegexOptions.IgnoreCase);
+                if (m.Success) groupId = m.Groups[1].Value.Trim();
+            }
 
             Log($"assessment open el={elId} group={groupId} pool={poolType}");
 
@@ -256,24 +297,18 @@ public partial class BookViewerPage : ContentPage
                 return;
             }
 
-            // Look for the pool HTML under the book folder
             var poolPath = _bookService.FindPoolFile(groupId);
             if (string.IsNullOrEmpty(poolPath) || !File.Exists(poolPath))
             {
-                await DisplayAlert("Not found",
-                    $"Interactive activity not found for group {groupId}.\nLooked under ola/ and pools/.",
-                    "OK");
+                await DisplayAlert("Not found", $"Interactive activity not found for group {groupId}.", "OK");
                 return;
             }
 
-            // Build the HTML with assets inlined, then show in the overlay WebView
             var html = await _bookService.BuildPoolHtmlAsync(poolPath, groupId);
 
             AssessmentTitleLabel.Text = "Activity " + groupId;
             AssessmentWebView.Source = new HtmlWebViewSource { Html = html };
             AssessmentOverlay.IsVisible = true;
-
-            // Also disable the page behind it
             ContentWebView.IsVisible = false;
         }
         catch (Exception ex)
@@ -297,10 +332,6 @@ public partial class BookViewerPage : ContentPage
         try { await AssessmentWebView.EvaluateJavaScriptAsync("history.back()"); }
         catch { CloseAssessment(); }
     }
-
-    // ============================================================
-    // Rest of the page — same as before
-    // ============================================================
 
     private void UpdateTwoPageLayout()
     {
