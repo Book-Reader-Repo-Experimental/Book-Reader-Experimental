@@ -67,7 +67,7 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
 .copyright { display: none !important; }
 ";
 
-        private const string ReaderJsTemplate = @"
+                private const string ReaderJsTemplate = @"
         window.__readerRedAnswersVisible = false;
         window.__readerNotesVisible = false;
         window.__redAnswerOriginalDisplay = new WeakMap();
@@ -210,75 +210,165 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
         
         // ---- Split-pane controller: move button opens the target book ----
         window.getSplitPaneInfo = function(pane){
-          if (!pane) return { id:'', bookUID:'', section:'', unit:'', step:'', split:'50%', tooltip:'' };
+          if (!pane) return { id:'', bookUID:'', section:'', unit:'', step:'', page:'', split:'50%', tooltip:'' };
           var id = pane.id || '';
 
-          function textOf(el){
-            if (!el) return '';
-            var t = (el.innerText || el.textContent || '').trim();
-            return t;
-          }
+          function trim(s){ return (s == null ? '' : ('' + s)).trim(); }
 
-          // Try a list of candidate element ids first; then any descendant whose
-          // id ends with one of the known suffixes; then pane attributes.
-          function pick(candidateIds, attrNames){
-            for (var i = 0; i < candidateIds.length; i++) {
-              var el = document.getElementById(candidateIds[i]);
-              var v = textOf(el);
-              if (v) return v;
-            }
-            if (attrNames && attrNames.length) {
-              for (var k = 0; k < attrNames.length; k++) {
-                var a = pane.getAttribute(attrNames[k]);
-                if (a) return ('' + a).trim();
+          function byId(idList){
+            for (var i = 0; i < idList.length; i++) {
+              var el = document.getElementById(idList[i]);
+              if (el) {
+                var v = trim(el.innerText || el.textContent);
+                if (v) return v;
               }
             }
             return '';
           }
 
-          // Descendant scan: match any element whose id ends with one of the
-          // given suffixes (covers whatever naming the book uses).
-          function pickDescendant(suffixes){
-            for (var i = 0; i < suffixes.length; i++) {
-              var el = pane.querySelector('[id$=""' + suffixes[i] + '""]');
-              var v = textOf(el);
+          function byAttr(attrs){
+            for (var i = 0; i < attrs.length; i++) {
+              var v = trim(pane.getAttribute(attrs[i]));
               if (v) return v;
             }
             return '';
           }
 
-          var bookUID = pick(
-              ['BY_SplitPaneBookUID_' + id, 'BY_SplitPaneBookUID'],
-              ['data-book-uid','data-bookuid','bookuid','book-uid'])
-            || pickDescendant(['BookUID','bookUID','bookuid','book_uid']);
+          function bySuffix(suffixes){
+            for (var i = 0; i < suffixes.length; i++) {
+              var el = pane.querySelector('[id$=""' + suffixes[i] + '""]');
+              if (el) {
+                var v = trim(el.innerText || el.textContent);
+                if (v) return v;
+              }
+            }
+            return '';
+          }
 
-          var section = pick(
-              ['BY_SplitPaneSectionNum_' + id, 'BY_SplitPaneSection_' + id, 'BY_SplitPaneSectionNum'],
-              ['data-section','data-section-num','section'])
-            || pickDescendant(['SectionNum','Section','section','section_num']);
+          // Collect every text node inside the pane (used for fallback keyword scan)
+          function allPaneText(){
+            var out = [];
+            if (document.createTreeWalker) {
+              var walker = document.createTreeWalker(pane, NodeFilter.SHOW_TEXT, null, false);
+              var n;
+              while ((n = walker.nextNode())) {
+                var t = trim(n.nodeValue);
+                if (t) out.push(t);
+              }
+            }
+            return out;
+          }
 
-          var unit = pick(
-              ['BY_SplitPaneUnitNum_' + id, 'BY_SplitPaneUnit_' + id, 'BY_SplitPaneUnitNum'],
-              ['data-unit','data-unit-num','unit'])
-            || pickDescendant(['UnitNum','Unit','unit','unit_num']);
+          // Scan a haystack for a keyword and return the first number that follows it
+          function extractNumber(haystack, keywords){
+            if (!haystack) return '';
+            var lower = ('' + haystack).toLowerCase();
+            for (var k = 0; k < keywords.length; k++) {
+              var kw = keywords[k].toLowerCase();
+              var idx = lower.indexOf(kw);
+              while (idx >= 0) {
+                var after = ('' + haystack).substring(idx + kw.length, idx + kw.length + 30);
+                var m = after.match(/(\d{1,6})/);
+                if (m) return m[1];
+                idx = lower.indexOf(kw, idx + 1);
+              }
+            }
+            return '';
+          }
 
-          var step = pick(
-              ['BY_SplitPaneStepNum_' + id, 'BY_SplitPaneStep_' + id, 'BY_SplitPaneStepNum'],
-              ['data-step','data-step-num','step'])
-            || pickDescendant(['StepNum','Step','step','step_num']);
+          // ---------- Structured lookups by DOM id ----------
+          var bookUID = byId([
+              'BY_SplitPaneBookUID_' + id,
+              'BY_SplitPaneBookUID'
+          ]) || byAttr(['data-book-uid','data-bookuid','bookuid','book-uid'])
+             || bySuffix(['BookUID','bookUID','bookuid','book_uid']);
 
-          var split = pick(
-              ['BY_SplitPaneRatio_' + id, 'BY_SplitPaneRatio'],
-              ['data-split','data-ratio'])
-            || pickDescendant(['Ratio','ratio','Split','split']) || '50%';
+          var section = byId([
+              'BY_SplitPaneSectionNum_' + id,
+              'BY_SplitPaneSection_' + id,
+              'BY_SplitPaneSectionNum'
+          ]) || byAttr(['data-section','data-section-num','section'])
+             || bySuffix(['SectionNum','Section','section','section_num']);
 
-          var tooltip = pick(
-              ['BY_SplitPaneTooltips_' + id, 'BY_SplitPaneTooltips'],
-              ['data-tooltip','title'])
-            || pickDescendant(['Tooltips','Tooltip','tooltip']);
+          var unit = byId([
+              'BY_SplitPaneUnitNum_' + id,
+              'BY_SplitPaneUnit_' + id,
+              'BY_SplitPaneUnitNum'
+          ]) || byAttr(['data-unit','data-unit-num','unit'])
+             || bySuffix(['UnitNum','Unit','unit','unit_num']);
+
+          // STEP: try ""Step #"" first, then fall back to ""Page #""
+          var step = byId([
+              'BY_SplitPaneStepNum_' + id,
+              'BY_SplitPaneStep_' + id,
+              'BY_SplitPaneStepNum'
+          ]) || byAttr(['data-step','data-step-num','step'])
+             || bySuffix(['StepNum','Step','step','step_num']);
+
+          var page = byId([
+              'BY_SplitPanePageNum_' + id,
+              'BY_SplitPanePage_' + id,
+              'BY_SplitPanePageNum'
+          ]) || byAttr(['data-page','data-page-num','page'])
+             || bySuffix(['PageNum','Page','page','page_num']);
+
+          // If no explicit Step but a Page exists, use Page as the step
+          if (!step && page) step = page;
+
+          // ---------- Fallback: scan the pane's full text + HTML ----------
+          if (!step || !section || !bookUID) {
+            var joined = allPaneText().join(' ');
+            var outer = trim(pane.outerHTML);
+            var blobs = [joined, outer];
+
+            if (!step) {
+              for (var i = 0; i < blobs.length && !step; i++) {
+                step = extractNumber(blobs[i], [
+                  'Step #','Step#','Step Number','StepNum','Step',
+                  'Page #','Page#','Page Number','PageNum','Page',
+                  '\u6B65\u9AA4','\u9801','\u9875'
+                ]);
+              }
+            }
+            if (!section) {
+              for (var i = 0; i < blobs.length && !section; i++) {
+                section = extractNumber(blobs[i], [
+                  'Section #','Section#','Section Number','SectionNum','Section'
+                ]);
+              }
+              if (section && !/^s_/i.test(section)) section = 's_' + section;
+            }
+            if (!bookUID) {
+              for (var i = 0; i < blobs.length && !bookUID; i++) {
+                bookUID = extractNumber(blobs[i], [
+                  'Book UID','BookUID','Book Uid','Book_UID','bookuid'
+                ]);
+              }
+            }
+            if (!unit) {
+              for (var i = 0; i < blobs.length && !unit; i++) {
+                unit = extractNumber(blobs[i], [
+                  'Unit #','Unit#','Unit Number','UnitNum','Unit'
+                ]);
+              }
+            }
+          }
+
+          var split = byId([
+              'BY_SplitPaneRatio_' + id,
+              'BY_SplitPaneRatio'
+          ]) || byAttr(['data-split','data-ratio'])
+             || bySuffix(['Ratio','ratio','Split','split'])
+             || '50%';
+
+          var tooltip = byId([
+              'BY_SplitPaneTooltips_' + id,
+              'BY_SplitPaneTooltips'
+          ]) || byAttr(['data-tooltip','title'])
+             || bySuffix(['Tooltips','Tooltip','tooltip']);
 
           // If section is empty but unit has a value, use unit
-          if (!section && unit) section = unit;
+          if (!section && unit) section = 's_' + unit;
 
           return {
             id: id,
@@ -286,6 +376,7 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
             section: section,
             unit: unit,
             step: step,
+            page: page,
             split: split,
             tooltip: tooltip
           };
@@ -324,7 +415,6 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
             if (!sp) { console.log('[splitpane] no element for id=' + id); return; }
             var info = window.getSplitPaneInfo(sp);
             console.log('[splitpane] info=' + JSON.stringify(info));
-            console.log('[splitpane] pane-html=' + (sp.outerHTML || '').substring(0, 2000));
             var url = 'bookviewer://splitpane-open'
                     + '?bookUID=' + encodeURIComponent(info.bookUID)
                     + '&section=' + encodeURIComponent(info.section)
