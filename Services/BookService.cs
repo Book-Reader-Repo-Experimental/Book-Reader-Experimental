@@ -45,7 +45,9 @@ namespace BookViewer
             Application.Current?.RequestedTheme == AppTheme.Dark ? "#1C1C1E" : "#E8E8E8";
 
         // ============================================================
-        // Static CSS template — used by BuildOverlayHtml
+        // Static CSS — inserted into the overlay HTML.
+        // Kept as a verbatim const (non-interpolated) so C# never tries
+        // to parse the braces and quotes inside.
         // ============================================================
         private const string OverlayCssTemplate = @"
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -120,16 +122,10 @@ namespace BookViewer
 ";
 
         // ============================================================
-        // Static JS template — used by BuildOverlayHtml
+        // Static JS — inserted into the overlay HTML.
         // ============================================================
         private const string OverlayJsTemplate = @"
 (function() {
-    function showItem(id, on) {
-        var el = document.querySelector('[data-ans-id=""' + id + '""]');
-        if (!el) return;
-        if (on) el.classList.add('ans-on'); else el.classList.remove('ans-on');
-    }
-
     window.__setNotes = function(on) {
         var layer = document.querySelector('.teacher-layer');
         if (!layer) return;
@@ -323,13 +319,37 @@ namespace BookViewer
         public Dictionary<int, string> FolioToStepFile => _folioToStepFile;
         public Dictionary<string, int> StepFileToIndex => _stepFileToIndex;
 
+        // ============================================================
+        // Answer/Notes visibility — four entry points, two pairs of aliases.
+        // ============================================================
         public void SetShowTeacherNotes(bool show)
         {
             _showTeacherNotes = show;
             if (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count)
                 _ = LoadPageAsync(_currentPageIndex);
         }
-        
+
+        public void SetShowStudentAnswers(bool show)
+        {
+            _showStudentAnswers = show;
+            if (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count)
+                _ = LoadPageAsync(_currentPageIndex);
+        }
+
+        public void ShowAllTeacherNotes(bool show)
+        {
+            _showTeacherNotes = show;
+            if (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count)
+                _ = LoadPageAsync(_currentPageIndex);
+        }
+
+        public void ShowAllStudentAnswers(bool show)
+        {
+            _showStudentAnswers = show;
+            if (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count)
+                _ = LoadPageAsync(_currentPageIndex);
+        }
+
         public bool IsFileEncrypted(string content) => _decryptionService.IsEncrypted(content);
         public string DecryptFile(string content, string fileName) => _decryptionService.DecryptWithFileName(content, fileName);
 
@@ -404,27 +424,6 @@ namespace BookViewer
             if (_sectionFirstIndex.TryGetValue(sectionId, out int idx))
                 return idx;
             return -1;
-        }
-
-        public void SetShowStudentAnswers(bool show)
-        {
-            _showStudentAnswers = show;
-            if (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count)
-                _ = LoadPageAsync(_currentPageIndex);
-        }
-        
-        public void ShowAllTeacherNotes(bool show)
-        {
-            _showTeacherNotes = show;
-            if (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count)
-                _ = LoadPageAsync(_currentPageIndex);
-        }
-        
-        public void ShowAllStudentAnswers(bool show)
-        {
-            _showStudentAnswers = show;
-            if (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count)
-                _ = LoadPageAsync(_currentPageIndex);
         }
 
         public async Task<bool> LoadBookAsync(string folderPath)
@@ -1051,7 +1050,7 @@ namespace BookViewer
 
         /// <summary>
         /// Assigns a unique data-ans-id to every tbnote/tbred wrapper so JS can toggle
-        /// each item individually. Preserves the original `name` attribute for grouping.
+        /// each item individually. Preserves the original name attribute for grouping.
         /// </summary>
         public static string AnnotateAnswerItems(string fragment)
         {
@@ -1237,7 +1236,6 @@ namespace BookViewer
 
                     fontCss += @"
 
-/* ==== CJK metric lock ==== */
 @font-face {
     font-family: 'CJKLocked';
     src: local('PingFang TC'), local('PingFang SC'), local('Heiti TC'),
@@ -1260,7 +1258,6 @@ body, .para, .base-content, .content-overlay {
                 fontCss = await GenerateFontCssFromFiles();
                 fontCss += @"
 
-/* ==== CJK metric lock ==== */
 @font-face {
     font-family: 'CJKLocked';
     src: local('PingFang TC'), local('PingFang SC'), local('Heiti TC'),
@@ -1325,16 +1322,15 @@ body, .para, .base-content, .content-overlay {
                         };
                         var dataUri = $"data:{mimeType};base64,{fontBase64}";
 
-                        fontCss += $@"
-@font-face {{
-    font-family: '{fontName}';
-    src: url('{dataUri}') format('{format}');
-    font-weight: normal;
-    font-style: normal;
-    ascent-override: 100%;
-    descent-override: 0%;
-    line-gap-override: 0%;
-}}";
+                        fontCss += "\n@font-face {\n"
+                                 + "    font-family: '" + fontName + "';\n"
+                                 + "    src: url('" + dataUri + "') format('" + format + "');\n"
+                                 + "    font-weight: normal;\n"
+                                 + "    font-style: normal;\n"
+                                 + "    ascent-override: 100%;\n"
+                                 + "    descent-override: 0%;\n"
+                                 + "    line-gap-override: 0%;\n"
+                                 + "}\n";
                     }
                     catch { }
                 }
@@ -1378,8 +1374,7 @@ body, .para, .base-content, .content-overlay {
         }
 
         // ============================================================
-        // BuildOverlayHtml — clean StringBuilder assembly (no $@"..." 
-        // interpolated verbatim strings containing CSS/JS).
+        // BuildOverlayHtml — StringBuilder assembly, no $@"..." interpolation
         // ============================================================
         private string BuildOverlayHtml(string bgImage, string contentHtml, string fileName, string fontCss,
             int pageWidth, int pageHeight)
@@ -1392,7 +1387,6 @@ body, .para, .base-content, .content-overlay {
             string surround = SurroundColor;
             string zoomStr = zoom.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-            // Load + annotate answers
             string filePath = (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count)
                 ? _pageFiles[_currentPageIndex]
                 : "";
@@ -1444,7 +1438,6 @@ body, .para, .base-content, .content-overlay {
             bool includeTeacherNotes,
             bool includeStudentAnswers)
         {
-            // Temporarily flip the two flags so BuildOverlayHtml includes the layers
             bool prevTeacher = _showTeacherNotes;
             bool prevStudent = _showStudentAnswers;
             _showTeacherNotes = includeAnswers && includeTeacherNotes;
