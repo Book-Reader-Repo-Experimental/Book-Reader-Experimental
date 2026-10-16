@@ -44,6 +44,216 @@ namespace BookViewer
         private static string SurroundColor =>
             Application.Current?.RequestedTheme == AppTheme.Dark ? "#1C1C1E" : "#E8E8E8";
 
+        // ============================================================
+        // Static CSS template — used by BuildOverlayHtml
+        // ============================================================
+        private const string OverlayCssTemplate = @"
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+        width: 100%; height: 100%; overflow: auto;
+        -webkit-font-smoothing: antialiased;
+    }
+    body { display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; }
+    .page-wrapper { display: flex; justify-content: center; align-items: flex-start; }
+    .page-container {
+        position: relative;
+        flex-shrink: 0; background: #ffffff;
+        box-shadow: 0 0 20px rgba(0,0,0,0.15);
+        overflow: hidden; border-radius: 2px;
+        transform-origin: top center;
+    }
+    .background-img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+    .content-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; }
+    .content-overlay > * { position: absolute !important; }
+
+    .base-content { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 5; pointer-events: none; }
+    .base-content > * { position: absolute !important; }
+    .base-content .para {
+        position: absolute !important; line-height: 1 !important; white-space: pre;
+        font-kerning: none; font-feature-settings: 'kern' 0, 'liga' 0;
+        text-rendering: geometricPrecision; -webkit-font-smoothing: antialiased;
+    }
+
+    .answer-layer {
+        position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+        z-index: 20; pointer-events: none; overflow: visible;
+        display: none;
+    }
+    .answer-layer.active { display: block; }
+    .answer-layer > * { position: absolute !important; }
+
+    .answer-layer .tbnote,
+    .answer-layer .tbred,
+    .answer-layer .sa {
+        display: none;
+    }
+    .answer-layer .tbnote.ans-on,
+    .answer-layer .tbred.ans-on,
+    .answer-layer .sa.ans-on {
+        display: block !important;
+    }
+
+    .answer-layer .tbnote { background: rgba(255,235,150,0.55); border: 3px solid #3498db; border-radius: 4px; padding: 3px; }
+    .answer-layer .tbred,
+    .answer-layer .sa { background: rgba(255,235,150,0.55); border: 3px solid #2ecc71; border-radius: 4px; padding: 3px; }
+
+    .item-btns {
+        position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+        z-index: 30; pointer-events: none;
+    }
+    .item-btn {
+        position: absolute;
+        width: 22px; height: 22px;
+        background: #FFEE99;
+        border: 1px solid #C80;
+        border-radius: 4px;
+        font-size: 11px; font-weight: bold;
+        color: #A00;
+        display: flex; align-items: center; justify-content: center;
+        cursor: pointer;
+        pointer-events: auto;
+        box-shadow: 0 1px 3px rgba(0,0,0,.3);
+        user-select: none;
+    }
+    .item-btn:hover { background: #FFE44D; }
+    .item-btn.on { background: #CC0000; color: #fff; border-color: #900; }
+";
+
+        // ============================================================
+        // Static JS template — used by BuildOverlayHtml
+        // ============================================================
+        private const string OverlayJsTemplate = @"
+(function() {
+    function showItem(id, on) {
+        var el = document.querySelector('[data-ans-id=""' + id + '""]');
+        if (!el) return;
+        if (on) el.classList.add('ans-on'); else el.classList.remove('ans-on');
+    }
+
+    window.__setNotes = function(on) {
+        var layer = document.querySelector('.teacher-layer');
+        if (!layer) return;
+        if (on) layer.classList.add('active'); else layer.classList.remove('active');
+        layer.querySelectorAll('.tbnote, .tbred').forEach(function(el) {
+            if (on) el.classList.add('ans-on'); else el.classList.remove('ans-on');
+        });
+        document.querySelectorAll('.item-btn').forEach(function(b) {
+            b.classList.toggle('on', !!on);
+        });
+    };
+
+    window.__setAnswers = function(on) {
+        var layer = document.querySelector('.student-layer');
+        if (!layer) return;
+        if (on) layer.classList.add('active'); else layer.classList.remove('active');
+        layer.querySelectorAll('.tbred, .sa').forEach(function(el) {
+            if (on) el.classList.add('ans-on'); else el.classList.remove('ans-on');
+        });
+    };
+
+    window.__toggleItem = function(id) {
+        var el = document.querySelector('[data-ans-id=""' + id + '""]');
+        if (!el) return;
+        var on = el.classList.toggle('ans-on');
+        var btn = document.querySelector('.item-btn[data-target=""' + id + '""]');
+        if (btn) btn.classList.toggle('on', on);
+    };
+
+    function buildButtons() {
+        var container = document.getElementById('itemBtns');
+        if (!container) return;
+        container.innerHTML = '';
+
+        var groups = document.querySelectorAll('hsg[id][name]');
+        groups.forEach(function(g) {
+            var icon = document.getElementById(g.id + '_img');
+            if (!icon) return;
+            var baseLeft = parseFloat(icon.style.left) || 0;
+            var baseTop  = parseFloat(icon.style.top)  || 0;
+            var children = g.querySelectorAll('hastext[linkname]');
+
+            if (children.length <= 1) return;
+
+            var i = 0;
+            children.forEach(function(h) {
+                var lid = h.getAttribute('linkname');
+                if (!lid) return;
+
+                var item = document.querySelector('[data-ans-id][data-lnk=""' + lid + '""]');
+                if (!item) {
+                    var all = document.querySelectorAll('[data-ans-id]');
+                    for (var k = 0; k < all.length; k++) {
+                        var inner = all[k].querySelector('[name=""' + lid + '""]');
+                        if (inner) { all[k].setAttribute('data-lnk', lid); item = all[k]; break; }
+                    }
+                }
+                if (!item) return;
+                var id = item.getAttribute('data-ans-id');
+
+                var labelEl = h.querySelector('a.s');
+                var label = labelEl ? (labelEl.textContent || '').trim().substring(0, 2) : String(i + 1);
+                if (!label) label = String(i + 1);
+
+                var btn = document.createElement('div');
+                btn.className = 'item-btn';
+                btn.setAttribute('data-target', id);
+                btn.title = labelEl ? labelEl.textContent : lid;
+                btn.textContent = label;
+                btn.style.left = (baseLeft - 26) + 'px';
+                btn.style.top  = (baseTop + i * 24) + 'px';
+                (function(capturedId) {
+                    btn.addEventListener('click', function(ev) {
+                        ev.stopPropagation();
+                        window.__toggleItem(capturedId);
+                    });
+                })(id);
+                container.appendChild(btn);
+                i++;
+            });
+        });
+    }
+
+    document.querySelectorAll('hsg[id][name]').forEach(function(g) {
+        var icon = document.getElementById(g.id + '_img');
+        if (!icon) return;
+        icon.style.cursor = 'pointer';
+        icon.style.pointerEvents = 'auto';
+        icon.style.display = '';
+        icon.addEventListener('click', function(ev) {
+            ev.stopPropagation();
+            var isOn = g.getAttribute('on') === 'true';
+            var turnOn = !isOn;
+            g.setAttribute('on', turnOn ? 'true' : 'false');
+            g.querySelectorAll('hastext[linkname]').forEach(function(h) {
+                var lid = h.getAttribute('linkname');
+                if (!lid) return;
+                var item = document.querySelector('[data-lnk=""' + lid + '""]');
+                if (item) {
+                    if (turnOn) item.classList.add('ans-on');
+                    else item.classList.remove('ans-on');
+                }
+                var targetId = item ? item.getAttribute('data-ans-id') : '';
+                var btn = document.querySelector('.item-btn[data-target=""' + targetId + '""]');
+                if (btn) btn.classList.toggle('on', turnOn);
+            });
+        });
+    });
+
+    buildButtons();
+
+    if (document.querySelector('.teacher-layer.active')) {
+        document.querySelectorAll('.teacher-layer .tbnote, .teacher-layer .tbred').forEach(function(el) {
+            el.classList.add('ans-on');
+        });
+    }
+    if (document.querySelector('.student-layer.active')) {
+        document.querySelectorAll('.student-layer .tbred, .student-layer .sa').forEach(function(el) {
+            el.classList.add('ans-on');
+        });
+    }
+})();
+";
+
         private string GetLogFilePath()
         {
             if (string.IsNullOrEmpty(_logFilePath))
@@ -126,9 +336,6 @@ namespace BookViewer
             if (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count)
                 _ = LoadPageAsync(_currentPageIndex);
         }
-
-        public void ShowAllTeacherNotes(bool show) => SetShowTeacherNotes(show);
-        public void ShowAllStudentAnswers(bool show) => SetShowStudentAnswers(show);
 
         public bool IsFileEncrypted(string content) => _decryptionService.IsEncrypted(content);
         public string DecryptFile(string content, string fileName) => _decryptionService.DecryptWithFileName(content, fileName);
@@ -761,10 +968,6 @@ namespace BookViewer
             }
         }
 
-        // ============================================================
-        // Red answers / teacher notes extraction
-        // Keeps display:none so items start hidden.
-        // ============================================================
         public async Task<string> GetRedAnswerContentAsync(string filePath, string answerType)
         {
             try
@@ -804,22 +1007,19 @@ namespace BookViewer
 
                 string content = await File.ReadAllTextAsync(redAnswerPath);
 
-                // Trim to <body> if present
                 var bodyMatch = Regex.Match(content, @"<body[^>]*>([\s\S]*?)</body>", RegexOptions.IgnoreCase);
                 if (bodyMatch.Success) content = bodyMatch.Groups[1].Value;
 
-                // Extract only the nodes we care about, keeping their structure intact
                 string classPattern = answerType == "teacherNotes" ? "tbnote" : "tbred";
                 var sb = new StringBuilder();
 
-                var matches = Regex.Matches(content,
+                var divMatches = Regex.Matches(content,
                     @"<div[^>]*class\s*=\s*[""'][^""']*" + classPattern + @"[^""']*[""'][^>]*>[\s\S]*?</div>",
                     RegexOptions.IgnoreCase);
 
-                foreach (Match match in matches)
+                foreach (Match match in divMatches)
                     sb.AppendLine(match.Value);
 
-                // SVG teacher-note paths
                 var svgMatches = Regex.Matches(content,
                     @"<svg[^>]*class\s*=\s*[""'][^""']*" + classPattern + @"[^""']*[""'][^>]*>[\s\S]*?</svg>",
                     RegexOptions.IgnoreCase);
@@ -836,33 +1036,34 @@ namespace BookViewer
         }
 
         /// <summary>
-        /// Assigns a unique id (data-ans-id) to each tbnote/tbred wrapper and
-        /// preserves display:none so items start hidden.
+        /// Assigns a unique data-ans-id to every tbnote/tbred wrapper so JS can toggle
+        /// each item individually. Preserves the original `name` attribute for grouping.
         /// </summary>
         public static string AnnotateAnswerItems(string fragment)
         {
             if (string.IsNullOrEmpty(fragment)) return fragment;
 
             var sb = new StringBuilder();
-            var regex = new Regex(@"<div([^>]*)class\s*=\s*[""']([^""']*?)[""']([^>]*)>",
+            var regex = new Regex(@"<div[^>]*class\s*=\s*[""']([^""']*?)[""'][^>]*>",
                                   RegexOptions.IgnoreCase);
             int idx = 0;
             int lastPos = 0;
+
             foreach (Match m in regex.Matches(fragment))
             {
                 sb.Append(fragment.Substring(lastPos, m.Index - lastPos));
-                var cls = m.Groups[2].Value;
+                var cls = m.Groups[1].Value;
                 var tag = m.Value;
 
                 if (cls.Contains("tbnote") || cls.Contains("tbred"))
                 {
-                    string id = "ans_" + idx++;
                     if (tag.Contains("data-ans-id="))
                     {
                         sb.Append(tag);
                     }
                     else
                     {
+                        string id = "ans_" + idx++;
                         sb.Append(tag.Substring(0, tag.Length - 1) + " data-ans-id=\"" + id + "\">");
                     }
                 }
@@ -870,8 +1071,10 @@ namespace BookViewer
                 {
                     sb.Append(tag);
                 }
+
                 lastPos = m.Index + m.Value.Length;
             }
+
             sb.Append(fragment.Substring(lastPos));
             return sb.ToString();
         }
@@ -953,10 +1156,14 @@ namespace BookViewer
                         @"@font-face\s*\{(?<body>.*?)\}",
                         RegexOptions.Singleline | RegexOptions.IgnoreCase);
 
+                    int totalFaces = fontFaceMatches.Count;
+                    int embeddedCount = 0;
+
                     foreach (Match match in fontFaceMatches)
                     {
                         var fontFaceContent = match.Groups[1].Value;
                         var urlMatches = Regex.Matches(fontFaceContent, @"url\(['""]?([^)'""]+)['""]?\)");
+                        bool faceWasEmbedded = false;
 
                         foreach (Match urlMatch in urlMatches)
                         {
@@ -999,9 +1206,20 @@ namespace BookViewer
                                 fontCss = fontCss.Replace($"url('{rawPath}')", $"url('{dataUri}')");
                                 fontCss = fontCss.Replace($"url(\"{rawPath}\")", $"url('{dataUri}')");
                                 fontCss = fontCss.Replace($"url({rawPath})", $"url('{dataUri}')");
+
+                                faceWasEmbedded = true;
+                                Log($"Embedded font: {Path.GetFileName(fullFontPath)} ({fontBytes.Length} bytes)");
+                            }
+                            else
+                            {
+                                Log($"Font file NOT FOUND: '{rawPath}' in {fontsFolder}");
                             }
                         }
+                        if (faceWasEmbedded)
+                            embeddedCount++;
                     }
+
+                    Log($"Font embedding summary: {embeddedCount} of {totalFaces} @font-face rules embedded");
 
                     fontCss += @"
 
@@ -1010,7 +1228,8 @@ namespace BookViewer
     font-family: 'CJKLocked';
     src: local('PingFang TC'), local('PingFang SC'), local('Heiti TC'),
          local('Microsoft JhengHei'), local('Microsoft YaHei'),
-         local('Noto Sans CJK TC'), local('Noto Sans CJK SC');
+         local('Noto Sans CJK TC'), local('Noto Sans CJK SC'),
+         local('Noto Serif CJK TC'), local('Noto Serif CJK SC');
     ascent-override: 100%;
     descent-override: 0%;
     line-gap-override: 0%;
@@ -1019,6 +1238,7 @@ body, .para, .base-content, .content-overlay {
     font-family: 'CJKLocked', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
 }
 ";
+
                     _fontCache[directory] = fontCss;
                     return fontCss;
                 }
@@ -1144,273 +1364,64 @@ body, .para, .base-content, .content-overlay {
         }
 
         // ============================================================
-        // BuildOverlayHtml — with individual item toggles + per-item buttons
+        // BuildOverlayHtml — clean StringBuilder assembly (no $@"..." 
+        // interpolated verbatim strings containing CSS/JS).
         // ============================================================
         private string BuildOverlayHtml(string bgImage, string contentHtml, string fileName, string fontCss,
             int pageWidth, int pageHeight)
         {
-            if (string.IsNullOrEmpty(bgImage))
-                bgImage = GetPlaceholderImage();
-
+            if (string.IsNullOrEmpty(bgImage)) bgImage = GetPlaceholderImage();
             if (string.IsNullOrEmpty(contentHtml))
                 contentHtml = "<div style='padding:20px;color:#666;font-size:24px;'>Content not available</div>";
 
             double zoom = _currentZoom;
             string surround = SurroundColor;
+            string zoomStr = zoom.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
             // Load + annotate answers
             string filePath = (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count)
                 ? _pageFiles[_currentPageIndex]
                 : "";
 
-            string teacherFrag = "";
-            string studentFrag = "";
-
-            if (!string.IsNullOrEmpty(filePath))
-            {
-                var teacherRaw = GetRedAnswerContentAsync(filePath, "teacherNotes").GetAwaiter().GetResult();
-                var studentRaw = GetRedAnswerContentAsync(filePath, "studentAnswers").GetAwaiter().GetResult();
-                teacherFrag = AnnotateAnswerItems(teacherRaw);
-                studentFrag = AnnotateAnswerItems(studentRaw);
-            }
+            var teacherRaw = _showTeacherNotes && !string.IsNullOrEmpty(filePath)
+                ? GetRedAnswerContentAsync(filePath, "teacherNotes").GetAwaiter().GetResult()
+                : "";
+            var studentRaw = _showStudentAnswers && !string.IsNullOrEmpty(filePath)
+                ? GetRedAnswerContentAsync(filePath, "studentAnswers").GetAwaiter().GetResult()
+                : "";
+            var teacherFrag = AnnotateAnswerItems(teacherRaw);
+            var studentFrag = AnnotateAnswerItems(studentRaw);
 
             string teacherWrapper = string.IsNullOrEmpty(teacherFrag) ? "" :
-                $"<div class='answer-layer teacher-layer{(_showTeacherNotes ? " active" : "")}'>{teacherFrag}</div>";
+                "<div class='answer-layer teacher-layer active'>" + teacherFrag + "</div>";
             string studentWrapper = string.IsNullOrEmpty(studentFrag) ? "" :
-                $"<div class='answer-layer student-layer{(_showStudentAnswers ? " active" : "")}'>{studentFrag}</div>";
+                "<div class='answer-layer student-layer active'>" + studentFrag + "</div>";
 
-            return $@"<!DOCTYPE html>
-<html>
-<head>
-<meta charset='UTF-8'>
-<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes'>
-<title>{fileName}</title>
-<style>
-    {fontCss}
-    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-    html, body {{
-        width: 100%; height: 100%; overflow: auto;
-        background: {surround};
-        -webkit-font-smoothing: antialiased;
-    }}
-    body {{ display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; }}
-    .page-wrapper {{ display: flex; justify-content: center; align-items: flex-start; }}
-    .page-container {{
-        position: relative;
-        width: {pageWidth}px; height: {pageHeight}px;
-        flex-shrink: 0; background: #ffffff;
-        box-shadow: 0 0 20px rgba(0,0,0,0.15);
-        overflow: hidden; border-radius: 2px;
-        transform: scale({zoom.ToString(System.Globalization.CultureInfo.InvariantCulture)});
-        transform-origin: top center;
-    }}
-    .background-img {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }}
-    .content-overlay {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; }}
-    .content-overlay > * {{ position: absolute !important; }}
+            var sb = new StringBuilder();
+            sb.Append("<!DOCTYPE html>\n<html>\n<head>\n");
+            sb.Append("<meta charset='UTF-8'>\n");
+            sb.Append("<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes'>\n");
+            sb.Append("<title>").Append(fileName).Append("</title>\n");
+            sb.Append("<style>\n");
+            sb.Append(fontCss);
+            sb.Append(OverlayCssTemplate);
+            sb.Append("html, body { background: ").Append(surround).Append("; }\n");
+            sb.Append(".page-container { width: ").Append(pageWidth).Append("px; height: ").Append(pageHeight).Append("px; }\n");
+            sb.Append(".page-container { transform: scale(").Append(zoomStr).Append("); }\n");
+            sb.Append("</style>\n</head>\n<body>\n");
+            sb.Append("<div class='page-wrapper'><div class='page-container'>\n");
+            sb.Append("<img class='background-img' src='").Append(bgImage).Append("' alt='' />\n");
+            sb.Append("<div class='content-overlay'>\n");
+            sb.Append("<div class='base-content'>").Append(contentHtml).Append("</div>\n");
+            sb.Append(studentWrapper);
+            sb.Append(teacherWrapper);
+            sb.Append("<div class='item-btns' id='itemBtns'></div>\n");
+            sb.Append("</div>\n</div>\n</div>\n");
+            sb.Append("<script>\n");
+            sb.Append(OverlayJsTemplate);
+            sb.Append("</script>\n</body>\n</html>");
 
-    .base-content {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 5; pointer-events: none; }}
-    .base-content > * {{ position: absolute !important; }}
-    .base-content .para {{
-        position: absolute !important;
-        line-height: 1 !important;
-        white-space: pre;
-        font-kerning: none;
-        font-feature-settings: 'kern' 0, 'liga' 0;
-        text-rendering: geometricPrecision;
-        -webkit-font-smoothing: antialiased;
-    }}
-
-    .answer-layer {{
-        position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-        z-index: 20; pointer-events: none; overflow: visible;
-        display: none;
-    }}
-    .answer-layer.active {{ display: block; }}
-    .answer-layer > * {{ position: absolute !important; }}
-
-    .answer-layer .tbnote,
-    .answer-layer .tbred,
-    .answer-layer .sa {{
-        display: none;
-    }}
-    .answer-layer .tbnote.ans-on,
-    .answer-layer .tbred.ans-on,
-    .answer-layer .sa.ans-on {{
-        display: block !important;
-    }}
-
-    .answer-layer .tbnote {{ background: rgba(255,235,150,0.55); border: 3px solid #3498db; border-radius: 4px; padding: 3px; }}
-    .answer-layer .tbred,
-    .answer-layer .sa {{ background: rgba(255,235,150,0.55); border: 3px solid #2ecc71; border-radius: 4px; padding: 3px; }}
-
-    .item-btns {{
-        position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-        z-index: 30; pointer-events: none;
-    }}
-    .item-btn {{
-        position: absolute;
-        width: 22px; height: 22px;
-        background: #FFEE99;
-        border: 1px solid #C80;
-        border-radius: 4px;
-        font-size: 11px; font-weight: bold;
-        color: #A00;
-        display: flex; align-items: center; justify-content: center;
-        cursor: pointer;
-        pointer-events: auto;
-        box-shadow: 0 1px 3px rgba(0,0,0,.3);
-        user-select: none;
-    }}
-    .item-btn:hover {{ background: #FFE44D; }}
-    .item-btn.on {{ background: #CC0000; color: #fff; border-color: #900; }}
-</style>
-</head>
-<body>
-    <div class='page-wrapper'>
-        <div class='page-container'>
-            <img class='background-img' src='{bgImage}' alt='' />
-            <div class='content-overlay'>
-                <div class='base-content'>{contentHtml}</div>
-                {studentWrapper}
-                {teacherWrapper}
-                <div class='item-btns' id='itemBtns'></div>
-            </div>
-        </div>
-    </div>
-    <script>
-    (function() {{
-        function showItem(id, on) {{
-            var el = document.querySelector('[data-ans-id="' + id + '"]');
-            if (!el) return;
-            if (on) el.classList.add('ans-on'); else el.classList.remove('ans-on');
-        }}
-
-        window.__setNotes = function(on) {{
-            var layer = document.querySelector('.teacher-layer');
-            if (!layer) return;
-            if (on) layer.classList.add('active'); else layer.classList.remove('active');
-            layer.querySelectorAll('.tbnote, .tbred').forEach(function(el) {{
-                if (on) el.classList.add('ans-on'); else el.classList.remove('ans-on');
-            }});
-            document.querySelectorAll('.item-btn').forEach(function(b) {{
-                b.classList.toggle('on', !!on);
-            }});
-        }};
-
-        window.__setAnswers = function(on) {{
-            var layer = document.querySelector('.student-layer');
-            if (!layer) return;
-            if (on) layer.classList.add('active'); else layer.classList.remove('active');
-            layer.querySelectorAll('.tbred, .sa').forEach(function(el) {{
-                if (on) el.classList.add('ans-on'); else el.classList.remove('ans-on');
-            }});
-        }};
-
-        window.__toggleItem = function(id) {{
-            var el = document.querySelector('[data-ans-id="' + id + '"]');
-            if (!el) return;
-            var on = el.classList.toggle('ans-on');
-            var btn = document.querySelector('.item-btn[data-target="' + id + '"]');
-            if (btn) btn.classList.toggle('on', on);
-        }};
-
-        function buildButtons() {{
-            var container = document.getElementById('itemBtns');
-            if (!container) return;
-            container.innerHTML = '';
-
-            var groups = document.querySelectorAll('hsg[id][name]');
-            groups.forEach(function(g) {{
-                var icon = document.getElementById(g.id + '_img');
-                if (!icon) return;
-                var baseLeft = parseFloat(icon.style.left) || 0;
-                var baseTop  = parseFloat(icon.style.top)  || 0;
-                var children = g.querySelectorAll('hastext[linkname]');
-
-                if (children.length <= 1) return;
-
-                var i = 0;
-                children.forEach(function(h) {{
-                    var lid = h.getAttribute('linkname');
-                    if (!lid) return;
-
-                    var item = document.querySelector('[data-lnk="' + lid + '"]');
-                    if (!item) {{
-                        var all = document.querySelectorAll('[data-ans-id]');
-                        for (var k = 0; k < all.length; k++) {{
-                            if (all[k].querySelector('[name="' + lid + '"]')) {{
-                                item = all[k];
-                                item.setAttribute('data-lnk', lid);
-                                break;
-                            }}
-                        }}
-                    }}
-                    if (!item) return;
-                    var id = item.getAttribute('data-ans-id');
-
-                    var labelEl = h.querySelector('a.s');
-                    var label = labelEl ? (labelEl.textContent || '').trim().substring(0, 2) : String(i + 1);
-                    if (!label) label = String(i + 1);
-
-                    var btn = document.createElement('div');
-                    btn.className = 'item-btn';
-                    btn.setAttribute('data-target', id);
-                    btn.title = labelEl ? labelEl.textContent : lid;
-                    btn.textContent = label;
-                    btn.style.left = (baseLeft - 26) + 'px';
-                    btn.style.top  = (baseTop + i * 24) + 'px';
-                    btn.addEventListener('click', function(ev) {{
-                        ev.stopPropagation();
-                        window.__toggleItem(id);
-                    }});
-                    container.appendChild(btn);
-                    i++;
-                }});
-            }});
-        }}
-
-        document.querySelectorAll('hsg[id][name]').forEach(function(g) {{
-            var icon = document.getElementById(g.id + '_img');
-            if (!icon) return;
-            icon.style.cursor = 'pointer';
-            icon.style.pointerEvents = 'auto';
-            icon.style.display = '';
-            icon.addEventListener('click', function(ev) {{
-                ev.stopPropagation();
-                var isOn = g.getAttribute('on') === 'true';
-                var turnOn = !isOn;
-                g.setAttribute('on', turnOn ? 'true' : 'false');
-                g.querySelectorAll('hastext[linkname]').forEach(function(h) {{
-                    var lid = h.getAttribute('linkname');
-                    if (!lid) return;
-                    var item = document.querySelector('[data-lnk="' + lid + '"]');
-                    if (item) {{
-                        if (turnOn) item.classList.add('ans-on');
-                        else item.classList.remove('ans-on');
-                    }}
-                    var btn = document.querySelector('.item-btn[data-target="' + (item ? item.getAttribute('data-ans-id') : '') + '"]');
-                    if (btn) btn.classList.toggle('on', turnOn);
-                }});
-            }});
-        }});
-
-        buildButtons();
-
-        // Initial pass — if layers are active, mark their items on
-        if (document.querySelector('.teacher-layer.active')) {{
-            document.querySelectorAll('.teacher-layer .tbnote, .teacher-layer .tbred').forEach(function(el) {{
-                el.classList.add('ans-on');
-            }});
-        }}
-        if (document.querySelector('.student-layer.active')) {{
-            document.querySelectorAll('.student-layer .tbred, .student-layer .sa').forEach(function(el) {{
-                el.classList.add('ans-on');
-            }});
-        }}
-    }})();
-    </script>
-</body>
-</html>";
+            return sb.ToString();
         }
 
         public async Task<string> BuildPageHtmlForRenderAsync(
@@ -1419,90 +1430,22 @@ body, .para, .base-content, .content-overlay {
             bool includeTeacherNotes,
             bool includeStudentAnswers)
         {
-            var directory = Path.GetDirectoryName(filePath) ?? "";
-            var fileName = Path.GetFileName(filePath) ?? "";
+            // Temporarily flip the two flags so BuildOverlayHtml includes the layers
+            bool prevTeacher = _showTeacherNotes;
+            bool prevStudent = _showStudentAnswers;
+            _showTeacherNotes = includeAnswers && includeTeacherNotes;
+            _showStudentAnswers = includeAnswers && includeStudentAnswers;
 
-            var rawHtml = await File.ReadAllTextAsync(filePath);
-            await ProcessHtmlContent(rawHtml, filePath);
-
-            int renderWidth = CurrentPageWidth;
-            int renderHeight = CurrentPageHeight;
-
-            string bgImage = GetStepBackgroundImage(filePath);
-            string contentHtml = await ExtractContentFromHtmlFile(filePath, fileName, directory);
-            string fontCss = await GetFontCssWithEmbeddedFonts(directory);
-
-            string teacherFragment = "";
-            string studentFragment = "";
-
-            if (includeAnswers)
+            try
             {
-                if (includeTeacherNotes)
-                {
-                    var raw = await GetRedAnswerContentAsync(filePath, "teacherNotes");
-                    if (!string.IsNullOrEmpty(raw))
-                    {
-                        var annotated = AnnotateAnswerItems(raw);
-                        teacherFragment = $@"<div class='highlight-overlay teacher-overlay'>
-<style>.tbnote {{ background: rgba(255,235,150,0.55); border: 3px solid #3498db; border-radius: 4px; padding: 3px; display: block !important; }}</style>
-{annotated}</div>";
-                    }
-                }
-
-                if (includeStudentAnswers)
-                {
-                    var raw = await GetRedAnswerContentAsync(filePath, "studentAnswers");
-                    if (!string.IsNullOrEmpty(raw))
-                    {
-                        var annotated = AnnotateAnswerItems(raw);
-                        studentFragment = $@"<div class='highlight-overlay student-overlay'>
-<style>.tbred, .sa {{ background: rgba(255,235,150,0.55); border: 3px solid #2ecc71; border-radius: 4px; padding: 3px; display: block !important; }}</style>
-{annotated}</div>";
-                    }
-                }
+                var rawHtml = await File.ReadAllTextAsync(filePath);
+                return await ProcessHtmlContent(rawHtml, filePath);
             }
-
-            return $@"<!DOCTYPE html>
-<html>
-<head>
-<meta charset='UTF-8'>
-<style>
-    {fontCss}
-    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-    html, body {{ width: {renderWidth}px; height: {renderHeight}px; overflow: hidden; background: #ffffff; }}
-    .page-container {{ position: relative; width: {renderWidth}px; height: {renderHeight}px; background: #ffffff; overflow: hidden; }}
-    .background-img {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }}
-    .content-overlay {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; }}
-    .content-overlay > * {{ position: absolute !important; top: 0; left: 0; }}
-    .base-content {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 5; }}
-    .base-content > * {{ position: absolute !important; }}
-    .base-content .para {{
-        position: absolute !important;
-        line-height: 1 !important;
-        white-space: pre;
-        font-kerning: none;
-        font-feature-settings: 'kern' 0, 'liga' 0;
-        text-rendering: geometricPrecision;
-        -webkit-font-smoothing: antialiased;
-    }}
-
-    .highlight-overlay {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 20; pointer-events: none; overflow: visible; }}
-    .highlight-overlay > *, .highlight-overlay > * > * {{ position: absolute !important; }}
-    .teacher-overlay .tbnote {{ background: rgba(255,235,150,0.55); border: 3px solid #3498db; border-radius: 4px; padding: 3px; display: block !important; }}
-    .student-overlay .tbred, .student-overlay .sa {{ background: rgba(255,235,150,0.55); border: 3px solid #2ecc71; border-radius: 4px; padding: 3px; display: block !important; }}
-</style>
-</head>
-<body>
-<div class='page-container'>
-    <img class='background-img' src='{bgImage}' />
-    <div class='content-overlay'>
-        <div class='base-content'>{contentHtml}</div>
-        {teacherFragment}
-        {studentFragment}
-    </div>
-</div>
-</body>
-</html>";
+            finally
+            {
+                _showTeacherNotes = prevTeacher;
+                _showStudentAnswers = prevStudent;
+            }
         }
 
         public void NavigatePrevious()
