@@ -20,6 +20,7 @@ namespace BookViewer
         private string _bookTitle = "Unknown Book";
         private string _currentPageHtml = "";
         private readonly Dictionary<string, string> _fontCache = new();
+        private readonly Dictionary<string, string> _assetCache = new();
         private bool _sideBySideMode = false;
         private bool _twoPageSpread = false;
         private string _nextPageHtml = "";
@@ -311,6 +312,8 @@ window.CH_showIcon = function(){};
             {
                 Log($"=== LOADING BOOK from: {folderPath} ===");
                 _currentBookPath = folderPath;
+                _assetCache.Clear();
+                _fontCache.Clear();
 
                 _tempFolder = Path.Combine(FileSystem.CacheDirectory, "BookViewer", $"temp_{Guid.NewGuid().ToString().Substring(0, 8)}");
                 Directory.CreateDirectory(_tempFolder);
@@ -578,8 +581,8 @@ window.CH_showIcon = function(){};
 
                 string nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
 
-                string baseHtml = await ReadIfExists(Path.Combine(directory, nameWithoutExt + "_base.html"));
-                string oriHtml  = await ReadIfExists(Path.Combine(directory, nameWithoutExt + "_ori.html"));
+                string baseHtml = StripAnswerDivs(await ReadIfExists(Path.Combine(directory, nameWithoutExt + "_base.html")));
+                string oriHtml  = StripAnswerDivs(await ReadIfExists(Path.Combine(directory, nameWithoutExt + "_ori.html")));
                 string redHtml  = await ReadIfExists(Path.Combine(directory, nameWithoutExt + "_redAnswer.html"));
                 string fontCss  = await GetFontCssWithEmbeddedFonts(directory);
 
@@ -613,7 +616,8 @@ window.CH_showIcon = function(){};
                     m => m.Groups[1].Value + redHtml + m.Groups[3].Value,
                     RegexOptions.IgnoreCase);
 
-                skeleton = RewriteUrlsToFile(skeleton, directory);
+                // Inline every image / svg as base64 data URI (Android WebView can't load file://)
+                skeleton = InlineAllAssets(skeleton, directory);
 
                 return BuildFinalHtml(skeleton, fontCss, pageWidth, pageHeight, fileName);
             }
@@ -630,85 +634,143 @@ window.CH_showIcon = function(){};
             catch { return ""; }
         }
 
-        /// <summary>
-        /// Rewrite every relative src/href/url() to a file:// absolute URL.
-        /// Handles:
-        ///   "images/redlayer.svg"                 → <pageDir>/images/redlayer.svg
-        ///   "SEC201/images/steps_1.jpg"           → strip "SEC201/" → <pageDir>/images/...
-        ///   "../images/x.svg"                     → walk up
-        ///   "../FONTS/x.ttf"                      → walk up
-        ///   "/absolute/path"                      → as-is
-        /// Falls back to <bookRoot>/<clean> and <bookRoot>/images/<filename>.
-        /// </summary>
-        private string RewriteUrlsToFile(string html, string pageDir)
+        private static string StripAnswerDivs(string html)
+        {
+            if (string.IsNullOrEmpty(html)) return html;
+
+            html = Regex.Replace(html,
+                @"<div\b[^>]*class=""[^""]*\b(?:tbred|tbnote)\b[^""]*""[^>]*>[\s\S]*?</div>",
+                "", RegexOptions.IgnoreCase);
+
+            html = Regex.Replace(html,
+                @"<svg\b[^>]*class=""[^""]*\btbred\b[^""]*""[^>]*>[\s\S]*?</svg>",
+                "", RegexOptions.IgnoreCase);
+
+            return html;
+        }
+
+        // ============================================================
+        // Inline assets — resolves each relative URL to a file on disk
+        // and returns a base64 data URI. This is the only reliable way
+        // to load images/svgs in an Android WebView loaded from a
+        // string (HtmlWebViewSource), where file:// access is blocked.
+        // ============================================================
+        private string InlineAllAssets(string html, string pageDir)
         {
             if (string.IsNullOrEmpty(html)) return html;
 
             string pageDirUnix = pageDir.Replace('\\', '/');
             string pageDirName = Path.GetFileName(pageDirUnix);
 
-            string Resolve(string raw)
+            string FindOnDisk(string raw)
             {
-                if (string.IsNullOrEmpty(raw)) return raw;
-                if (raw.StartsWith("data:") || raw.StartsWith("http") || raw.StartsWith("//") || raw.StartsWith("file://"))
-                    return raw;
+                if (string.IsNullOrEmpty(raw)) return null;
+                if (raw.StartsWith("data:") || raw.StartsWith("http") || raw.StartsWith("//"))
+                    return null;
 
                 var clean = raw;
                 var q = clean.IndexOfAny(new[] { '?', '#' });
                 if (q >= 0) clean = clean.Substring(0, q);
                 clean = clean.Replace('\\', '/').TrimStart('.', '/');
 
-                // 1. Direct: <pageDir>/<clean>
-                var candidate = Path.GetFullPath(Path.Combine(pageDir, clean));
-                if (File.Exists(candidate)) return ToFileUrl(candidate);
+                // 1. pageDir/<clean>
+                var c = Path.GetFullPath(Path.Combine(pageDir, clean));
+                if (File.Exists(c)) return c;
 
-                // 2. Strip leading folder if it equals the page's own folder name
-                //    e.g. "SEC201/images/steps_1.jpg" → "images/steps_1.jpg"
+                // 2. strip leading folder that equals pageDir name
                 var segments = clean.Split('/');
                 if (segments.Length > 1 && segments[0] == pageDirName)
                 {
                     var stripped = string.Join("/", segments.Skip(1));
-                    candidate = Path.GetFullPath(Path.Combine(pageDir, stripped));
-                    if (File.Exists(candidate)) return ToFileUrl(candidate);
+                    c = Path.GetFullPath(Path.Combine(pageDir, stripped));
+                    if (File.Exists(c)) return c;
                 }
 
-                // 3. Walk up two levels
+                // 3. walk up two levels
                 var up = pageDir;
                 for (int i = 0; i < 2; i++)
                 {
                     up = Path.GetDirectoryName(up) ?? up;
-                    candidate = Path.GetFullPath(Path.Combine(up, clean));
-                    if (File.Exists(candidate)) return ToFileUrl(candidate);
+                    c = Path.GetFullPath(Path.Combine(up, clean));
+                    if (File.Exists(c)) return c;
                 }
 
-                // 4. Book root
-                candidate = Path.GetFullPath(Path.Combine(_currentBookPath, clean));
-                if (File.Exists(candidate)) return ToFileUrl(candidate);
+                // 4. book root
+                c = Path.GetFullPath(Path.Combine(_currentBookPath, clean));
+                if (File.Exists(c)) return c;
 
-                // 5. Book root images/
+                // 5. book root images/
                 var fname = Path.GetFileName(clean);
-                candidate = Path.GetFullPath(Path.Combine(_currentBookPath, "images", fname));
-                if (File.Exists(candidate)) return ToFileUrl(candidate);
+                c = Path.GetFullPath(Path.Combine(_currentBookPath, "images", fname));
+                if (File.Exists(c)) return c;
 
-                return raw;
+                return null;
             }
 
-            string ToFileUrl(string full)
+            string ToDataUri(string diskPath)
             {
-                var p = full.Replace('\\', '/');
-                if (!p.StartsWith("/")) p = "/" + p;
-                return "file://" + p;
+                if (_assetCache.TryGetValue(diskPath, out var cached)) return cached;
+
+                try
+                {
+                    var bytes = File.ReadAllBytes(diskPath);
+                    var ext = Path.GetExtension(diskPath).ToLowerInvariant();
+                    var mime = ext switch
+                    {
+                        ".svg" => "image/svg+xml",
+                        ".png" => "image/png",
+                        ".jpg" or ".jpeg" => "image/jpeg",
+                        ".gif" => "image/gif",
+                        ".webp" => "image/webp",
+                        ".bmp" => "image/bmp",
+                        ".ico" => "image/x-icon",
+                        _ => "application/octet-stream"
+                    };
+                    var uri = $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
+                    _assetCache[diskPath] = uri;
+                    return uri;
+                }
+                catch { return null; }
             }
 
+            string Resolve(string raw)
+            {
+                if (string.IsNullOrEmpty(raw)) return raw;
+                if (raw.StartsWith("data:") || raw.StartsWith("http") || raw.StartsWith("//"))
+                    return raw;
+
+                var disk = FindOnDisk(raw);
+                if (disk == null)
+                {
+                    Log($"[asset-miss] {raw} (pageDir={pageDir})");
+                    return raw;
+                }
+                var uri = ToDataUri(disk);
+                return uri ?? raw;
+            }
+
+            // src="..."  and  href="..."
             html = Regex.Replace(html,
-                @"(\bsrc\s*=\s*[""'])([^""']+)([""'])",
-                m => m.Groups[1].Value + Resolve(m.Groups[2].Value) + m.Groups[3].Value);
+                @"(\bsrc\s*=\s*"")([^""]+)("")",
+                m => m.Groups[1].Value + Resolve(m.Groups[2].Value) + m.Groups[3].Value,
+                RegexOptions.IgnoreCase);
             html = Regex.Replace(html,
-                @"(\bhref\s*=\s*[""'])([^""']+)([""'])",
-                m => m.Groups[1].Value + Resolve(m.Groups[2].Value) + m.Groups[3].Value);
+                @"(\bsrc\s*=\s*')([^']+)(')",
+                m => m.Groups[1].Value + Resolve(m.Groups[2].Value) + m.Groups[3].Value,
+                RegexOptions.IgnoreCase);
+            html = Regex.Replace(html,
+                @"(\bhref\s*=\s*"")([^""]+)("")",
+                m => m.Groups[1].Value + Resolve(m.Groups[2].Value) + m.Groups[3].Value,
+                RegexOptions.IgnoreCase);
+            html = Regex.Replace(html,
+                @"(\bhref\s*=\s*')([^']+)(')",
+                m => m.Groups[1].Value + Resolve(m.Groups[2].Value) + m.Groups[3].Value,
+                RegexOptions.IgnoreCase);
+            // url(...)  inside inline styles
             html = Regex.Replace(html,
                 @"url\(\s*['""]?([^'"")\s]+)['""]?\s*\)",
-                m => "url('" + Resolve(m.Groups[1].Value) + "')");
+                m => "url('" + Resolve(m.Groups[1].Value) + "')",
+                RegexOptions.IgnoreCase);
 
             return html;
         }
@@ -737,6 +799,9 @@ window.CH_showIcon = function(){};
             return sb.ToString();
         }
 
+        // ============================================================
+        // Font CSS — inline every font file as base64 data URI too.
+        // ============================================================
         public async Task<string> GetFontCssWithEmbeddedFonts(string directory)
         {
             try
@@ -758,13 +823,12 @@ window.CH_showIcon = function(){};
                 {
                     fontCss = await File.ReadAllTextAsync(fontCssPath);
 
-                    // Rewrite url(...) to file:// for any ttf/otf/woff under FONTS at bookRoot or pageDir
                     fontCss = Regex.Replace(fontCss,
                         @"url\(\s*['""]?([^'"")\s]+)['""]?\s*\)",
                         m =>
                         {
                             var raw = m.Groups[1].Value;
-                            if (raw.StartsWith("data:") || raw.StartsWith("http") || raw.StartsWith("file://")) return m.Value;
+                            if (raw.StartsWith("data:") || raw.StartsWith("http")) return m.Value;
 
                             var name = Path.GetFileName(raw.Replace('\\', '/'));
                             var candidates = new[]
@@ -775,12 +839,62 @@ window.CH_showIcon = function(){};
                                 Path.Combine(directory, "fonts", name)
                             };
                             foreach (var c in candidates)
+                            {
                                 if (File.Exists(c))
                                 {
-                                    var u = c.Replace('\\', '/');
-                                    if (!u.StartsWith("/")) u = "/" + u;
-                                    return "url('file://" + u + "')";
+                                    try
+                                    {
+                                        var bytes = File.ReadAllBytes(c);
+                                        var ext = Path.GetExtension(c).ToLowerInvariant();
+                                        var mime = ext switch
+                                        {
+                                            ".ttf" => "font/ttf",
+                                            ".otf" => "font/otf",
+                                            ".woff" => "font/woff",
+                                            ".woff2" => "font/woff2",
+                                            _ => "font/ttf"
+                                        };
+                                        var uri = $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
+                                        return "url('" + uri + "')";
+                                    }
+                                    catch { }
                                 }
+                            }
+
+                            // Non-font background image referenced from font.css
+                            // (e.g. div.blur29 { background-image: url(images/steps_3_b.jpg); })
+                            var imgCandidates = new[]
+                            {
+                                Path.Combine(directory, name),
+                                Path.Combine(directory, "images", name),
+                                Path.Combine(_currentBookPath, "images", name),
+                                Path.Combine(_currentBookPath, name)
+                            };
+                            foreach (var c in imgCandidates)
+                            {
+                                if (File.Exists(c))
+                                {
+                                    try
+                                    {
+                                        var bytes = File.ReadAllBytes(c);
+                                        var ext = Path.GetExtension(c).ToLowerInvariant();
+                                        var mime = ext switch
+                                        {
+                                            ".svg" => "image/svg+xml",
+                                            ".png" => "image/png",
+                                            ".jpg" or ".jpeg" => "image/jpeg",
+                                            ".gif" => "image/gif",
+                                            ".webp" => "image/webp",
+                                            _ => "application/octet-stream"
+                                        };
+                                        var uri = $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
+                                        return "url('" + uri + "')";
+                                    }
+                                    catch { }
+                                }
+                            }
+
+                            Log($"[css-asset-miss] {raw} (dir={directory})");
                             return m.Value;
                         });
 
