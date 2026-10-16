@@ -45,28 +45,28 @@ namespace BookViewer
             Application.Current?.RequestedTheme == AppTheme.Dark ? "#1C1C1E" : "#E8E8E8";
 
         private const string OverlayCssTemplate = @"
-* { margin: 0; padding: 0; box-sizing: border-box; }
-html, body { width: 100%; height: 100%; overflow: auto; background: #E8E8E8; -webkit-font-smoothing: antialiased; }
-body { display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; }
-.page-wrapper { display: flex; justify-content: center; align-items: flex-start; }
-.page-container { position: relative; flex-shrink: 0; background: #ffffff; box-shadow: 0 0 20px rgba(0,0,0,0.15); overflow: hidden; transform-origin: top center; }
-#rez { position: relative; }
-.bgcls { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
-img.bgcls { width: 100%; height: 100%; }
-pane { display: block; position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
-pane.base > *, pane.redAnswer > *, pane.ori > * { position: absolute; }
-.redbtn { cursor: pointer; opacity: .85; }
-.hideBtn { display: none; }
-.tbred { color: #E40477 !important; }
-.tbnote { color: #0070C0 !important; }
-.hsgbtn { cursor: pointer; }
-pane.redAnswer { pointer-events: none; }
-pane.redAnswer .tbred { pointer-events: none; }
-hsg { pointer-events: auto; }
-img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes'], img.has2btn[redanswertype='teacherNotes'] { pointer-events: auto !important; cursor: pointer !important; }
-.copyright { display: none !important; }
-";
-
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 100%; height: 100%; overflow: auto; background: #E8E8E8; -webkit-font-smoothing: antialiased; }
+        body { display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; }
+        .page-wrapper { display: flex; justify-content: center; align-items: flex-start; }
+        .page-container { position: relative; flex-shrink: 0; background: #ffffff; box-shadow: 0 0 20px rgba(0,0,0,0.15); overflow: hidden; transform-origin: top center; }
+        #rez { position: relative; }
+        .bgcls { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        img.bgcls { width: 100%; height: 100%; }
+        pane { display: block; position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        pane.base > *, pane.redAnswer > *, pane.ori > * { position: absolute; }
+        .redbtn { cursor: pointer; opacity: .85; }
+        .hideBtn { display: none; }
+        .tbred { color: #E40477 !important; }
+        .tbnote { color: #0070C0 !important; }
+        .hsgbtn { cursor: pointer; }
+        pane.redAnswer { pointer-events: none; }
+        pane.redAnswer .tbred { pointer-events: none; }
+        hsg { pointer-events: auto; }
+        img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes'], img.has2btn[redanswertype='teacherNotes'] { pointer-events: auto !important; cursor: pointer !important; }
+        .copyright { display: none !important; }
+        ";
+        
         private const string ReaderJsTemplate = @"
         window.__readerRedAnswersVisible = false;
         window.__readerNotesVisible = false;
@@ -208,18 +208,36 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
           window.__toggleByName(id, turnOn);
         };
         
-        // ---- Split-pane controller: move button opens the target book ----
+        // ============================================================
+        // getSplitPaneInfo — reads every known field-name variant:
+        //   Book UID      -> BY_SplitPaneBookUID_<id>
+        //   Section #     -> BY_SplitPaneSectionNum_<id>
+        //   Unit #        -> BY_SplitPaneUnitNum_<id>
+        //   Step #        -> BY_SplitPaneStepNum_<id>
+        //   Page #        -> BY_SplitPanePageNum_<id>
+        //   Split %       -> BY_SplitPaneRatio_<id>
+        //   Tool tip      -> BY_SplitPaneTooltips_<id>
+        // Also falls back to data-* attributes on the <splitpane> element.
+        // ============================================================
         window.getSplitPaneInfo = function(pane){
           var id = pane.id;
-          function t(x){ var e = document.getElementById(x); return e ? (e.innerText || '').trim() : ''; }
+          function t(x){
+            var e = document.getElementById(x);
+            return e ? (e.innerText || e.textContent || '').trim() : '';
+          }
+          function a(k){
+            var v = pane.getAttribute(k);
+            return v ? v.trim() : '';
+          }
           return {
-            id: id,
-            bookUID: t('BY_SplitPaneBookUID_' + id) || pane.getAttribute('data-book-uid') || '',
-            section: t('BY_SplitPaneSectionNum_' + id) || pane.getAttribute('data-section') || '',
-            unit: t('BY_SplitPaneUnitNum_' + id) || pane.getAttribute('data-unit') || '',
-            step: t('BY_SplitPaneStepNum_' + id) || pane.getAttribute('data-step') || '',
-            split: t('BY_SplitPaneRatio_' + id) || pane.getAttribute('data-split') || '50%',
-            tooltip: t('BY_SplitPaneTooltips_' + id) || pane.getAttribute('data-tooltip') || ''
+            id:      id,
+            bookUID: t('BY_SplitPaneBookUID_'    + id) || a('data-book-uid') || '',
+            section: t('BY_SplitPaneSectionNum_' + id) || a('data-section')  || '',
+            unit:    t('BY_SplitPaneUnitNum_'    + id) || a('data-unit')     || '',
+            step:    t('BY_SplitPaneStepNum_'    + id) || a('data-step')     || '',
+            page:    t('BY_SplitPanePageNum_'    + id) || a('data-page')     || '',
+            split:   t('BY_SplitPaneRatio_'      + id) || a('data-split')    || '50%',
+            tooltip: t('BY_SplitPaneTooltips_'   + id) || a('data-tooltip')  || ''
           };
         };
         
@@ -228,7 +246,7 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
             var el = document.getElementById(id);
             if (!el) return;
             var info = window.getSplitPaneInfo(el);
-            try { window.location.href = 'bookviewer://splitpane-delete?bookUID=' + encodeURIComponent(info.bookUID); } catch(e){}
+            try { window.location.href = 'about:blank#splitpane-delete?bookUID=' + encodeURIComponent(info.bookUID); } catch(e){}
             if (el.parentNode) el.parentNode.removeChild(el);
           },
           validateSplitRatio: function(id){
@@ -250,15 +268,21 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
           }
         };
         
+        // ============================================================
+        // showSplitPanePage — passes every field so the reader can
+        // decide between section+step and page (folio) navigation.
+        // ============================================================
         window.BY_SplitPaneController = {
           showSplitPanePage: function(id){
             var sp = document.getElementById(id);
             if (!sp) return;
             var info = window.getSplitPaneInfo(sp);
-            var url = 'bookviewer://splitpane-open'
-                    + '?bookUID=' + encodeURIComponent(info.bookUID)
-                    + '&section=' + encodeURIComponent(info.section)
-                    + '&step=' + encodeURIComponent(info.step);
+            var url = 'about:blank#splitpane-open'
+                    + '?bookUID=' + encodeURIComponent(info.bookUID || '')
+                    + '&section=' + encodeURIComponent(info.section || '')
+                    + '&unit='    + encodeURIComponent(info.unit    || '')
+                    + '&step='    + encodeURIComponent(info.step    || '')
+                    + '&page='    + encodeURIComponent(info.page    || '');
             try { window.location.href = url; } catch(e){}
           }
         };
@@ -267,23 +291,21 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
           showExerciseView: function(id, poolType){
             var el = document.getElementById(id);
             if (!el) return;
-            // Try to read the question-group id from the sibling <a> element
             var gid = '';
             var a = document.getElementById('BY_assessmentQuestion_' + id);
             if (a) gid = (a.innerText || '').trim();
             try {
-              window.location.href = 'bookviewer://assessment-open'
+              window.location.href = 'about:blank#assessment-open'
                 + '?id=' + encodeURIComponent(id)
                 + '&poolType=' + encodeURIComponent(poolType || '')
                 + '&group=' + encodeURIComponent(gid);
             } catch(e){}
           },
           closeExerciseView: function(){
-            try { window.location.href = 'bookviewer://assessment-close'; } catch(e){}
+            try { window.location.href = 'about:blank#assessment-close'; } catch(e){}
           }
         };
         
-        // ---- Force every toggle icon visible and clickable ----
         (function(){
           function makeClickable(){
             document.querySelectorAll('img.redbtn, img.has2btn, img.hsgbtn').forEach(function(b){
