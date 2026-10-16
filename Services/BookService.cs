@@ -58,19 +58,33 @@ pane.base > *, pane.redAnswer > *, pane.ori > * { position: absolute; }
 .redbtn { cursor: pointer; opacity: .85; }
 .hideBtn { display: none; }
 .tbred { color: #E40477 !important; }
-.tbnote { color: #0070C0 !important; }
+.tbnote { color: #E40477 !important; }
+.tbnote * { color: #E40477 !important; }
 .hsgbtn { cursor: pointer; }
 pane.redAnswer { pointer-events: none; }
 pane.redAnswer .tbred { pointer-events: none; }
 hsg { pointer-events: auto; }
 img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes'], img.has2btn[redanswertype='teacherNotes'] { pointer-events: auto !important; cursor: pointer !important; }
 .copyright { display: none !important; }
+
+/* Force teacher-note overlay art to render red */
+img.redbtn[redanswertype='teacherNotes'],
+img.hsgbtn[redanswertype='teacherNotes'],
+img.has2btn[redanswertype='teacherNotes'] {
+    filter: invert(15%) sepia(99%) saturate(7000%) hue-rotate(315deg) brightness(90%) contrast(120%);
+    -webkit-filter: invert(15%) sepia(99%) saturate(7000%) hue-rotate(315deg) brightness(90%) contrast(120%);
+}
+
+/* Teacher-note text color inside <hsg> popups */
+hsg[redanswertype='teacherNotes'] { color: #E40477 !important; }
+hsg[redanswertype='teacherNotes'] * { color: #E40477 !important; }
 ";
 
-                private const string ReaderJsTemplate = @"
+        private const string ReaderJsTemplate = @"
         window.__readerRedAnswersVisible = false;
         window.__readerNotesVisible = false;
         window.__redAnswerOriginalDisplay = new WeakMap();
+        window.__lastSplitPaneLog = '';
         
         function rememberDisplay(el){
           if (!window.__redAnswerOriginalDisplay.has(el)) {
@@ -245,7 +259,6 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
             return '';
           }
 
-          // Collect every text node inside the pane (used for fallback keyword scan)
           function allPaneText(){
             var out = [];
             if (document.createTreeWalker) {
@@ -259,7 +272,6 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
             return out;
           }
 
-          // Scan a haystack for a keyword and return the first number that follows it
           function extractNumber(haystack, keywords){
             if (!haystack) return '';
             var lower = ('' + haystack).toLowerCase();
@@ -276,7 +288,6 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
             return '';
           }
 
-          // ---------- Structured lookups by DOM id ----------
           var bookUID = byId([
               'BY_SplitPaneBookUID_' + id,
               'BY_SplitPaneBookUID'
@@ -297,7 +308,6 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
           ]) || byAttr(['data-unit','data-unit-num','unit'])
              || bySuffix(['UnitNum','Unit','unit','unit_num']);
 
-          // STEP: try ""Step #"" first, then fall back to ""Page #""
           var step = byId([
               'BY_SplitPaneStepNum_' + id,
               'BY_SplitPaneStep_' + id,
@@ -312,10 +322,8 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
           ]) || byAttr(['data-page','data-page-num','page'])
              || bySuffix(['PageNum','Page','page','page_num']);
 
-          // If no explicit Step but a Page exists, use Page as the step
           if (!step && page) step = page;
 
-          // ---------- Fallback: scan the pane's full text + HTML ----------
           if (!step || !section || !bookUID) {
             var joined = allPaneText().join(' ');
             var outer = trim(pane.outerHTML);
@@ -367,7 +375,6 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
           ]) || byAttr(['data-tooltip','title'])
              || bySuffix(['Tooltips','Tooltip','tooltip']);
 
-          // If section is empty but unit has a value, use unit
           if (!section && unit) section = 's_' + unit;
 
           return {
@@ -412,16 +419,19 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
         window.BY_SplitPaneController = {
           showSplitPanePage: function(id){
             var sp = document.getElementById(id);
-            if (!sp) { console.log('[splitpane] no element for id=' + id); return; }
+            if (!sp) {
+              window.__lastSplitPaneLog = 'no element for id=' + id;
+              return;
+            }
             var info = window.getSplitPaneInfo(sp);
-            console.log('[splitpane] info=' + JSON.stringify(info));
+            window.__lastSplitPaneLog = 'info=' + JSON.stringify(info);
             var url = 'bookviewer://splitpane-open'
                     + '?bookUID=' + encodeURIComponent(info.bookUID)
                     + '&section=' + encodeURIComponent(info.section)
                     + '&unit=' + encodeURIComponent(info.unit)
                     + '&step=' + encodeURIComponent(info.step);
-            console.log('[splitpane] url=' + url);
-            try { window.location.href = url; } catch(e){ console.log('[splitpane] nav err=' + e); }
+            window.__lastSplitPaneLog += ' url=' + url;
+            try { window.location.href = url; } catch(e){ window.__lastSplitPaneLog += ' err=' + e; }
           }
         };
         
@@ -429,7 +439,6 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
           showExerciseView: function(id, poolType){
             var el = document.getElementById(id);
             if (!el) return;
-            // Try to read the question-group id from the sibling <a> element
             var gid = '';
             var a = document.getElementById('BY_assessmentQuestion_' + id);
             if (a) gid = (a.innerText || '').trim();
@@ -846,15 +855,10 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
             var wanted = "steps_" + step;
             var wantedAlt = "step_" + step;
 
-            // Normalize the section identifier: strip any path, keep last segment
             string sectionKey = (section ?? "").Replace('\\', '/').Trim();
             if (sectionKey.Contains('/'))
                 sectionKey = sectionKey.Substring(sectionKey.LastIndexOf('/') + 1);
 
-            // Build a set of acceptable folder names for this section:
-            //   - the raw value ("s_1", "1", etc.)
-            //   - "s_<value>" if the value is numeric and doesn't already start with s_
-            //   - the bare number if the value starts with "s_"
             var acceptableFolders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (!string.IsNullOrEmpty(sectionKey))
             {
@@ -884,8 +888,7 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
                 return i;
             }
 
-            // PASS 2: match folder only (any step file in that folder), pick the one
-            // whose parsed step index is closest to the requested step.
+            // PASS 2: match folder only — pick closest step
             if (acceptableFolders.Count > 0)
             {
                 int bestIdx = -1;
@@ -902,11 +905,7 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
                     if (int.TryParse(m.Groups[1].Value, out int fileStep))
                     {
                         int delta = Math.Abs(fileStep - step);
-                        if (delta < bestDelta)
-                        {
-                            bestDelta = delta;
-                            bestIdx = i;
-                        }
+                        if (delta < bestDelta) { bestDelta = delta; bestIdx = i; }
                     }
                 }
                 if (bestIdx >= 0)
@@ -916,7 +915,7 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
                 }
             }
 
-            // PASS 3: filename-only fallback (old behavior) — but log it clearly
+            // PASS 3: filename-only fallback
             for (int i = 0; i < _pageFiles.Count; i++)
             {
                 var name = Path.GetFileNameWithoutExtension(_pageFiles[i]);
@@ -931,15 +930,6 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
             return -1;
         }
                 
-        // ============================================================
-        // Find the pool HTML for a given question group id.
-        // Looks under:
-        //   <bookRoot>/ola/<groupId>.html
-        //   <bookRoot>/pools/<groupId>.html
-        //   <bookRoot>/pools/<groupId>/index.html
-        //   <bookRoot>/ola/<groupId>/index.html
-        //   plus any <bookRoot>/s_*/ola/<groupId>.html
-        // ============================================================
         public string FindPoolFile(string groupId)
         {
             if (string.IsNullOrEmpty(groupId) || string.IsNullOrEmpty(_currentBookPath))
@@ -968,7 +958,6 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
             foreach (var c in candidates)
                 if (File.Exists(c)) { Log($"[pool] found {groupId} at {c}"); return c; }
         
-            // Last-ditch: search recursively
             try
             {
                 var hits = Directory.GetFiles(_currentBookPath, groupId + ".html", SearchOption.AllDirectories);
@@ -983,12 +972,6 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
             return null;
         }
         
-        // ============================================================
-        // Build the pool HTML for display in the overlay.
-        // Reads the pool file, inlines every referenced asset
-        // (images, svgs, css) as base64 data URIs so the WebView
-        // renders it from HtmlWebViewSource.
-        // ============================================================
         public async Task<string> BuildPoolHtmlAsync(string poolFilePath, string groupId)
         {
             try
@@ -996,8 +979,6 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
                 var raw = await File.ReadAllTextAsync(poolFilePath);
                 var poolDir = Path.GetDirectoryName(poolFilePath) ?? _currentBookPath;
         
-                // If the file already looks like a full HTML document, inline its assets
-                // and use it directly. Otherwise wrap it in a minimal document.
                 if (!Regex.IsMatch(raw, @"<html", RegexOptions.IgnoreCase))
                 {
                     raw = "<!DOCTYPE html><html><head>" +
@@ -1009,7 +990,6 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
         
                 raw = InlineAllAssets(raw, poolDir);
         
-                // Inject a tiny script that posts back to MAUI when the activity completes
                 raw = raw.Replace("</body>",
                     "<script>" +
                     "window.__assessment_complete = function(){ window.location.href='bookviewer://assessment-complete'; };" +
@@ -1103,14 +1083,6 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
             return html;
         }
 
-        // ============================================================
-        // InlineAllAssets — resolves every src/href/url to a file on
-        // disk and embeds it as a base64 data URI.
-        // Uses "drop-N leading segments" fallback: if "SEC201/images/x.jpg"
-        // doesn't resolve, try "images/x.jpg", then "x.jpg".
-        // Looks in: pageDir, up 1 level, up 2 levels, bookRoot,
-        // bookRoot/images, pageDir/images.
-        // ============================================================
         private string InlineAllAssets(string html, string pageDir)
         {
             if (string.IsNullOrEmpty(html)) return html;
@@ -1128,17 +1100,14 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
 
                 var segments = clean.Split('/').ToList();
 
-                // Try as-is, then drop 1 leading segment, drop 2, drop 3
                 for (int drop = 0; drop <= 3 && drop < segments.Count; drop++)
                 {
                     var tail = string.Join("/", segments.Skip(drop));
                     if (string.IsNullOrEmpty(tail)) continue;
 
-                    // A. <pageDir>/<tail>
                     var c = Path.GetFullPath(Path.Combine(pageDir, tail));
                     if (File.Exists(c)) return c;
 
-                    // B. walk up 1, walk up 2 from pageDir
                     var up = pageDir;
                     for (int i = 0; i < 2; i++)
                     {
@@ -1147,21 +1116,16 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
                         if (File.Exists(c)) return c;
                     }
 
-                    // C. bookRoot/<tail>
                     c = Path.GetFullPath(Path.Combine(_currentBookPath, tail));
                     if (File.Exists(c)) return c;
 
-                    // D. bookRoot/images/<filename>
                     var fname = Path.GetFileName(tail);
                     c = Path.GetFullPath(Path.Combine(_currentBookPath, "images", fname));
                     if (File.Exists(c)) return c;
 
-                    // E. pageDir/images/<filename>
                     c = Path.GetFullPath(Path.Combine(pageDir, "images", fname));
                     if (File.Exists(c)) return c;
 
-                    // F. bookRoot/<sectionFolder>/images/<filename>
-                    //    (in case section folder differs from pageDirName)
                     var sects = Directory.Exists(_currentBookPath)
                         ? Directory.GetDirectories(_currentBookPath, "s_*")
                         : Array.Empty<string>();
@@ -1217,7 +1181,6 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
                 return uri ?? raw;
             }
 
-            // src="..."
             html = Regex.Replace(html,
                 @"(\bsrc\s*=\s*"")([^""]+)("")",
                 m => m.Groups[1].Value + Resolve(m.Groups[2].Value) + m.Groups[3].Value,
@@ -1227,7 +1190,6 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
                 m => m.Groups[1].Value + Resolve(m.Groups[2].Value) + m.Groups[3].Value,
                 RegexOptions.IgnoreCase);
 
-            // href="..."
             html = Regex.Replace(html,
                 @"(\bhref\s*=\s*"")([^""]+)("")",
                 m => m.Groups[1].Value + Resolve(m.Groups[2].Value) + m.Groups[3].Value,
@@ -1237,7 +1199,6 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
                 m => m.Groups[1].Value + Resolve(m.Groups[2].Value) + m.Groups[3].Value,
                 RegexOptions.IgnoreCase);
 
-            // url(...)
             html = Regex.Replace(html,
                 @"url\(\s*['""]?([^'"")\s]+)['""]?\s*\)",
                 m => "url('" + Resolve(m.Groups[1].Value) + "')",
@@ -1300,19 +1261,15 @@ img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes
 
                             var name = Path.GetFileName(raw.Replace('\\', '/'));
 
-                            // Try fonts and images in several locations
                             var candidates = new List<string>();
-                            // Fonts
                             candidates.Add(Path.Combine(_currentBookPath, "FONTS", name));
                             candidates.Add(Path.Combine(_currentBookPath, "fonts", name));
                             candidates.Add(Path.Combine(directory, "FONTS", name));
                             candidates.Add(Path.Combine(directory, "fonts", name));
-                            // Images (for background-image url(...))
                             candidates.Add(Path.Combine(directory, name));
                             candidates.Add(Path.Combine(directory, "images", name));
                             candidates.Add(Path.Combine(_currentBookPath, "images", name));
                             candidates.Add(Path.Combine(_currentBookPath, name));
-                            // Also try under every s_* folder
                             if (Directory.Exists(_currentBookPath))
                             {
                                 foreach (var s in Directory.GetDirectories(_currentBookPath, "s_*"))
