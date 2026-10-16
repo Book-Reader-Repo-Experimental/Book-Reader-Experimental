@@ -44,7 +44,7 @@ namespace BookViewer
         private static string SurroundColor =>
             Application.Current?.RequestedTheme == AppTheme.Dark ? "#1C1C1E" : "#E8E8E8";
 
-        private const string OverlayCssTemplate = @"
+                private const string OverlayCssTemplate = @"
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body { width: 100%; height: 100%; overflow: auto; background: #E8E8E8; -webkit-font-smoothing: antialiased; }
         body { display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; }
@@ -67,20 +67,20 @@ namespace BookViewer
         img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes'], img.has2btn[redanswertype='teacherNotes'] { pointer-events: auto !important; cursor: pointer !important; }
         .copyright { display: none !important; }
         
-        /* Hide the splitpane author-tool panel (grey box with move/delete + Book UID / Section / Step fields) */
-        tohide,
-        tohide *,
-        splitpane tohide,
-        splitpane tohide * {
+        /* Hide the grey author-tool panel next to the move button */
+        tohide, tohide *, splitpane tohide, splitpane tohide * {
             display: none !important;
             visibility: hidden !important;
-            width: 0 !important;
-            height: 0 !important;
-            overflow: hidden !important;
         }
+        .btn_h, .btn_h_m { display: none !important; }
         
-        /* Fallback: hide the author-tool anchors by class, in case they escape <tohide> */
-        .btn_h, .btn_h_m { display: none !important; visibility: hidden !important; }
+        /* Teacher-note toggle buttons render red */
+        img.redbtn[redanswertype='teacherNotes'],
+        img.hsgbtn[redanswertype='teacherNotes'],
+        img.has2btn[redanswertype='teacherNotes'] {
+            filter: invert(15%) sepia(99%) saturate(7000%) hue-rotate(315deg) brightness(90%) contrast(120%);
+            -webkit-filter: invert(15%) sepia(99%) saturate(7000%) hue-rotate(315deg) brightness(90%) contrast(120%);
+        }
         ";
         private const string ReaderJsTemplate = @"
         window.__readerRedAnswersVisible = false;
