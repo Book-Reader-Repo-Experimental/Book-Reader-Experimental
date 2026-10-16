@@ -98,129 +98,148 @@ namespace BookViewer
 ";
 
         private const string OverlayJsTemplate = @"
-(function() {
-    window.__setNotes = function(on) {
-        var layer = document.querySelector('.teacher-layer');
-        if (!layer) return;
-        if (on) layer.classList.add('active'); else layer.classList.remove('active');
-        layer.querySelectorAll('.tbnote, .tbred').forEach(function(el) {
-            if (on) el.classList.add('ans-on'); else el.classList.remove('ans-on');
-        });
-        document.querySelectorAll('.item-btn').forEach(function(b) {
-            b.classList.toggle('on', !!on);
-        });
-    };
-
-    window.__setAnswers = function(on) {
-        var layer = document.querySelector('.student-layer');
-        if (!layer) return;
-        if (on) layer.classList.add('active'); else layer.classList.remove('active');
-        layer.querySelectorAll('.tbred, .sa').forEach(function(el) {
-            if (on) el.classList.add('ans-on'); else el.classList.remove('ans-on');
-        });
-    };
-
-    window.__toggleItem = function(id) {
-        var el = document.querySelector('[data-ans-id=""' + id + '""]');
-        if (!el) return;
-        var on = el.classList.toggle('ans-on');
-        var btn = document.querySelector('.item-btn[data-target=""' + id + '""]');
-        if (btn) btn.classList.toggle('on', on);
-    };
-
-    function buildButtons() {
-        var container = document.getElementById('itemBtns');
-        if (!container) return;
-        container.innerHTML = '';
-
-        var groups = document.querySelectorAll('hsg[id][name]');
-        groups.forEach(function(g) {
-            var icon = document.getElementById(g.id + '_img');
-            if (!icon) return;
-            var baseLeft = parseFloat(icon.style.left) || 0;
-            var baseTop  = parseFloat(icon.style.top)  || 0;
-            var children = g.querySelectorAll('hastext[linkname]');
-            if (children.length <= 1) return;
-
-            var i = 0;
-            children.forEach(function(h) {
-                var lid = h.getAttribute('linkname');
-                if (!lid) return;
-
-                var item = document.querySelector('[data-ans-id][data-lnk=""' + lid + '""]');
-                if (!item) {
+        (function() {
+            function showItem(id, on) {
+                var el = document.querySelector('[data-ans-id=""' + id + '""]');
+                if (!el) return;
+                if (on) el.classList.add('ans-on'); else el.classList.remove('ans-on');
+            }
+        
+            window.__toggleItem = function(id) {
+                var el = document.querySelector('[data-ans-id=""' + id + '""]');
+                if (!el) return;
+                var on = el.classList.toggle('ans-on');
+                var btn = document.querySelector('.item-btn[data-target=""' + id + '""]');
+                if (btn) btn.classList.toggle('on', on);
+            };
+        
+            // ---- Toggle by linkname (used by group icons) ----
+            function toggleGroup(g) {
+                var icon = document.getElementById(g.id + '_img');
+                var isOn = g.getAttribute('on') === 'true';
+                var turnOn = !isOn;
+                g.setAttribute('on', turnOn ? 'true' : 'false');
+        
+                g.querySelectorAll('hastext[linkname]').forEach(function(h) {
+                    var lid = h.getAttribute('linkname');
+                    if (!lid) return;
                     var all = document.querySelectorAll('[data-ans-id]');
                     for (var k = 0; k < all.length; k++) {
                         var inner = all[k].querySelector('[name=""' + lid + '""]');
-                        if (inner) { all[k].setAttribute('data-lnk', lid); item = all[k]; break; }
+                        if (!inner) continue;
+                        if (!all[k].getAttribute('data-lnk')) all[k].setAttribute('data-lnk', lid);
+                        if (turnOn) all[k].classList.add('ans-on');
+                        else all[k].classList.remove('ans-on');
+                        var id = all[k].getAttribute('data-ans-id');
+                        var btn = document.querySelector('.item-btn[data-target=""' + id + '""]');
+                        if (btn) btn.classList.toggle('on', turnOn);
                     }
+                });
+        
+                if (icon) {
+                    var src = icon.getAttribute('src') || '';
+                    if (turnOn) icon.setAttribute('src', src.replace('teacherNotes.svg','teacherNotes_o.svg').replace('redlayerAll.svg','redlayerNone.svg'));
+                    else icon.setAttribute('src', src.replace('teacherNotes_o.svg','teacherNotes.svg').replace('redlayerNone.svg','redlayerAll.svg'));
                 }
-                if (!item) return;
-                var id = item.getAttribute('data-ans-id');
-
-                var labelEl = h.querySelector('a.s');
-                var label = labelEl ? (labelEl.textContent || '').trim().substring(0, 2) : String(i + 1);
-                if (!label) label = String(i + 1);
-
-                var btn = document.createElement('div');
-                btn.className = 'item-btn';
-                btn.setAttribute('data-target', id);
-                btn.title = labelEl ? labelEl.textContent : lid;
-                btn.textContent = label;
-                btn.style.left = (baseLeft - 26) + 'px';
-                btn.style.top  = (baseTop + i * 24) + 'px';
-                (function(capturedId) {
-                    btn.addEventListener('click', function(ev) {
-                        ev.stopPropagation();
-                        window.__toggleItem(capturedId);
+            }
+        
+            // ---- Make group icons visible + clickable, and wire them ----
+            function wireGroupIcons() {
+                document.querySelectorAll('hsg[id][name]').forEach(function(g) {
+                    var icon = document.getElementById(g.id + '_img');
+                    if (!icon) return;
+                    icon.style.cursor = 'pointer';
+                    icon.style.pointerEvents = 'auto';
+                    icon.style.display = '';
+                    icon.style.zIndex = '9999';
+                    if (!icon.__clickBound) {
+                        icon.__clickBound = true;
+                        // Capture the original onclick and re-bind as an event listener
+                        var onclickStr = icon.getAttribute('onclick') || '';
+                        if (onclickStr) {
+                            try {
+                                var fn = new Function('event', onclickStr + '; return false;');
+                                icon.removeAttribute('onclick');
+                                icon.addEventListener('click', function(ev) {
+                                    ev.stopPropagation();
+                                    try { fn.call(icon, ev); } catch(e) { console.log('[icon click] err', e.message); }
+                                }, true);
+                            } catch(e) { console.log('[icon click] compile err', e.message); }
+                        } else {
+                            icon.addEventListener('click', function(ev) {
+                                ev.stopPropagation();
+                                toggleGroup(g);
+                            }, true);
+                        }
+                    }
+                });
+            }
+        
+            // ---- Build per-item buttons next to each group icon ----
+            function buildButtons() {
+                var container = document.getElementById('itemBtns');
+                if (!container) return;
+                container.innerHTML = '';
+        
+                var groups = document.querySelectorAll('hsg[id][name]');
+                groups.forEach(function(g) {
+                    var icon = document.getElementById(g.id + '_img');
+                    if (!icon) return;
+                    var baseLeft = parseFloat(icon.style.left) || 0;
+                    var baseTop  = parseFloat(icon.style.top)  || 0;
+                    var children = g.querySelectorAll('hastext[linkname]');
+        
+                    var i = 0;
+                    children.forEach(function(h) {
+                        var lid = h.getAttribute('linkname');
+                        if (!lid) return;
+        
+                        // Find the matching item(s) in the layer
+                        var matched = null;
+                        var all = document.querySelectorAll('[data-ans-id]');
+                        for (var k = 0; k < all.length; k++) {
+                            var inner = all[k].querySelector('[name=""' + lid + '""]');
+                            if (inner) { matched = all[k]; if (!matched.getAttribute('data-lnk')) matched.setAttribute('data-lnk', lid); break; }
+                        }
+                        if (!matched) return;
+                        var id = matched.getAttribute('data-ans-id');
+        
+                        var labelEl = h.querySelector('a.s');
+                        var label = labelEl ? (labelEl.textContent || '').trim().substring(0, 3) : String(i + 1);
+                        if (!label) label = String(i + 1);
+        
+                        var btn = document.createElement('div');
+                        btn.className = 'item-btn';
+                        btn.setAttribute('data-target', id);
+                        btn.title = labelEl ? labelEl.textContent : lid;
+                        btn.textContent = label;
+                        btn.style.left = (baseLeft - 30) + 'px';
+                        btn.style.top  = (baseTop + i * 24) + 'px';
+                        (function(capturedId) {
+                            btn.addEventListener('click', function(ev) {
+                                ev.stopPropagation();
+                                window.__toggleItem(capturedId);
+                            });
+                        })(id);
+                        container.appendChild(btn);
+                        i++;
                     });
-                })(id);
-                container.appendChild(btn);
-                i++;
-            });
-        });
-    }
+                });
+            }
+        
+            function init() {
+                wireGroupIcons();
+                buildButtons();
+            }
+        
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+            else init();
+            setTimeout(init, 200);
+            setTimeout(init, 800);
+        })();
+        ";
 
-    document.querySelectorAll('hsg[id][name]').forEach(function(g) {
-        var icon = document.getElementById(g.id + '_img');
-        if (!icon) return;
-        icon.style.cursor = 'pointer';
-        icon.style.pointerEvents = 'auto';
-        icon.style.display = '';
-        icon.addEventListener('click', function(ev) {
-            ev.stopPropagation();
-            var isOn = g.getAttribute('on') === 'true';
-            var turnOn = !isOn;
-            g.setAttribute('on', turnOn ? 'true' : 'false');
-            g.querySelectorAll('hastext[linkname]').forEach(function(h) {
-                var lid = h.getAttribute('linkname');
-                if (!lid) return;
-                var item = document.querySelector('[data-lnk=""' + lid + '""]');
-                if (item) {
-                    if (turnOn) item.classList.add('ans-on');
-                    else item.classList.remove('ans-on');
-                }
-                var targetId = item ? item.getAttribute('data-ans-id') : '';
-                var btn = document.querySelector('.item-btn[data-target=""' + targetId + '""]');
-                if (btn) btn.classList.toggle('on', turnOn);
-            });
-        });
-    });
 
-    buildButtons();
-
-    if (document.querySelector('.teacher-layer.active')) {
-        document.querySelectorAll('.teacher-layer .tbnote, .teacher-layer .tbred').forEach(function(el) {
-            el.classList.add('ans-on');
-        });
-    }
-    if (document.querySelector('.student-layer.active')) {
-        document.querySelectorAll('.student-layer .tbred, .student-layer .sa').forEach(function(el) {
-            el.classList.add('ans-on');
-        });
-    }
-})();
-";
 
         private string GetLogFilePath()
         {
@@ -1111,34 +1130,33 @@ namespace BookViewer
             if (string.IsNullOrEmpty(bgImage)) bgImage = GetPlaceholderImage();
             if (string.IsNullOrEmpty(contentHtml))
                 contentHtml = "<div style='padding:20px;color:#666;font-size:24px;'>Content not available</div>";
-
+        
             double zoom = _currentZoom;
             string surround = SurroundColor;
             string zoomStr = zoom.ToString(System.Globalization.CultureInfo.InvariantCulture);
-
+        
             string filePath = (_currentPageIndex >= 0 && _currentPageIndex < _pageFiles.Count)
                 ? _pageFiles[_currentPageIndex]
                 : "";
-
+        
+            // Always load BOTH layers — individual items start hidden anyway.
             string teacherRaw = "";
             string studentRaw = "";
-
             if (!string.IsNullOrEmpty(filePath))
             {
-                if (_showTeacherNotes)
-                    teacherRaw = await GetRedAnswerContentAsync(filePath, "teacherNotes");
-                if (_showStudentAnswers)
-                    studentRaw = await GetRedAnswerContentAsync(filePath, "studentAnswers");
+                teacherRaw = await GetRedAnswerContentAsync(filePath, "teacherNotes");
+                studentRaw = await GetRedAnswerContentAsync(filePath, "studentAnswers");
             }
-
+        
             var teacherFrag = AnnotateAnswerItems(teacherRaw);
             var studentFrag = AnnotateAnswerItems(studentRaw);
-
+        
+            // Layers always active; items inside start hidden (no 'ans-on' class).
             string teacherWrapper = string.IsNullOrEmpty(teacherFrag) ? "" :
                 "<div class='answer-layer teacher-layer active'>" + teacherFrag + "</div>";
             string studentWrapper = string.IsNullOrEmpty(studentFrag) ? "" :
                 "<div class='answer-layer student-layer active'>" + studentFrag + "</div>";
-
+        
             var sb = new StringBuilder();
             sb.Append("<!DOCTYPE html>\n<html>\n<head>\n");
             sb.Append("<meta charset='UTF-8'>\n");
@@ -1162,7 +1180,7 @@ namespace BookViewer
             sb.Append("<script>\n");
             sb.Append(OverlayJsTemplate);
             sb.Append("</script>\n</body>\n</html>");
-
+        
             return sb.ToString();
         }
 
