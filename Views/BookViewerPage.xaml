@@ -70,4 +70,21 @@
             <Label x:Name="StatusLabel" Text="" Style="{StaticResource Caption}" LineBreakMode="TailTruncation"/>
         </Grid>
     </Grid>
+    <!-- ================= ASSESSMENT OVERLAY ================= -->
+    <Grid x:Name="AssessmentOverlay" Grid.RowSpan="4" IsVisible="False"
+          BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}"
+          RowDefinitions="Auto,*">
+        <Grid Grid.Row="0"
+              BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}"
+              Padding="8,8" ColumnDefinitions="Auto,*,Auto">
+            <Button Grid.Column="0" Text="‹" Clicked="OnAssessmentBackClicked"
+                    Style="{StaticResource IconButton}" FontSize="24" Margin="4,0,0,0"/>
+            <Label x:Name="AssessmentTitleLabel" Grid.Column="1" Text="Activity"
+                   Style="{StaticResource NavTitle}" HorizontalTextAlignment="Center"
+                   LineBreakMode="TailTruncation"/>
+            <Button Grid.Column="2" Text="✕" Clicked="OnAssessmentCloseClicked"
+                    Style="{StaticResource IconButton}" FontSize="20"/>
+        </Grid>
+        <WebView x:Name="AssessmentWebView" Grid.Row="1"/>
+    </Grid>
 </ContentPage>
