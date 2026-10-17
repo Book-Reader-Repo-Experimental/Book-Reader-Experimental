@@ -256,22 +256,36 @@ jobs:
           mkdir -p ./release-assets
 
           # Android APK
-          cp ./artifacts/android/*.apk ./release-assets/ || true
+          if compgen -G "./artifacts/android/*.apk" > /dev/null; then
+            cp ./artifacts/android/*.apk ./release-assets/
+          else
+            echo "Warning: No Android APK found"
+          fi
 
           # iOS IPA
-          cp ./artifacts/ios/*.ipa ./release-assets/ || true
+          if compgen -G "./artifacts/ios/*.ipa" > /dev/null; then
+            cp ./artifacts/ios/*.ipa ./release-assets/
+          else
+            echo "Warning: No iOS IPA found"
+          fi
 
           # macOS .app zip
-          cp ./artifacts/macos/*.zip ./release-assets/ || true
+          if compgen -G "./artifacts/macos/*.zip" > /dev/null; then
+            cp ./artifacts/macos/*.zip ./release-assets/
+          else
+            echo "Warning: No macOS zip found"
+          fi
 
           # Windows — zip the publish folder
           if [ -d ./artifacts/windows ] && [ "$(ls -A ./artifacts/windows)" ]; then
             cd ./artifacts/windows
             zip -r -y "$GITHUB_WORKSPACE/release-assets/BookViewer-Windows-Release.zip" .
+          else
+            echo "Warning: Windows artifacts directory is empty or missing"
           fi
 
           echo "Release assets:"
-          ls -la ./release-assets
+          ls -la "$GITHUB_WORKSPACE/release-assets"
 
       - name: Generate Release Tag
         id: tag
