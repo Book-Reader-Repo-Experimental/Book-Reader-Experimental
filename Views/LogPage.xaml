@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="BookViewer.Views.LogPage"
+             BackgroundColor="{AppThemeBinding Light={StaticResource Canvas}, Dark={StaticResource CanvasDark}}">
+    <Grid RowDefinitions="Auto,Auto,*">
+
+        <Grid Grid.Row="0"
+              BackgroundColor="{AppThemeBinding Light={StaticResource Surface}, Dark={StaticResource SurfaceDark}}"
+              Padding="8,8" ColumnDefinitions="Auto,*,Auto">
+            <Button Grid.Column="0" Text="‹" Clicked="OnCloseClicked"
+                    Style="{StaticResource IconButton}" FontSize="24"/>
+            <Label Grid.Column="1" Text="Log" Style="{StaticResource NavTitle}"
+                   HorizontalTextAlignment="Center"/>
+            <Button Grid.Column="2" Text="Copy" Clicked="OnCopyClicked"
+                    Style="{StaticResource TextButton}"/>
+        </Grid>
+
+        <Label Grid.Row="1" x:Name="PathLabel"
+               Style="{StaticResource Caption}"
+               Margin="16,8,16,4" LineBreakMode="CharacterWrap"
+               FontSize="10"/>
+
+        <ScrollView Grid.Row="2" Padding="8">
+            <Label x:Name="LogLabel"
+                   FontFamily="monospace"
+                   FontSize="11"
+                   LineBreakMode="NoWrap"
+                   TextColor="{AppThemeBinding Light={StaticResource TextPrimary}, Dark={StaticResource TextPrimaryDark}}"/>
+        </ScrollView>
+    </Grid>
+</ContentPage>
