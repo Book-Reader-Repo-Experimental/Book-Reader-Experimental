@@ -420,8 +420,6 @@ public partial class BookViewerPage : ContentPage
             ContentWebView.IsVisible = true;
         }
 
-        // The second WebView is no longer used; the pair is embedded in the
-        // single ContentWebView. Keep it collapsed.
         NextPageWebView.IsVisible = false;
         RightColumn.Width = new GridLength(0);
         UpdateUI();
@@ -533,6 +531,15 @@ public partial class BookViewerPage : ContentPage
         if (string.IsNullOrEmpty(_bookService.CurrentBookPath)) { await DisplayAlert("Info", "Please open a book first.", "OK"); return; }
         var confirm = await DisplayAlert("Confirm Decrypt", $"This will decrypt all encrypted files in:\n{_bookService.CurrentBookPath}\n\nContinue?", "Yes", "No");
         if (confirm) { await _bookService.DecryptBookAsync(); await _bookService.LoadBookAsync(_bookService.CurrentBookPath); }
+    }
+
+    private async void OnLogClicked(object sender, EventArgs e)
+    {
+        var lines = _bookService.GetRecentLogs();
+        var path = _bookService.GetLogFilePathOrEmpty();
+
+        var logPage = new LogPage(lines, path);
+        await Navigation.PushModalAsync(new NavigationPage(logPage));
     }
 
     private void OnPrevClicked(object sender, EventArgs e)
