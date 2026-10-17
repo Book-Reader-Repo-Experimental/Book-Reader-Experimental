@@ -124,6 +124,7 @@ public partial class BookViewerPage : ContentPage
             Dispatcher.Dispatch(() => { if (ZoomLabel != null) ZoomLabel.Text = $"{zoom:F1}x"; });
 
         ContentWebView.Navigating += OnWebViewNavigating;
+        ContentWebView.Navigated += OnContentWebViewNavigated;
 
         Loaded += async (s, e) =>
         {
@@ -301,14 +302,15 @@ public partial class BookViewerPage : ContentPage
             }
             else if (host == "open-resource")
             {
-                var url = HttpUtility.UrlDecode(q["url"] ?? "");
-                var desc = HttpUtility.UrlDecode(q["desc"] ?? "");
-                Log($"[resource] open url='{url}' desc='{desc}'");
-                if (!string.IsNullOrEmpty(url))
+                var resourceUrl = HttpUtility.UrlDecode(q["url"] ?? "");
+                var resourceDesc = HttpUtility.UrlDecode(q["desc"] ?? "");
+                Log($"[resource] open url='{resourceUrl}' desc='{resourceDesc}'");
+
+                if (!string.IsNullOrEmpty(resourceUrl))
                 {
                     try
                     {
-                        await Launcher.Default.OpenAsync(url);
+                        await Launcher.Default.OpenAsync(resourceUrl);
                     }
                     catch (Exception ex)
                     {
@@ -321,6 +323,29 @@ public partial class BookViewerPage : ContentPage
         catch (Exception ex)
         {
             Log($"bridge nav error: {ex.Message}");
+        }
+    }
+
+    private async void OnContentWebViewNavigated(object sender, WebNavigatedEventArgs e)
+    {
+        await ApplyAnswerOverridesAsync();
+    }
+
+    private async Task ApplyAnswerOverridesAsync()
+    {
+        try
+        {
+            var notesJs = $"window.__setNotes({(_showTeacherNotes ? "true" : "false")})";
+            await ContentWebView.EvaluateJavaScriptAsync(notesJs);
+
+            var answersJs = $"window.__setRedAnswers({(_showStudentAnswers ? "true" : "false")})";
+            await ContentWebView.EvaluateJavaScriptAsync(answersJs);
+
+            Log($"[override] applied notes={_showTeacherNotes} answers={_showStudentAnswers}");
+        }
+        catch (Exception ex)
+        {
+            Log($"[override] apply err: {ex.Message}");
         }
     }
 
@@ -406,28 +431,14 @@ public partial class BookViewerPage : ContentPage
     {
         _showTeacherNotes = !_showTeacherNotes;
         UpdateTeacherButton();
-
-        var js = $"window.__setNotes({(_showTeacherNotes ? "true" : "false")})";
-        try { await ContentWebView.EvaluateJavaScriptAsync(js); } catch (Exception ex) { Log($"setNotes err: {ex.Message}"); }
-
-        if (_bookService.TwoPageSpread)
-        {
-            try { await NextPageWebView.EvaluateJavaScriptAsync(js); } catch { }
-        }
+        await ApplyAnswerOverridesAsync();
     }
 
     private async void OnStudentAnswersClicked(object sender, EventArgs e)
     {
         _showStudentAnswers = !_showStudentAnswers;
         UpdateStudentButton();
-
-        var js = $"window.__setRedAnswers({(_showStudentAnswers ? "true" : "false")})";
-        try { await ContentWebView.EvaluateJavaScriptAsync(js); } catch (Exception ex) { Log($"setRedAnswers err: {ex.Message}"); }
-
-        if (_bookService.TwoPageSpread)
-        {
-            try { await NextPageWebView.EvaluateJavaScriptAsync(js); } catch { }
-        }
+        await ApplyAnswerOverridesAsync();
     }
 
     private void UpdateTeacherButton()
