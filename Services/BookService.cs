@@ -581,11 +581,48 @@ img.resbtn:active { opacity: .6 !important; }
 
         private void Log(string message)
         {
+            string logMessage = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} - {message}";
+        
+            // Always emit to the debug console, independent of file I/O.
+            System.Diagnostics.Debug.WriteLine(logMessage);
+        
+            // Try every plausible writable folder until one succeeds.
             try
             {
-                string logMessage = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} - {message}";
-                lock (_logLock) File.AppendAllText(GetLogFilePath(), logMessage + Environment.NewLine);
-                System.Diagnostics.Debug.WriteLine(logMessage);
+                lock (_logLock)
+                {
+                    if (string.IsNullOrEmpty(_logFilePath))
+                    {
+                        var candidates = new List<string>
+                        {
+                            Path.Combine(FileSystem.AppDataDirectory, "Logs"),
+                            Path.Combine(FileSystem.CacheDirectory, "Logs"),
+                            Path.Combine(Path.GetTempPath(), "BookViewerLogs"),
+                            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "BookViewer", "Logs"),
+                        };
+        
+                        foreach (var folder in candidates)
+                        {
+                            try
+                            {
+                                Directory.CreateDirectory(folder);
+                                var testFile = Path.Combine(folder, $"BookService_{DateTime.Now:yyyyMMdd_HHmmss}.log");
+                                File.AppendAllText(testFile, "");
+                                _logFilePath = testFile;
+                                break;
+                            }
+                            catch { }
+                        }
+                    }
+        
+                    if (!string.IsNullOrEmpty(_logFilePath))
+                        File.AppendAllText(_logFilePath, logMessage + Environment.NewLine);
+                }
+            }
+            catch { }
+        
+            try
+            {
                 OnStatusChanged?.Invoke(this, message.Length < 80 ? message : message.Substring(0, 77) + "...");
             }
             catch { }
