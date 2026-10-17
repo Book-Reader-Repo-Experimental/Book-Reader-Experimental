@@ -75,6 +75,16 @@ tohide, tohide *, splitpane tohide, splitpane tohide * {
     visibility: hidden !important;
 }
 .btn_h, .btn_h_m { display: none !important; }
+
+/* External resource button injected from steps_N_data.xml */
+img.resbtn {
+    position: absolute;
+    cursor: pointer;
+    z-index: 60;
+    width: 32px;
+    height: 32px;
+}
+img.resbtn:active { opacity: .6; }
 ";
 
         private const string ReaderJsTemplate = @"
@@ -271,6 +281,17 @@ tohide, tohide *, splitpane tohide, splitpane tohide * {
           var turnOn = !isOn;
           if (btn) btn.setAttribute('data-on', turnOn ? 'true' : 'false');
           window.__toggleByName(id, turnOn);
+        };
+        
+        // ---- External resource link (from steps_N_data.xml) ----
+        window.__openResource = function(el){
+          try {
+            var url = el && el.getAttribute && el.getAttribute('data-url');
+            var desc = el && el.getAttribute && (el.getAttribute('title') || el.getAttribute('data-desc') || '');
+            if (!url) return;
+            window.location.href = 'bookviewer://open-resource?url=' + encodeURIComponent(url)
+                                 + '&desc=' + encodeURIComponent(desc || '');
+          } catch(e) {}
         };
         
         // ---- Split-pane controller: move button opens the target book ----
@@ -935,12 +956,6 @@ tohide, tohide *, splitpane tohide, splitpane tohide * {
             }
         }
 
-        /// <summary>
-        /// Merge the current page and the next page into a single HTML document
-        /// side by side. Both pages' CSS is scoped so they don't fight, and the
-        /// shared font CSS is emitted once. No iframes, no srcdoc, no attribute
-        /// encoding — the document loads much faster than the previous version.
-        /// </summary>
         public Task<string> BuildTwoPageHtmlAsync()
         {
             if (_currentPageIndex < 0 || _pageFiles.Count == 0)
@@ -968,14 +983,12 @@ tohide, tohide *, splitpane tohide, splitpane tohide * {
                 return sb.ToString();
             }
 
-            // Remove @font-face blocks so the shared font CSS emitted once isn't duplicated.
             string StripFontFaces(string css)
             {
                 if (string.IsNullOrEmpty(css)) return "";
                 return Regex.Replace(css, @"@font-face\s*\{[^}]*\}", "", RegexOptions.IgnoreCase);
             }
 
-            // Scope plain CSS rules so left/right pages don't collide. @-rules pass through.
             string Scope(string css, string scope)
             {
                 if (string.IsNullOrEmpty(css)) return "";
@@ -1012,7 +1025,6 @@ tohide, tohide *, splitpane tohide, splitpane tohide * {
             string leftCss = Scope(StripFontFaces(leftCssRaw), ".page-left");
             string rightCss = Scope(StripFontFaces(rightCssRaw), ".page-right");
 
-            // Overlay CSS and the reader JS must live outside the scopes.
             string overlayCss = OverlayCssTemplate;
 
             string surround = SurroundColor;
@@ -1023,16 +1035,12 @@ tohide, tohide *, splitpane tohide, splitpane tohide * {
             sb.Append("<!DOCTYPE html><html><head><meta charset='UTF-8'>");
             sb.Append("<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes'>");
             sb.Append("<style>");
-            // Shared font CSS (with @font-face) once
             sb.Append(_lastFontCss);
-            // Overlay CSS once
             sb.Append(overlayCss);
-            // Outer layout
             sb.Append("html,body{margin:0;padding:0;background:").Append(surround).Append(";overflow:auto;}");
             sb.Append("body{display:flex;justify-content:center;align-items:flex-start;min-height:100vh;}");
             sb.Append(".pair{display:flex;gap:8px;transform-origin:top center;transform:scale(").Append(zoom).Append(");}");
             sb.Append(".page-left,.page-right{position:relative;flex-shrink:0;background:#fff;box-shadow:0 0 20px rgba(0,0,0,0.15);overflow:hidden;width:").Append(CurrentPageWidth).Append("px;height:").Append(CurrentPageHeight).Append("px;}");
-            // Scoped page CSS
             sb.Append(leftCss);
             sb.Append(rightCss);
             sb.Append("</style></head><body>");
@@ -1252,6 +1260,16 @@ tohide, tohide *, splitpane tohide, splitpane tohide * {
                     m => m.Groups[1].Value + redHtml + m.Groups[3].Value,
                     RegexOptions.IgnoreCase);
 
+                // ---- Inject external resource buttons from steps_N_data.xml ----
+                var resButtons = await BuildResourceButtonsAsync(directory, nameWithoutExt);
+                if (!string.IsNullOrEmpty(resButtons))
+                {
+                    var insertAt = skeleton.LastIndexOf("</div>");
+                    if (insertAt < 0) insertAt = skeleton.Length;
+                    skeleton = skeleton.Substring(0, insertAt) + resButtons + skeleton.Substring(insertAt);
+                    Log($"[res] injected {resButtons.Length} chars of resource buttons for {nameWithoutExt}");
+                }
+
                 skeleton = InlineAllAssets(skeleton, directory);
 
                 return BuildFinalHtml(skeleton, fontCss, pageWidth, pageHeight, fileName);
@@ -1261,6 +1279,152 @@ tohide, tohide *, splitpane tohide, splitpane tohide * {
                 Log($"ERROR ProcessHtmlContent: {ex.Message}");
                 return htmlContent;
             }
+        }
+
+        /// <summary>
+        /// Read steps_N_data.xml, parse <links> items, and generate an <img class="resbtn">
+        /// for each, positioned at (x,y), with the resolved icon inlined and the
+        /// target URL stored on data-url. Clicking calls window.__openResource(this).
+        /// </summary>
+        private async Task<string> BuildResourceButtonsAsync(string pageDir, string nameWithoutExt)
+        {
+            try
+            {
+                var dataXmlPath = Path.Combine(pageDir, nameWithoutExt + "_data.xml");
+                if (!File.Exists(dataXmlPath)) return "";
+
+                var doc = new XmlDocument();
+                doc.LoadXml(await File.ReadAllTextAsync(dataXmlPath));
+
+                var items = doc.SelectNodes("//links/item");
+                if (items == null || items.Count == 0) return "";
+
+                var sb = new StringBuilder();
+
+                for (int i = 0; i < items.Count; i++)
+                {
+                    var item = items[i];
+                    var xStr = item.SelectSingleNode("x")?.InnerText ?? "";
+                    var yStr = item.SelectSingleNode("y")?.InnerText ?? "";
+                    var iconPath = item.SelectSingleNode("icon")?.InnerText ?? "";
+                    var desc = item.SelectSingleNode("desc")?.InnerText ?? "";
+
+                    // Prefer ios path, then any available, then fall back to <path>
+                    var url = item.SelectSingleNode("teacheriospath")?.InnerText
+                           ?? item.SelectSingleNode("studentiospath")?.InnerText
+                           ?? item.SelectSingleNode("teacherwebpath")?.InnerText
+                           ?? item.SelectSingleNode("studentwebpath")?.InnerText
+                           ?? item.SelectSingleNode("path")?.InnerText
+                           ?? "";
+
+                    if (string.IsNullOrEmpty(url)) continue;
+                    if (!double.TryParse(xStr, out double x)) continue;
+                    if (!double.TryParse(yStr, out double y)) continue;
+
+                    // URL-decode url and desc (they arrive percent-encoded)
+                    url = Uri.UnescapeDataString(url);
+                    desc = Uri.UnescapeDataString(desc);
+                    // But desc may contain %uXXXX (UTF-16) escapes from the book editor
+                    desc = Regex.Replace(desc, @"%u([0-9A-Fa-f]{4})",
+                        m => ((char)Convert.ToInt32(m.Groups[1].Value, 16)).ToString());
+
+                    // Resolve icon to disk
+                    string iconDataUri = "";
+                    if (!string.IsNullOrEmpty(iconPath))
+                    {
+                        // icon path is relative to the data.xml folder, e.g. "../images/svgIcon/..."
+                        var resolved = ResolveIconPath(iconPath, pageDir);
+                        if (!string.IsNullOrEmpty(resolved))
+                            iconDataUri = ToIconDataUri(resolved);
+                    }
+
+                    if (string.IsNullOrEmpty(iconDataUri))
+                    {
+                        // Fallback: a small dot indicator
+                        iconDataUri = "data:image/svg+xml;base64," + Convert.ToBase64String(Encoding.UTF8.GetBytes(
+                            "<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'><circle cx='12' cy='12' r='10' fill='#0A84FF'/><path d='M8 12 L16 12 M12 8 L12 16' stroke='white' stroke-width='2'/></svg>"));
+                    }
+
+                    var safeUrl = System.Web.HttpUtility.HtmlAttributeEncode(url);
+                    var safeDesc = System.Web.HttpUtility.HtmlAttributeEncode(desc);
+
+                    sb.Append("<img class='resbtn' ");
+                    sb.Append("src='").Append(iconDataUri).Append("' ");
+                    sb.Append("style='left:").Append(x.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)).Append("px;");
+                    sb.Append("top:").Append(y.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)).Append("px;' ");
+                    sb.Append("data-url='").Append(safeUrl).Append("' ");
+                    sb.Append("data-desc='").Append(safeDesc).Append("' ");
+                    sb.Append("title='").Append(safeDesc).Append("' ");
+                    sb.Append("onclick='__openResource(this)' />");
+                }
+
+                return sb.ToString();
+            }
+            catch (Exception ex)
+            {
+                Log($"[res] BuildResourceButtonsAsync error: {ex.Message}");
+                return "";
+            }
+        }
+
+        private string ResolveIconPath(string iconPath, string pageDir)
+        {
+            try
+            {
+                var clean = iconPath.Replace('\\', '/');
+                var q = clean.IndexOfAny(new[] { '?', '#' });
+                if (q >= 0) clean = clean.Substring(0, q);
+
+                // Try relative to pageDir
+                var combined = Path.GetFullPath(Path.Combine(pageDir, clean));
+                if (File.Exists(combined)) return combined;
+
+                // Try relative to bookRoot
+                combined = Path.GetFullPath(Path.Combine(_currentBookPath, clean.TrimStart('.', '/')));
+                if (File.Exists(combined)) return combined;
+
+                // Try stripping leading ../ and looking under bookRoot/images
+                var fname = Path.GetFileName(clean);
+                combined = Path.GetFullPath(Path.Combine(_currentBookPath, "images", fname));
+                if (File.Exists(combined)) return combined;
+
+                combined = Path.GetFullPath(Path.Combine(_currentBookPath, "images", "svgIcon", fname));
+                if (File.Exists(combined)) return combined;
+
+                // Walk up from pageDir trying each level
+                var up = pageDir;
+                for (int i = 0; i < 3; i++)
+                {
+                    up = Path.GetDirectoryName(up) ?? up;
+                    combined = Path.GetFullPath(Path.Combine(up, clean));
+                    if (File.Exists(combined)) return combined;
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        private string ToIconDataUri(string diskPath)
+        {
+            if (_assetCache.TryGetValue(diskPath, out var cached)) return cached;
+            try
+            {
+                var bytes = File.ReadAllBytes(diskPath);
+                var ext = Path.GetExtension(diskPath).ToLowerInvariant();
+                var mime = ext switch
+                {
+                    ".svg" => "image/svg+xml",
+                    ".png" => "image/png",
+                    ".jpg" or ".jpeg" => "image/jpeg",
+                    ".gif" => "image/gif",
+                    ".webp" => "image/webp",
+                    _ => "application/octet-stream"
+                };
+                var uri = $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
+                _assetCache[diskPath] = uri;
+                return uri;
+            }
+            catch { return null; }
         }
 
         private async Task<string> ReadIfExists(string path)
