@@ -70,6 +70,8 @@
                             Style="{StaticResource TintedChip}" IsEnabled="False"/>
                     <Button x:Name="ExportPdfButton" Text="⇪ PDF" Clicked="OnExportPdfClicked"
                             Style="{StaticResource TintedChip}" IsEnabled="False"/>
+                    <Button x:Name="LogButton" Text="ⓘ Log" Clicked="OnLogClicked"
+                            Style="{StaticResource TintedChip}"/>
 
                     <BoxView WidthRequest="1" HeightRequest="20"
                              Color="{AppThemeBinding Light=#E5E5EA, Dark=#38383A}"
