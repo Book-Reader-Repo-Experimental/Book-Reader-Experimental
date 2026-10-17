@@ -1381,7 +1381,12 @@ img.resbtn:active { opacity: .6 !important; }
                     return "";
                 }
 
-                var items = doc.SelectNodes("//links/item");
+                // The book editor wraps items in <links><array><item>. Try the exact
+                // path first, then a descendant fallback in case <array> is absent.
+                var items = doc.SelectNodes("//links/array/item");
+                if (items == null || items.Count == 0)
+                    items = doc.SelectNodes("//links//item");
+                                
                 Log($"[res] found {items?.Count ?? 0} <links><item> nodes");
                 if (items == null || items.Count == 0) return "";
 
@@ -1718,6 +1723,9 @@ img.resbtn:active { opacity: .6 !important; }
                             if (raw.StartsWith("data:") || raw.StartsWith("http")) return m.Value;
 
                             var name = Path.GetFileName(raw.Replace('\\', '/'));
+                            // Strip ?query and #fragment so the file resolves on disk
+                            var q = name.IndexOfAny(new[] { '?', '#' });
+                            if (q >= 0) name = name.Substring(0, q);
 
                             var candidates = new List<string>();
                             candidates.Add(Path.Combine(_currentBookPath, "FONTS", name));
