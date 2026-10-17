@@ -1282,7 +1282,7 @@ img.resbtn:active { opacity: .6; }
         }
 
         /// <summary>
-        /// Read steps_N_data.xml, parse <links> items, and generate an <img class="resbtn">
+        /// Read steps_N_data.xml, parse &lt;links&gt; items, and generate an &lt;img class="resbtn"&gt;
         /// for each, positioned at (x,y), with the resolved icon inlined and the
         /// target URL stored on data-url. Clicking calls window.__openResource(this).
         /// </summary>
