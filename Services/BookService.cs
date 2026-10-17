@@ -38,6 +38,8 @@ namespace BookViewer
         private readonly Dictionary<string, string> _unitFirstSection = new();
 
         private static readonly object _logLock = new object();
+        private static readonly Queue<string> _logBuffer = new();
+        private const int MaxLogBuffer = 800;
         private static string _logFilePath = "";
 
         public int CurrentPageWidth { get; private set; } = 1024;
@@ -564,63 +566,74 @@ img.resbtn:active { opacity: .6 !important; }
 
         private string GetLogFilePath()
         {
-            if (string.IsNullOrEmpty(_logFilePath))
+            if (!string.IsNullOrEmpty(_logFilePath)) return _logFilePath;
+
+            try
             {
-                try
+                var candidates = new List<string>
                 {
-                    string logFolder = Path.Combine(FileSystem.AppDataDirectory, "Logs");
-                    Directory.CreateDirectory(logFolder);
-                    _logFilePath = Path.Combine(logFolder, $"BookService_{DateTime.Now:yyyyMMdd_HHmmss}.log");
+                    Path.Combine(FileSystem.AppDataDirectory, "Logs"),
+                    Path.Combine(FileSystem.CacheDirectory, "Logs"),
+                    Path.Combine(Path.GetTempPath(), "BookViewerLogs"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "BookViewer", "Logs"),
+                };
+
+                foreach (var folder in candidates)
+                {
+                    try
+                    {
+                        Directory.CreateDirectory(folder);
+                        var testFile = Path.Combine(folder, $"BookService_{DateTime.Now:yyyyMMdd_HHmmss}.log");
+                        File.AppendAllText(testFile, "");
+                        _logFilePath = testFile;
+                        return _logFilePath;
+                    }
+                    catch { }
                 }
-                catch { _logFilePath = Path.Combine(Path.GetTempPath(), $"BookService_{DateTime.Now:yyyyMMdd_HHmmss}.log"); }
             }
-            return _logFilePath;
+            catch { }
+
+            return "";
         }
 
         public string GetLogPath() => GetLogFilePath();
 
+        public string[] GetRecentLogs()
+        {
+            lock (_logBuffer) return _logBuffer.ToArray();
+        }
+
+        public string GetLogFilePathOrEmpty() => _logFilePath ?? "";
+
         private void Log(string message)
         {
             string logMessage = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} - {message}";
-        
-            // Always emit to the debug console, independent of file I/O.
+
+            // Always to debug console — independent of file system.
             System.Diagnostics.Debug.WriteLine(logMessage);
-        
-            // Try every plausible writable folder until one succeeds.
+
+            // Always to in-memory buffer — survives file-write failures.
             try
             {
-                lock (_logLock)
+                lock (_logBuffer)
                 {
-                    if (string.IsNullOrEmpty(_logFilePath))
-                    {
-                        var candidates = new List<string>
-                        {
-                            Path.Combine(FileSystem.AppDataDirectory, "Logs"),
-                            Path.Combine(FileSystem.CacheDirectory, "Logs"),
-                            Path.Combine(Path.GetTempPath(), "BookViewerLogs"),
-                            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "BookViewer", "Logs"),
-                        };
-        
-                        foreach (var folder in candidates)
-                        {
-                            try
-                            {
-                                Directory.CreateDirectory(folder);
-                                var testFile = Path.Combine(folder, $"BookService_{DateTime.Now:yyyyMMdd_HHmmss}.log");
-                                File.AppendAllText(testFile, "");
-                                _logFilePath = testFile;
-                                break;
-                            }
-                            catch { }
-                        }
-                    }
-        
-                    if (!string.IsNullOrEmpty(_logFilePath))
-                        File.AppendAllText(_logFilePath, logMessage + Environment.NewLine);
+                    while (_logBuffer.Count >= MaxLogBuffer) _logBuffer.Dequeue();
+                    _logBuffer.Enqueue(logMessage);
                 }
             }
             catch { }
-        
+
+            // Best-effort to file.
+            try
+            {
+                var path = GetLogFilePath();
+                if (!string.IsNullOrEmpty(path))
+                {
+                    lock (_logLock) File.AppendAllText(path, logMessage + Environment.NewLine);
+                }
+            }
+            catch { }
+
             try
             {
                 OnStatusChanged?.Invoke(this, message.Length < 80 ? message : message.Substring(0, 77) + "...");
@@ -1301,21 +1314,18 @@ img.resbtn:active { opacity: .6 !important; }
                     m => m.Groups[1].Value + redHtml + m.Groups[3].Value,
                     RegexOptions.IgnoreCase);
 
-                // ---- Fix A: Inject external resource buttons ----
+                // Inject external resource buttons
                 Log($"[res] about to build resbtn for {nameWithoutExt} in {directory}");
                 var resButtons = await BuildResourceButtonsAsync(directory, nameWithoutExt);
                 Log($"[res] got {resButtons?.Length ?? 0} chars of resbtn HTML");
                 if (!string.IsNullOrEmpty(resButtons))
                 {
-                    // Append at end so the buttons are direct children of .page-container,
-                    // siblings of #rez, splitpane, redbtn, etc. — NOT inside a hidden <tohide>.
                     skeleton = skeleton + resButtons;
                     Log($"[res] injected at end. new skeleton length={skeleton.Length}");
                 }
 
                 skeleton = InlineAllAssets(skeleton, directory);
 
-                // ---- Fix D: final diagnostic dump ----
                 var finalHtml = BuildFinalHtml(skeleton, fontCss, pageWidth, pageHeight, fileName);
 
                 var hasRes = finalHtml.Contains("class='resbtn'") || finalHtml.Contains("class=\"resbtn\"");
@@ -1442,10 +1452,6 @@ img.resbtn:active { opacity: .6 !important; }
             }
         }
 
-        /// <summary>
-        /// Resolve an icon path from steps_N_data.xml to an absolute file on disk.
-        /// Tries several fallback locations and logs every attempt.
-        /// </summary>
         private string ResolveIconPath(string iconPath, string pageDir)
         {
             try
