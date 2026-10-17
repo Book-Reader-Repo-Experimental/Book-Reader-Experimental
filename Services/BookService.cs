@@ -78,13 +78,17 @@ tohide, tohide *, splitpane tohide, splitpane tohide * {
 
 /* External resource button injected from steps_N_data.xml */
 img.resbtn {
-    position: absolute;
-    cursor: pointer;
-    z-index: 60;
-    width: 32px;
-    height: 32px;
+    position: absolute !important;
+    cursor: pointer !important;
+    z-index: 9999 !important;
+    width: 32px !important;
+    height: 32px !important;
+    display: block !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
+    opacity: 1 !important;
 }
-img.resbtn:active { opacity: .6; }
+img.resbtn:active { opacity: .6 !important; }
 ";
 
         private const string ReaderJsTemplate = @"
@@ -1260,23 +1264,44 @@ img.resbtn:active { opacity: .6; }
                     m => m.Groups[1].Value + redHtml + m.Groups[3].Value,
                     RegexOptions.IgnoreCase);
 
-                // ---- Inject external resource buttons from steps_N_data.xml ----
+                // ---- Fix A: Inject external resource buttons ----
+                Log($"[res] about to build resbtn for {nameWithoutExt} in {directory}");
                 var resButtons = await BuildResourceButtonsAsync(directory, nameWithoutExt);
+                Log($"[res] got {resButtons?.Length ?? 0} chars of resbtn HTML");
                 if (!string.IsNullOrEmpty(resButtons))
                 {
-                    var insertAt = skeleton.LastIndexOf("</div>");
-                    if (insertAt < 0) insertAt = skeleton.Length;
-                    skeleton = skeleton.Substring(0, insertAt) + resButtons + skeleton.Substring(insertAt);
-                    Log($"[res] injected {resButtons.Length} chars of resource buttons for {nameWithoutExt}");
+                    // Append at end so the buttons are direct children of .page-container,
+                    // siblings of #rez, splitpane, redbtn, etc. — NOT inside a hidden <tohide>.
+                    skeleton = skeleton + resButtons;
+                    Log($"[res] injected at end. new skeleton length={skeleton.Length}");
                 }
 
                 skeleton = InlineAllAssets(skeleton, directory);
 
-                return BuildFinalHtml(skeleton, fontCss, pageWidth, pageHeight, fileName);
+                // ---- Fix D: final diagnostic dump ----
+                var finalHtml = BuildFinalHtml(skeleton, fontCss, pageWidth, pageHeight, fileName);
+
+                var hasRes = finalHtml.Contains("class='resbtn'") || finalHtml.Contains("class=\"resbtn\"");
+                Log($"[res] FINAL contains resbtn={hasRes}");
+
+                var idx = finalHtml.IndexOf("class='resbtn'");
+                if (idx < 0) idx = finalHtml.IndexOf("class=\"resbtn\"");
+                if (idx >= 0)
+                {
+                    var start = Math.Max(0, idx - 60);
+                    var end = Math.Min(finalHtml.Length, idx + 260);
+                    Log($"[res] snippet: {finalHtml.Substring(start, end - start)}");
+                }
+                else
+                {
+                    Log($"[res] resbtn NOT in final HTML. skeleton contains? {skeleton.Contains("class='resbtn'")}");
+                }
+
+                return finalHtml;
             }
             catch (Exception ex)
             {
-                Log($"ERROR ProcessHtmlContent: {ex.Message}");
+                Log($"ERROR ProcessHtmlContent: {ex.Message}\n{ex.StackTrace}");
                 return htmlContent;
             }
         }
@@ -1291,12 +1316,26 @@ img.resbtn:active { opacity: .6; }
             try
             {
                 var dataXmlPath = Path.Combine(pageDir, nameWithoutExt + "_data.xml");
-                if (!File.Exists(dataXmlPath)) return "";
+                Log($"[res] looking for data xml at: {dataXmlPath}");
+                if (!File.Exists(dataXmlPath))
+                {
+                    Log($"[res] NOT FOUND: {dataXmlPath}");
+                    return "";
+                }
+
+                var raw = await File.ReadAllTextAsync(dataXmlPath);
+                Log($"[res] read data xml, length={raw.Length}, head='{raw.Substring(0, Math.Min(80, raw.Length))}'");
 
                 var doc = new XmlDocument();
-                doc.LoadXml(await File.ReadAllTextAsync(dataXmlPath));
+                try { doc.LoadXml(raw); }
+                catch (Exception xex)
+                {
+                    Log($"[res] XML parse error: {xex.Message}");
+                    return "";
+                }
 
                 var items = doc.SelectNodes("//links/item");
+                Log($"[res] found {items?.Count ?? 0} <links><item> nodes");
                 if (items == null || items.Count == 0) return "";
 
                 var sb = new StringBuilder();
@@ -1309,7 +1348,6 @@ img.resbtn:active { opacity: .6; }
                     var iconPath = item.SelectSingleNode("icon")?.InnerText ?? "";
                     var desc = item.SelectSingleNode("desc")?.InnerText ?? "";
 
-                    // Prefer ios path, then any available, then fall back to <path>
                     var url = item.SelectSingleNode("teacheriospath")?.InnerText
                            ?? item.SelectSingleNode("studentiospath")?.InnerText
                            ?? item.SelectSingleNode("teacherwebpath")?.InnerText
@@ -1317,30 +1355,29 @@ img.resbtn:active { opacity: .6; }
                            ?? item.SelectSingleNode("path")?.InnerText
                            ?? "";
 
-                    if (string.IsNullOrEmpty(url)) continue;
-                    if (!double.TryParse(xStr, out double x)) continue;
-                    if (!double.TryParse(yStr, out double y)) continue;
+                    Log($"[res] item[{i}] raw x='{xStr}' y='{yStr}' icon='{iconPath}' url='{(url?.Length > 60 ? url.Substring(0, 60) + "..." : url)}'");
 
-                    // URL-decode url and desc (they arrive percent-encoded)
+                    if (string.IsNullOrEmpty(url)) { Log($"[res] item[{i}] SKIP empty url"); continue; }
+                    if (!double.TryParse(xStr, out double x)) { Log($"[res] item[{i}] SKIP bad x"); continue; }
+                    if (!double.TryParse(yStr, out double y)) { Log($"[res] item[{i}] SKIP bad y"); continue; }
+
                     url = Uri.UnescapeDataString(url);
                     desc = Uri.UnescapeDataString(desc);
-                    // But desc may contain %uXXXX (UTF-16) escapes from the book editor
                     desc = Regex.Replace(desc, @"%u([0-9A-Fa-f]{4})",
                         m => ((char)Convert.ToInt32(m.Groups[1].Value, 16)).ToString());
 
-                    // Resolve icon to disk
                     string iconDataUri = "";
                     if (!string.IsNullOrEmpty(iconPath))
                     {
-                        // icon path is relative to the data.xml folder, e.g. "../images/svgIcon/..."
                         var resolved = ResolveIconPath(iconPath, pageDir);
+                        Log($"[res] item[{i}] resolved icon='{resolved ?? "(null)"}'");
                         if (!string.IsNullOrEmpty(resolved))
                             iconDataUri = ToIconDataUri(resolved);
                     }
 
                     if (string.IsNullOrEmpty(iconDataUri))
                     {
-                        // Fallback: a small dot indicator
+                        Log($"[res] item[{i}] no icon → fallback blue dot");
                         iconDataUri = "data:image/svg+xml;base64," + Convert.ToBase64String(Encoding.UTF8.GetBytes(
                             "<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'><circle cx='12' cy='12' r='10' fill='#0A84FF'/><path d='M8 12 L16 12 M12 8 L12 16' stroke='white' stroke-width='2'/></svg>"));
                     }
@@ -1358,15 +1395,20 @@ img.resbtn:active { opacity: .6; }
                     sb.Append("onclick='__openResource(this)' />");
                 }
 
+                Log($"[res] built {sb.Length} chars of resbtn HTML (from {items.Count} items)");
                 return sb.ToString();
             }
             catch (Exception ex)
             {
-                Log($"[res] BuildResourceButtonsAsync error: {ex.Message}");
+                Log($"[res] BuildResourceButtonsAsync EXCEPTION: {ex.Message}\n{ex.StackTrace}");
                 return "";
             }
         }
 
+        /// <summary>
+        /// Resolve an icon path from steps_N_data.xml to an absolute file on disk.
+        /// Tries several fallback locations and logs every attempt.
+        /// </summary>
         private string ResolveIconPath(string iconPath, string pageDir)
         {
             try
@@ -1375,32 +1417,40 @@ img.resbtn:active { opacity: .6; }
                 var q = clean.IndexOfAny(new[] { '?', '#' });
                 if (q >= 0) clean = clean.Substring(0, q);
 
-                // Try relative to pageDir
+                var tried = new List<string>();
+
                 var combined = Path.GetFullPath(Path.Combine(pageDir, clean));
-                if (File.Exists(combined)) return combined;
+                tried.Add(combined);
+                if (File.Exists(combined)) { Log($"[res] icon found (A): {combined}"); return combined; }
 
-                // Try relative to bookRoot
                 combined = Path.GetFullPath(Path.Combine(_currentBookPath, clean.TrimStart('.', '/')));
-                if (File.Exists(combined)) return combined;
+                tried.Add(combined);
+                if (File.Exists(combined)) { Log($"[res] icon found (B): {combined}"); return combined; }
 
-                // Try stripping leading ../ and looking under bookRoot/images
                 var fname = Path.GetFileName(clean);
                 combined = Path.GetFullPath(Path.Combine(_currentBookPath, "images", fname));
-                if (File.Exists(combined)) return combined;
+                tried.Add(combined);
+                if (File.Exists(combined)) { Log($"[res] icon found (C): {combined}"); return combined; }
 
                 combined = Path.GetFullPath(Path.Combine(_currentBookPath, "images", "svgIcon", fname));
-                if (File.Exists(combined)) return combined;
+                tried.Add(combined);
+                if (File.Exists(combined)) { Log($"[res] icon found (D): {combined}"); return combined; }
 
-                // Walk up from pageDir trying each level
                 var up = pageDir;
                 for (int i = 0; i < 3; i++)
                 {
                     up = Path.GetDirectoryName(up) ?? up;
                     combined = Path.GetFullPath(Path.Combine(up, clean));
-                    if (File.Exists(combined)) return combined;
+                    tried.Add(combined);
+                    if (File.Exists(combined)) { Log($"[res] icon found (E{i + 1}): {combined}"); return combined; }
                 }
+
+                Log($"[res] icon NOT FOUND for '{iconPath}' in {pageDir}. Tried:\n  {string.Join("\n  ", tried)}");
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Log($"[res] ResolveIconPath error: {ex.Message}");
+            }
             return null;
         }
 
