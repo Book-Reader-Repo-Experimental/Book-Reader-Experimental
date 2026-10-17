@@ -2,10 +2,16 @@ name: Debug Builds
 
 on:
   workflow_dispatch:
+    inputs:
+      release_build:
+        description: 'Publish as Release build (creates GitHub Release)'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   build-android:
-    name: Build Android APK (Debug)
+    name: Build Android APK (${{ inputs.release_build && 'Release' || 'Debug' }})
     runs-on: ubuntu-latest
 
     steps:
@@ -36,19 +42,19 @@ jobs:
           dotnet publish ./BookViewer.Maui.csproj \
             -f net9.0-android \
             -p:TargetFrameworks=net9.0-android \
-            -c Debug \
+            -c ${{ inputs.release_build && 'Release' || 'Debug' }} \
             -p:AndroidPackageFormat=apk \
             -o ./publish-android
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Android-APK-Debug
+          name: Android-APK-${{ inputs.release_build && 'Release' || 'Debug' }}
           path: ./publish-android/*.apk
           if-no-files-found: error
 
   build-ios:
-    name: Build iOS IPA (Debug)
+    name: Build iOS IPA (${{ inputs.release_build && 'Release' || 'Debug' }})
     runs-on: macos-latest
 
     steps:
@@ -81,7 +87,7 @@ jobs:
           dotnet publish ./BookViewer.Maui.csproj \
             -f net9.0-ios \
             -p:TargetFrameworks=net9.0-ios \
-            -c Debug \
+            -c ${{ inputs.release_build && 'Release' || 'Debug' }} \
             -p:RuntimeIdentifier=ios-arm64 \
             -p:EnableCodeSigning=false \
             -p:BuildIpa=true \
@@ -90,15 +96,15 @@ jobs:
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: iOS-IPA-Debug
+          name: iOS-IPA-${{ inputs.release_build && 'Release' || 'Debug' }}
           path: ./publish-ios/*.ipa
           if-no-files-found: error
 
   # ============================================================
-  # NEW: macOS (Mac Catalyst) — produces a .app bundle
+  # macOS (Mac Catalyst) — produces a .app bundle
   # ============================================================
   build-maccatalyst:
-    name: Build macOS App (Debug)
+    name: Build macOS App (${{ inputs.release_build && 'Release' || 'Debug' }})
     runs-on: macos-latest
 
     steps:
@@ -131,27 +137,15 @@ jobs:
           dotnet publish ./BookViewer.Maui.csproj \
             -f net9.0-maccatalyst \
             -p:TargetFrameworks=net9.0-maccatalyst \
-            -c Debug \
+            -c ${{ inputs.release_build && 'Release' || 'Debug' }} \
             -p:RuntimeIdentifier=maccatalyst-x64 \
             -p:EnableCodeSigning=false \
             -p:CreatePackage=false \
             -o ./publish-maccatalyst
 
-      # Universal binary (Intel + Apple Silicon). Uncomment if you want
-      # a single .app that runs natively on both architectures.
-      # - name: Build Mac Catalyst App (Universal)
-      #   run: |
-      #     dotnet publish ./BookViewer.Maui.csproj \
-      #       -f net9.0-maccatalyst \
-      #       -p:TargetFrameworks=net9.0-maccatalyst \
-      #       -c Debug \
-      #       -p:RuntimeIdentifiers="maccatalyst-x64;maccatalyst-arm64" \
-      #       -p:EnableCodeSigning=false \
-      #       -o ./publish-maccatalyst
-
       - name: Zip .app Bundle
         run: |
-          APP_PATH=$(find ./bin/Debug/net9.0-maccatalyst/maccatalyst-x64 -maxdepth 1 -name "*.app" -type d | head -n 1)
+          APP_PATH=$(find ./bin/${{ inputs.release_build && 'Release' || 'Debug' }}/net9.0-maccatalyst/maccatalyst-x64 -maxdepth 1 -name "*.app" -type d | head -n 1)
       
           if [ -z "$APP_PATH" ]; then
             echo "No .app bundle found. Contents of publish dir:"
@@ -168,18 +162,18 @@ jobs:
           cp -R "$APP_PATH" ./publish-maccatalyst/
       
           cd ./publish-maccatalyst
-          zip -r -y "BookViewer-macOS-Debug.zip" "$APP_NAME"
+          zip -r -y "BookViewer-macOS-${{ inputs.release_build && 'Release' || 'Debug' }}.zip" "$APP_NAME"
           ls -la
-          
+
       - name: Upload macOS Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: macOS-App-Debug
-          path: ./publish-maccatalyst/BookViewer-macOS-Debug.zip
+          name: macOS-App-${{ inputs.release_build && 'Release' || 'Debug' }}
+          path: ./publish-maccatalyst/BookViewer-macOS-${{ inputs.release_build && 'Release' || 'Debug' }}.zip
           if-no-files-found: error
 
   build-windows:
-    name: Build Windows App (Debug)
+    name: Build Windows App (${{ inputs.release_build && 'Release' || 'Debug' }})
     runs-on: windows-latest
 
     steps:
@@ -205,7 +199,7 @@ jobs:
           dotnet publish ./BookViewer.Maui.csproj `
             -f net9.0-windows10.0.19041.0 `
             -p:TargetFrameworks=net9.0-windows10.0.19041.0 `
-            -c Debug `
+            -c ${{ inputs.release_build && 'Release' || 'Debug' }} `
             -p:RuntimeIdentifierOverride=win10-x64 `
             -p:WindowsPackageType=None `
             -p:GenerateAppInstallerFile=false `
@@ -214,6 +208,90 @@ jobs:
       - name: Upload Windows Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Windows-App-Debug
+          name: Windows-App-${{ inputs.release_build && 'Release' || 'Debug' }}
           path: ./publish-windows/**
           if-no-files-found: error
+
+  # ============================================================
+  # NEW: Publish to GitHub Releases (only when release_build = true)
+  # ============================================================
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-android, build-ios, build-maccatalyst, build-windows]
+    if: ${{ inputs.release_build }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download Android Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Android-APK-Release
+          path: ./artifacts/android
+
+      - name: Download iOS Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: iOS-IPA-Release
+          path: ./artifacts/ios
+
+      - name: Download macOS Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: macOS-App-Release
+          path: ./artifacts/macos
+
+      - name: Download Windows Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Windows-App-Release
+          path: ./artifacts/windows
+
+      - name: Prepare Release Assets
+        run: |
+          set -e
+          mkdir -p ./release-assets
+
+          # Android APK
+          cp ./artifacts/android/*.apk ./release-assets/ || true
+
+          # iOS IPA
+          cp ./artifacts/ios/*.ipa ./release-assets/ || true
+
+          # macOS .app zip
+          cp ./artifacts/macos/*.zip ./release-assets/ || true
+
+          # Windows — zip the publish folder
+          if [ -d ./artifacts/windows ] && [ "$(ls -A ./artifacts/windows)" ]; then
+            cd ./artifacts/windows
+            zip -r -y "$GITHUB_WORKSPACE/release-assets/BookViewer-Windows-Release.zip" .
+          fi
+
+          echo "Release assets:"
+          ls -la ./release-assets
+
+      - name: Generate Release Tag
+        id: tag
+        run: |
+          TAG="v$(date +'%Y.%m.%d')-build.${{ github.run_number }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Release tag: $TAG"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: "Release ${{ steps.tag.outputs.tag }}"
+          body: |
+            Automated release build for BookViewer.
+
+            **Commit:** ${{ github.sha }}
+            **Run:** [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          draft: false
+          prerelease: false
+          files: ./release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
