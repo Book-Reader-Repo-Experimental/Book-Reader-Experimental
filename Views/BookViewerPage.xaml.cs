@@ -299,6 +299,24 @@ public partial class BookViewerPage : ContentPage
             {
                 Log("splitpane delete " + q["bookUID"]);
             }
+            else if (host == "open-resource")
+            {
+                var url = HttpUtility.UrlDecode(q["url"] ?? "");
+                var desc = HttpUtility.UrlDecode(q["desc"] ?? "");
+                Log($"[resource] open url='{url}' desc='{desc}'");
+                if (!string.IsNullOrEmpty(url))
+                {
+                    try
+                    {
+                        await Launcher.Default.OpenAsync(url);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"[resource] open err: {ex.Message}");
+                        await DisplayAlert("Cannot open link", ex.Message, "OK");
+                    }
+                }
+            }
         }
         catch (Exception ex)
         {
