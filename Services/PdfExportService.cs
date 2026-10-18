@@ -131,7 +131,7 @@ namespace BookViewer.Services
                 return $"<input type=\"text\" id=\"{fieldId}\" name=\"{fieldId}\" class=\"pdf-answer-field\" value=\"{content.Replace("\"", "&quot;")}\" readonly=\"readonly\" style=\"display:block; width:100%; border:none; background:none;\" />";
             });
         }
-                
+                        
         private void InjectToggleActions(PdfDocument pdf, string html, int pageIndex)
         {
             var form = PdfAcroForm.GetAcroForm(pdf, true);
@@ -164,13 +164,14 @@ namespace BookViewer.Services
         
                         var rect = new Rectangle(x, y, 24, 24);
         
-                        // Create standard push button field safely across all iText 7 versions
-                        var buttonField = new PdfButtonFormField(pdf, rect);
+                        // Use the parameterless or document-only constructor and set properties via methods
+                        var buttonField = new PdfButtonFormField(pdf);
                         buttonField.SetFieldName($"Toggle_{pageIndex}_{imgId}_{btnCounter++}");
                         buttonField.SetAdditionalAction(PdfName.U, action);
                         
                         foreach (var w in buttonField.GetWidgets())
                         {
+                            w.SetRectangle(rect);
                             w.SetFlags(PdfAnnotation.PRINT);
                         }
         
