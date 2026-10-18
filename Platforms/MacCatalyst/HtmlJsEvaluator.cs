@@ -36,7 +36,7 @@ namespace BookViewer.Platforms.MacCatalyst
                 try
                 {
                     await Task.Delay(300);
-                    var js = "window.__getInteractiveElements ? window.__getInteractiveElements() : '[]'";
+                    var js = "window.__getPdfDom ? window.__getPdfDom() : '[]'";
                     var result = await webView.EvaluateJavaScriptAsync(js);
                     tcs.TrySetResult(result?.ToString() ?? "[]");
                 }
