@@ -131,7 +131,7 @@ namespace BookViewer.Services
                 return $"<input type=\"text\" id=\"{fieldId}\" name=\"{fieldId}\" class=\"pdf-answer-field\" value=\"{content.Replace("\"", "&quot;")}\" readonly=\"readonly\" style=\"display:block; width:100%; border:none; background:none;\" />";
             });
         }
-        
+                
         private void InjectToggleActions(PdfDocument pdf, string html, int pageIndex)
         {
             var form = PdfAcroForm.GetAcroForm(pdf, true);
@@ -164,11 +164,10 @@ namespace BookViewer.Services
         
                         var rect = new Rectangle(x, y, 24, 24);
         
-                        // Create a standard push button form field
-                        var buttonField = PdfButtonFormField.AddPushButton(pdf, rect, $"Toggle_{pageIndex}_{imgId}_{btnCounter++}", "");
+                        // Correct iText 7 factory method for push buttons
+                        var buttonField = PdfButtonFormField.CreatePushButton(pdf, rect, $"Toggle_{pageIndex}_{imgId}_{btnCounter++}", "");
                         buttonField.SetAdditionalAction(PdfName.U, action);
                         
-                        // Set the widget to print-only/invisible overlay if needed, or let it sit transparently over the image
                         foreach (var w in buttonField.GetWidgets())
                         {
                             w.SetFlags(PdfAnnotation.PRINT);
