@@ -164,8 +164,9 @@ namespace BookViewer.Services
         
                         var rect = new Rectangle(x, y, 24, 24);
         
-                        // Correct iText 7 factory method for push buttons
-                        var buttonField = PdfButtonFormField.CreatePushButton(pdf, rect, $"Toggle_{pageIndex}_{imgId}_{btnCounter++}", "");
+                        // Create standard push button field safely across all iText 7 versions
+                        var buttonField = new PdfButtonFormField(pdf, rect);
+                        buttonField.SetFieldName($"Toggle_{pageIndex}_{imgId}_{btnCounter++}");
                         buttonField.SetAdditionalAction(PdfName.U, action);
                         
                         foreach (var w in buttonField.GetWidgets())
