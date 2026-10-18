@@ -1,12 +1,8 @@
-using iText.Html2pdf;
-using iText.Html2pdf.Resolver.Font;
-using iText.Kernel.Pdf;
-using iText.Kernel.Utils;
-using iText.Kernel.Geom;
+using PdfSharpCore.Pdf;
+using PdfSharpCore.Pdf.Advanced;
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace BookViewer.Services
@@ -19,6 +15,8 @@ namespace BookViewer.Services
         public event EventHandler<string>? OnComplete;
         public event EventHandler<string>? OnError;
 
+        public Func<string, Task<byte[]?>>? RenderPageToImageAsync { get; set; }
+
         public PdfExportService(BookService bookService)
         {
             _bookService = bookService;
@@ -26,21 +24,17 @@ namespace BookViewer.Services
 
         public async Task ExportBookAsPdfAsync(string outputPath, bool includeAnswers, bool includeTeacherNotes, bool includeStudentAnswers)
         {
-            var tempFiles = new List<string>();
             try
             {
                 var totalPages = _bookService.PageFiles.Count;
                 if (totalPages == 0) { OnError?.Invoke(this, "No pages to export"); return; }
+                if (RenderPageToImageAsync == null) { OnError?.Invoke(this, "Render callback not set"); return; }
 
-                var tempDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "BookViewerPdfExport");
-                if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
-                Directory.CreateDirectory(tempDir);
+                double pageWidthPt = 1024 * 0.75;
+                double pageHeightPt = 1344 * 0.75;
 
-                var converterProperties = new ConverterProperties();
-                converterProperties.SetFontProvider(new DefaultFontProvider(true, true, true));
-
-                // 1024x1344 pixels at 96 DPI = 768x1008 points
-                var pageSize = new PageSize(768f, 1008f);
+                var document = new PdfDocument();
+                document.Info.Title = _bookService.BookTitle;
 
                 for (int i = 0; i < totalPages; i++)
                 {
@@ -50,128 +44,61 @@ namespace BookViewer.Services
                     string html = await _bookService.BuildPageHtmlForRenderAsync(
                         filePath, includeAnswers, includeTeacherNotes, includeStudentAnswers);
 
-                    // Inject CSS to flatten the layout and force buttons visible
-                    html = InjectPdfCss(html);
-
-                    // Extract base64 images to disk
-                    html = await ExtractBase64ImagesAsync(html, tempDir, i);
-
-                    var tempPdfPath = System.IO.Path.Combine(tempDir, $"page_{i}.pdf");
-                    tempFiles.Add(tempPdfPath);
-
-                    using (var writer = new PdfWriter(tempPdfPath))
-                    using (var pdf = new PdfDocument(writer))
+                    byte[]? imageBytes = null;
+                    try
                     {
-                        pdf.SetDefaultPageSize(pageSize);
-                        HtmlConverter.ConvertToPdf(html, pdf, converterProperties);
+                        imageBytes = await RenderPageToImageAsync(html);
                     }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Capture error page {i + 1}: {ex.Message}");
+                    }
+
+                    if (imageBytes == null || imageBytes.Length == 0)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Skipping page {i + 1} (no image)");
+                        continue;
+                    }
+
+                    var pdfPage = document.AddPage();
+                    pdfPage.Width = PdfSharpCore.Drawing.XUnit.FromPoint(pageWidthPt);
+                    pdfPage.Height = PdfSharpCore.Drawing.XUnit.FromPoint(pageHeightPt);
+
+                    // MANUAL IMAGE EMBEDDING
+                    var pdfImage = new PdfImage(document);
+                    pdfImage.Stream.Value = imageBytes;
+                    pdfImage.Width = (int)pageWidthPt;
+                    pdfImage.Height = (int)pageHeightPt;
+                    
+                    var xObject = document.Internals.AddObject(pdfImage);
+                    
+                    var content = new PdfSharpCore.Pdf.PdfContent(document);
+                    content.Append("q\n");
+                    
+                    string cmCommand = string.Format(System.Globalization.CultureInfo.InvariantCulture, 
+                        "{0} 0 0 {1} 0 0 cm\n", pageWidthPt, pageHeightPt);
+                    content.Append(cmCommand);
+                    
+                    content.Append("/Im0 Do\n");
+                    content.Append("Q\n");
+
+                    var pageContent = new PdfSharpCore.Pdf.PdfContent(document);
+                    pageContent.CreateStream(content.ToString());
+                    pdfPage.Contents.Add(pageContent);
+
+                    var resources = new PdfResources();
+                    resources.Elements["/XObject"] = new PdfDictionary(document);
+                    ((PdfDictionary)resources.Elements["/XObject"]).Elements["/Im0"] = xObject.Reference;
+                    pdfPage.Elements["/Resources"] = resources;
                 }
 
-                OnProgress?.Invoke(this, 100);
-                using (var writer = new PdfWriter(outputPath))
-                using (var mergedPdf = new PdfDocument(writer))
-                {
-                    var merger = new PdfMerger(mergedPdf);
-                    foreach (var tempPdf in tempFiles)
-                    {
-                        using (var reader = new PdfReader(tempPdf))
-                        using (var sourcePdf = new PdfDocument(reader))
-                        {
-                            merger.Merge(sourcePdf, 1, sourcePdf.GetNumberOfPages());
-                        }
-                    }
-                }
-
+                document.Save(outputPath);
                 OnComplete?.Invoke(this, outputPath);
             }
             catch (Exception ex)
             {
                 OnError?.Invoke(this, ex.Message);
             }
-            finally
-            {
-                foreach (var file in tempFiles)
-                {
-                    try { File.Delete(file); } catch { }
-                }
-            }
-        }
-
-        private string InjectPdfCss(string html)
-        {
-            var css = @"
-<style>
-    @page { 
-        size: 768pt 1008pt; 
-        margin: 0 !important; 
-    }
-    html, body { 
-        margin: 0 !important; 
-        padding: 0 !important; 
-        width: 768pt !important; 
-        height: 1008pt !important; 
-        overflow: visible !important;
-        background: #fff !important;
-    }
-    
-    /* Flatten the layout so iText7 doesn't crop or hide things */
-    .page-container, .page-wrapper, pane, pane.base, pane.ori, pane.redAnswer, div, span { 
-        position: relative !important; 
-        display: block !important;
-        width: 100% !important;
-        height: auto !important;
-        transform: none !important;
-        top: auto !important; 
-        left: auto !important; 
-        margin: 0 !important;
-        padding: 0 !important;
-    }
-    
-    /* Make sure images don't overflow */
-    img { 
-        max-width: 100% !important; 
-        height: auto !important; 
-        display: inline-block !important;
-        visibility: visible !important;
-    }
-    
-    /* Force answer buttons visible */
-    .hideBtn { display: inline-block !important; visibility: visible !important; }
-    img.redbtn, img.hsgbtn, img.has2btn { 
-        display: inline-block !important; 
-        visibility: visible !important; 
-        opacity: 1 !important;
-        width: 24px !important; 
-        height: 24px !important;
-    }
-</style>
-";
-            if (html.Contains("<head>"))
-                return html.Replace("<head>", "<head>" + css);
-            else
-                return css + html;
-        }
-
-        private async Task<string> ExtractBase64ImagesAsync(string html, string tempDir, int pageIndex)
-        {
-            var matches = Regex.Matches(html, @"src=""(data:image/([^;]+);base64,([^""]+))""", RegexOptions.IgnoreCase);
-            foreach (Match match in matches)
-            {
-                var dataUri = match.Groups[1].Value;
-                var ext = match.Groups[2].Value;
-                var base64 = match.Groups[3].Value;
-
-                var fileName = $"img_{pageIndex}_{Guid.NewGuid().ToString("N").Substring(0, 8)}.{ext}";
-                var filePath = System.IO.Path.Combine(tempDir, fileName);
-
-                try
-                {
-                    await File.WriteAllBytesAsync(filePath, Convert.FromBase64String(base64));
-                    html = html.Replace(dataUri, filePath.Replace('\\', '/'));
-                }
-                catch { }
-            }
-            return html;
         }
     }
 }
