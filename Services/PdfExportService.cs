@@ -163,15 +163,14 @@ namespace BookViewer.Services
                         float y = 1008 - (float.Parse(styleMatch.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture) * 0.75f) - 24;
         
                         var rect = new Rectangle(x, y, 24, 24);
+                        var fieldName = $"Toggle_{pageIndex}_{imgId}_{btnCounter++}";
         
-                        // Use the parameterless or document-only constructor and set properties via methods
-                        var buttonField = new PdfButtonFormField(pdf);
-                        buttonField.SetFieldName($"Toggle_{pageIndex}_{imgId}_{btnCounter++}");
+                        // Use the standard high-level form creator for push buttons available in iText 7
+                        var buttonField = PdfFormField.CreatePushButton(pdf, rect, fieldName, "");
                         buttonField.SetAdditionalAction(PdfName.U, action);
                         
                         foreach (var w in buttonField.GetWidgets())
                         {
-                            w.SetRectangle(rect);
                             w.SetFlags(PdfAnnotation.PRINT);
                         }
         
