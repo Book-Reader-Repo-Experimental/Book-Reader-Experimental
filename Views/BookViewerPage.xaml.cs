@@ -376,7 +376,7 @@ public partial class BookViewerPage : ContentPage
 
     private async void OnBackClicked(object sender, EventArgs e) => await Navigation.PopAsync();
 
-    private async void OnExportPdfClicked(object sender, EventArgs e)
+        private async void OnExportPdfClicked(object sender, EventArgs e)
     {
         if (string.IsNullOrEmpty(_bookService.CurrentBookPath)) { await DisplayAlert("Info", "Please load a book first.", "OK"); return; }
         try
