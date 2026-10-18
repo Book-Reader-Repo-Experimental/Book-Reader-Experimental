@@ -10,7 +10,7 @@ namespace BookViewer.Services
 {
     public class PdfDomElement
     {
-        public string Type { get; set; } = ""; 
+        public string Type { get; set; } = "";
         public double X { get; set; }
         public double Y { get; set; }
         public double W { get; set; }
@@ -73,7 +73,6 @@ namespace BookViewer.Services
                     pdfPage.Width = XUnit.FromPoint(pageWidthPt);
                     pdfPage.Height = XUnit.FromPoint(pageHeightPt);
 
-                    // FIX: Use XGraphicsPdfPageOptions.Append
                     var gfx = XGraphics.FromPdfPage(pdfPage, XGraphicsPdfPageOptions.Append);
                     try
                     {
@@ -84,14 +83,18 @@ namespace BookViewer.Services
                         foreach (var el in elements)
                         {
                             double x = el.X * 0.75;
-                            double y = el.Y * 0.75; 
+                            double y = el.Y * 0.75;
                             double w = el.W * 0.75;
                             double h = el.H * 0.75;
 
                             if (el.Type == "text" && !string.IsNullOrWhiteSpace(el.Text))
                             {
-                                var font = new XFont("Courier New", Math.Max(1, el.FontSize * 0.75), XFontStyle.Regular);
-                                
+                                var style = XFontStyle.Regular;
+                                if (el.IsBold && el.IsItalic) style = XFontStyle.BoldItalic;
+                                else if (el.IsBold) style = XFontStyle.Bold;
+                                else if (el.IsItalic) style = XFontStyle.Italic;
+
+                                var font = new XFont("Courier New", Math.Max(1, el.FontSize * 0.75), style);
                                 var rect = new XRect(x, y, w, h);
                                 gfx.DrawString(el.Text.Trim(), font, XBrushes.Black, rect, XStringFormats.TopLeft);
 
