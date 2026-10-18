@@ -35,6 +35,17 @@ namespace BookViewer.Services
             _httpClient.DefaultRequestHeaders.Add("User-Agent", "BookViewer/1.0");
         }
 
+        private static string GetSharedResourcesDir()
+        {
+            var booksDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                "BookViewer", "Books");
+            Directory.CreateDirectory(booksDir);
+            var shared = Path.Combine(booksDir, "resources");
+            Directory.CreateDirectory(shared);
+            return shared;
+        }
+
         private string GetLogFilePath()
         {
             if (_logFilePath == null)
@@ -157,7 +168,7 @@ namespace BookViewer.Services
                                 : pattern.Substring(0, pattern.LastIndexOf('/'));
                             Log($"Parent dir resolved: {parentDir}");
 
-                            // Resource PC
+                            // Resource PC (goes to shared folder)
                             OnProgress?.Invoke(this, 50);
                             Log("Downloading resource PC zip...");
                             await DownloadAndExtractResourcePCAsync(bookNumber, parentDir, bookExtractDir);
@@ -394,7 +405,15 @@ namespace BookViewer.Services
                                     continue;
 
                                 var entryName = entry.FullName.Replace('\\', '/');
-                                var fullPath = Path.Combine(extractDir, entryName.Replace('/', Path.DirectorySeparatorChar));
+                                var relative = entryName;
+                                // Strip the zip's internal root prefix so we don't get resources/resources
+                                if (relative.StartsWith("resources/", StringComparison.OrdinalIgnoreCase))
+                                    relative = relative.Substring("resources/".Length);
+                                else if (relative.StartsWith("resource/", StringComparison.OrdinalIgnoreCase))
+                                    relative = relative.Substring("resource/".Length);
+
+                                var sharedDir = GetSharedResourcesDir();
+                                var fullPath = Path.Combine(sharedDir, relative.Replace('/', Path.DirectorySeparatorChar));
                                 var directory = Path.GetDirectoryName(fullPath);
                                 if (!string.IsNullOrEmpty(directory))
                                     Directory.CreateDirectory(directory);
@@ -402,7 +421,7 @@ namespace BookViewer.Services
                                 if (!File.Exists(fullPath))
                                     entry.ExtractToFile(fullPath, true);
                             }
-                            Log("Extracted resource PC zip");
+                            Log("Extracted resource PC zip to shared folder");
                         }
                         catch (Exception ex)
                         {
@@ -569,7 +588,14 @@ namespace BookViewer.Services
                                     continue;
 
                                 var entryName = entry.FullName.Replace('\\', '/');
-                                var fullPath = Path.Combine(extractDir, entryName.Replace('/', Path.DirectorySeparatorChar));
+                                var relative = entryName;
+                                if (relative.StartsWith("resources/", StringComparison.OrdinalIgnoreCase))
+                                    relative = relative.Substring("resources/".Length);
+                                else if (relative.StartsWith("resource/", StringComparison.OrdinalIgnoreCase))
+                                    relative = relative.Substring("resource/".Length);
+
+                                var sharedDir = GetSharedResourcesDir();
+                                var fullPath = Path.Combine(sharedDir, relative.Replace('/', Path.DirectorySeparatorChar));
                                 var directory = Path.GetDirectoryName(fullPath);
                                 if (!string.IsNullOrEmpty(directory))
                                     Directory.CreateDirectory(directory);
@@ -577,7 +603,7 @@ namespace BookViewer.Services
                                 if (!File.Exists(fullPath))
                                     entry.ExtractToFile(fullPath, true);
                             }
-                            Log($"Extracted unit PC {uid}");
+                            Log($"Extracted unit PC {uid} to shared folder");
                         }
                         catch (Exception ex)
                         {
