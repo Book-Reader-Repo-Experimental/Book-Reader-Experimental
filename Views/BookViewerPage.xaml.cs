@@ -225,7 +225,7 @@ public partial class BookViewerPage : ContentPage
 
         e.Cancel = true;
 
-        // ---- Manual parse (never new Uri() on the raw bridge string) ----
+        // Manual parse: never new Uri() on the raw bridge string
         string host, query;
 
         if (url.StartsWith("bookviewer://", StringComparison.OrdinalIgnoreCase))
@@ -312,8 +312,7 @@ public partial class BookViewerPage : ContentPage
             }
             else if (host == "open-resource")
             {
-                // ParseQueryString already decodes once. Do NOT decode again.
-                var resourceUrl  = q["url"]  ?? "";
+                var resourceUrl  = q["url"]  ?? ""; // Already decoded once by ParseQueryString
                 var resourceDesc = q["desc"] ?? "";
                 var openInApp    = q["openInApp"] == "1";
                 var audio        = q["audio"] == "1";
@@ -322,35 +321,42 @@ public partial class BookViewerPage : ContentPage
 
                 if (string.IsNullOrEmpty(resourceUrl)) return;
 
-                // Local file?
-                bool isLocal = false;
-                try
+                // 1. Check if it's a remote URL
+                if (resourceUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
                 {
-                    isLocal = !resourceUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase)
-                           && !resourceUrl.StartsWith("data:", StringComparison.OrdinalIgnoreCase)
-                           && !resourceUrl.StartsWith("//",   StringComparison.Ordinal)
-                           && File.Exists(resourceUrl);
-                }
-                catch { isLocal = false; }
-
-                if (isLocal)
-                {
-                    await OpenLocalResourceAsync(resourceUrl, openInApp);
+                    try
+                    {
+                        if (Uri.TryCreate(resourceUrl, UriKind.Absolute, out var remoteUri))
+                            await Launcher.Default.OpenAsync(remoteUri);
+                        else
+                            await DisplayAlert("Cannot open", $"Not a valid URL:\n{resourceUrl}", "OK");
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"[resource] open remote err: {ex.Message}");
+                        await DisplayAlert("Cannot open link", ex.Message, "OK");
+                    }
                     return;
                 }
 
-                // Remote — guard TryCreate so Launcher doesn't throw "Invalid uri"
-                try
+                // 2. It's a local file path (e.g., "resources/K20107_pp.pptx").
+                string absolutePath = resourceUrl;
+                
+                if (!Path.IsPathRooted(resourceUrl))
                 {
-                    if (Uri.TryCreate(resourceUrl, UriKind.Absolute, out var remoteUri))
-                        await Launcher.Default.OpenAsync(remoteUri);
-                    else
-                        await DisplayAlert("Cannot open", $"Not a valid URL:\n{resourceUrl}", "OK");
+                    // Resolve relative paths against the book's root folder
+                    absolutePath = Path.Combine(_bookService.CurrentBookPath, resourceUrl.Replace('/', Path.DirectorySeparatorChar));
                 }
-                catch (Exception ex)
+
+                // 3. Verify it exists and open it
+                if (File.Exists(absolutePath))
                 {
-                    Log($"[resource] open remote err: {ex.Message}");
-                    await DisplayAlert("Cannot open link", ex.Message, "OK");
+                    await OpenLocalResourceAsync(absolutePath, openInApp);
+                }
+                else
+                {
+                    Log($"[resource] File NOT FOUND at resolved path: {absolutePath}");
+                    await DisplayAlert("File Not Found", $"Could not find the file:\n{absolutePath}\n\nCheck if the book downloaded completely.", "OK");
                 }
             }
         }
