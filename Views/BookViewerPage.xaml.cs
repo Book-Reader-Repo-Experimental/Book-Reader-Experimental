@@ -375,8 +375,7 @@ public partial class BookViewerPage : ContentPage
     }
 
     private async void OnBackClicked(object sender, EventArgs e) => await Navigation.PopAsync();
-
-        private async void OnExportPdfClicked(object sender, EventArgs e)
+    private async void OnExportPdfClicked(object sender, EventArgs e)
     {
         if (string.IsNullOrEmpty(_bookService.CurrentBookPath)) { await DisplayAlert("Info", "Please load a book first.", "OK"); return; }
         try
@@ -395,28 +394,37 @@ public partial class BookViewerPage : ContentPage
             var outputPath = Path.Combine(exportDir, $"{safe}_{DateTime.Now:yyyyMMdd_HHmmss}.pdf");
 
             ExportPdfButton.IsEnabled = false;
-            StatusLabel.Text = "Generating PDF...";
+            StatusLabel.Text = "Starting PDF generation...";
 
             var pdfService = new Services.PdfExportService(_bookService);
 
+            pdfService.OnProgress += (s, pct) => Dispatcher.Dispatch(() => 
+                StatusLabel.Text = $"Generating PDF: {pct}%");
+
+            pdfService.OnError += (s, err) => Dispatcher.Dispatch(() => 
+                StatusLabel.Text = $"Export Error: {err}");
+
             pdfService.RenderPageToImageAsync = async (html) =>
             {
+                Dispatcher.Dispatch(() => StatusLabel.Text = "Capturing page...");
+                
 #if IOS
-                return await BookViewer.Platforms.iOS.WebViewCapture.CaptureHtmlAsync(html, 1024, 1344);
+                var res = await BookViewer.Platforms.iOS.WebViewCapture.CaptureHtmlAsync(html, 1024, 1344);
 #elif MACCATALYST
-                return await BookViewer.Platforms.MacCatalyst.WebViewCapture.CaptureHtmlAsync(html, 1024, 1344);
+                var res = await BookViewer.Platforms.MacCatalyst.WebViewCapture.CaptureHtmlAsync(html, 1024, 1344);
 #elif ANDROID
-                return await BookViewer.Platforms.Android.WebViewCapture.CaptureHtmlAsync(html, 1024, 1344);
+                var res = await BookViewer.Platforms.Android.WebViewCapture.CaptureHtmlAsync(html, 1024, 1344);
 #elif WINDOWS
-                return await BookViewer.Platforms.Windows.WebViewCapture.CaptureHtmlAsync(html, 1024, 1344);
+                var res = await BookViewer.Platforms.Windows.WebViewCapture.CaptureHtmlAsync(html, 1024, 1344);
 #else
-                await Task.CompletedTask; return null;
+                byte[] res = null;
 #endif
+                Dispatcher.Dispatch(() => StatusLabel.Text = res != null ? $"Captured {res.Length} bytes" : "Capture failed (null)");
+                return res;
             };
 
             var tcs = new TaskCompletionSource<string>();
             pdfService.OnComplete += (s, path) => tcs.TrySetResult(path);
-            pdfService.OnError += (s, error) => tcs.TrySetException(new Exception(error));
 
             await pdfService.ExportBookAsPdfAsync(outputPath, includeAnswers, includeTeacherNotes, includeStudentAnswers);
             var resultPath = await tcs.Task;
