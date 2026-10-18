@@ -1,8 +1,5 @@
 using Microsoft.Extensions.Logging;
-using PdfSharpCore.Fonts;
-using System;
-using System.IO;
-using BookViewer.Services;
+using Papiro;
 
 namespace BookViewer.Maui
 {
@@ -16,22 +13,15 @@ namespace BookViewer.Maui
                 .ConfigureFonts(fonts =>
                 {
                     fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
+                    fonts.AddFont("OpenSans-Semibold.ttf", "OpenSansSemibold");
                 });
 
-            // MUST be set before any PDF operations and BEFORE the app initializes
-            try 
-            {
-                if (GlobalFontSettings.FontResolver == null)
-                {
-                    GlobalFontSettings.FontResolver = new PdfFontResolver();
-                }
-            }
-            catch (TypeInitializationException ex)
-            {
-                // If PdfSharpCore's default resolver tries to load and throws,
-                // we catch it here, but the resolver is already set to our custom one.
-                System.Diagnostics.Debug.WriteLine($"FontResolver init error: {ex.Message}");
-            }
+            // Register Papiro
+            builder.Services.AddPapiro();
+
+#if DEBUG
+            builder.Logging.AddDebug();
+#endif
 
             return builder.Build();
         }
