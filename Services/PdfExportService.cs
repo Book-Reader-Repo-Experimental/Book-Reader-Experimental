@@ -124,41 +124,53 @@ namespace BookViewer.Services
         private void InjectToggleActions(PdfDocument pdf, string html, int pageIndex)
         {
             var form = PdfAcroForm.GetAcroForm(pdf, true);
-
+        
             // Find all buttons and map them to answer fields
             var buttonRegex = new Regex(@"<img[^>]+class=""[^""]*(?:redbtn|hsgbtn|has2btn)[^""]*""[^>]*id=""([^""]+)""[^>]*linkname=""([^""]+)""", RegexOptions.IgnoreCase);
             var buttonMatches = buttonRegex.Matches(html);
-
+        
+            int btnCounter = 0;
+        
             foreach (Match buttonMatch in buttonMatches)
             {
                 var imgId = buttonMatch.Groups[1].Value;
                 var linkName = buttonMatch.Groups[2].Value;
                 
-                // The field ID must match the button's linkname. We append the page index to make it unique.
+                // The field ID must match the button's linkname.
                 var fieldId = $"AnswerField_{pageIndex}_{linkName}"; 
-
+        
                 // If the field exists, create a JS action to toggle it
                 if (form.GetField(fieldId) != null)
                 {
-                    // FIXED: Escaped double quotes so C# compiles
                     var toggleScript = $"var f = this.getField(\"{fieldId}\"); if (f) f.display = (f.display == display.hidden) ? display.visible : display.hidden;";
                     var action = PdfAction.CreateJavaScript(toggleScript);
-
-                    // Create a transparent checkbox over the image using the image's inline style
+        
                     var styleMatch = Regex.Match(buttonMatch.Value, @"style=""[^""]*left:\s*([\d\.]+)px[^""]*top:\s*([\d\.]+)px");
                     if (styleMatch.Success)
                     {
                         float x = float.Parse(styleMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) * 0.75f;
-                        // Y-axis inversion: pageHeight - (top * scale) - buttonHeight
                         float y = 1008 - (float.Parse(styleMatch.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture) * 0.75f) - 24;
-
+        
                         var rect = new Rectangle(x, y, 24, 24);
                         
-                        // Create a generic button form field (acts as checkbox with custom action)
-                        var checkbox = new PdfButtonFormField(pdf.GetDocument(), new PdfString($"Toggle_{pageIndex}_{imgId}"));
-                        checkbox.SetWidgets(new List<PdfFormAnnotation> { new PdfFormAnnotation(pdf.GetDocument(), rect) });
-                        checkbox.SetAdditionalAction(PdfName.E, action);
-                        form.AddField(checkbox);
+                        // Create the form field
+                        var field = new PdfTextFormField(pdf, new PdfString($"Toggle_{pageIndex}_{imgId}"));
+                        field.SetAdditionalAction(PdfName.E, action);
+                        
+                        // Create a widget annotation manually
+                        var widget = new PdfWidgetAnnotation(rect);
+                        widget.SetPage(pdf.GetPage(1)); // set the page
+                        widget.SetParent(field.GetPdfObject());
+                        
+                        // Style the widget to be invisible but clickable
+                        widget.SetBorder(new PdfArray(pdf, new PdfNumber(0), new PdfNumber(0), new PdfNumber(0)));
+                        widget.SetBackgroundColor(new iText.Kernel.Colors.DeviceRgb(1f, 1f, 1f)); // white background
+        
+                        // Add the widget to the page annotations
+                        pdf.GetPage(1).AddAnnotation(widget);
+                        
+                        // Add the field to the form
+                        form.AddField(field);
                     }
                 }
             }
