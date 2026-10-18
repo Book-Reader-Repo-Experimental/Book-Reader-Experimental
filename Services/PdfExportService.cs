@@ -1,25 +1,34 @@
 using PdfSharpCore.Drawing;
 using PdfSharpCore.Pdf;
-using PdfSharpCore.Pdf.Annotations;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using System.Threading.Tasks;
-using BookViewer.Models;
 
 namespace BookViewer.Services
 {
+    public class PdfInteractiveElement
+    {
+        public string Type { get; set; } = ""; // "link", "answer"
+        public double X { get; set; }
+        public double Y { get; set; }
+        public double Width { get; set; }
+        public double Height { get; set; }
+        public string Url { get; set; } = "";
+        public string Tooltip { get; set; } = "";
+    }
+
     public class PdfExportService
     {
         private readonly BookService _bookService;
 
-        public event EventHandler<int> OnProgress;
-        public event EventHandler<string> OnComplete;
-        public event EventHandler<string> OnError;
+        public event EventHandler<int>? OnProgress;
+        public event EventHandler<string>? OnComplete;
+        public event EventHandler<string>? OnError;
 
-        public Func<string, Task<byte[]>> RenderPageToImageAsync { get; set; }
-        public Func<string, Task<string>> EvaluateJsAsync { get; set; } // NEW
+        public Func<string, Task<byte[]?>>? RenderPageToImageAsync { get; set; }
+        public Func<string, Task<string?>>? EvaluateJsAsync { get; set; }
 
         public PdfExportService(BookService bookService)
         {
@@ -47,29 +56,25 @@ namespace BookViewer.Services
                     OnProgress?.Invoke(this, (int)((i / (double)totalPages) * 100));
 
                     var filePath = _bookService.PageFiles[i];
-                    string html = await _bookService.BuildPageHtmlForRenderAsync(filePath, includeAnswers, includeTeacherNotes, includeStudentAnswers);
+                    string html = await _bookService.BuildPageHtmlForRenderAsync(
+                        filePath, includeAnswers, includeTeacherNotes, includeStudentAnswers);
 
-                    // 1. Get the image
-                    byte[] imageBytes = null;
+                    byte[]? imageBytes = null;
                     try { imageBytes = await RenderPageToImageAsync(html); } catch { }
                     if (imageBytes == null || imageBytes.Length == 0) continue;
 
-                    // 2. Extract interactive elements via JS
                     var interactiveElements = new List<PdfInteractiveElement>();
                     try
                     {
                         var json = await EvaluateJsAsync(html);
-                        if (!string.IsNullOrEmpty(json) && json != "[]")
-                        {
-                            interactiveElements = JsonSerializer.Deserialize<List<PdfInteractiveElement>>(json);
-                        }
+                        if (!string.IsNullOrEmpty(json) && json != "[]" && json != "null")
+                            interactiveElements = JsonSerializer.Deserialize<List<PdfInteractiveElement>>(json) ?? new();
                     }
                     catch (Exception ex)
                     {
-                        System.Diagnostics.Debug.WriteLine($"Failed to extract elements page {i+1}: {ex.Message}");
+                        System.Diagnostics.Debug.WriteLine($"Failed to extract elements page {i + 1}: {ex.Message}");
                     }
 
-                    // 3. Build PDF Page
                     var pdfPage = document.AddPage();
                     pdfPage.Width = XUnit.FromPoint(pageWidthPt);
                     pdfPage.Height = XUnit.FromPoint(pageHeightPt);
@@ -82,32 +87,34 @@ namespace BookViewer.Services
                         img.Dispose();
                     }
 
-                    // 4. Draw interactive overlays
+                    // Inject link annotations manually — PdfSharpCore's public API doesn't
+                    // expose PdfLinkAnnotation, so we build the /Annots dictionary ourselves.
+                    var annots = new PdfArray(document);
                     foreach (var el in interactiveElements)
                     {
-                        // Convert 1024x1344 pixel space to PDF points
                         double x = el.X * 0.75;
-                        double y = el.Y * 0.75;
+                        double y = pageHeightPt - ((el.Y + el.Height) * 0.75);
                         double w = el.Width * 0.75;
                         double h = el.Height * 0.75;
 
                         if (el.Type == "link" && !string.IsNullOrEmpty(el.Url))
                         {
-                            var linkAnnot = new PdfLinkAnnotation(pdfPage, new PdfRectangle(x, y, x + w, y + h));
-                            var action = new PdfUriAction(el.Url);
-                            linkAnnot.Actions.Add(action);
-                            linkAnnot.Contents = el.Tooltip;
-                            pdfPage.Annotations.Add(linkAnnot);
+                            var annot = BuildLinkAnnot(document, x, y, w, h, el.Url, el.Tooltip);
+                            annots.Elements.Add(annot);
                         }
                         else if (el.Type == "answer")
                         {
-                            // For PDF, toggles aren't natively supported without AcroForms.
-                            // We create a hidden button that highlights the area with a tooltip.
-                            var textAnnot = new PdfTextAnnotation(pdfPage, new PdfRectangle(x, y, x + w, y + h));
-                            textAnnot.Title = "Answer Note";
-                            textAnnot.Contents = el.Tooltip;
-                            pdfPage.Annotations.Add(textAnnot);
+                            var annot = BuildTextAnnot(document, x, y, w, h, el.Tooltip);
+                            annots.Elements.Add(annot);
                         }
+                    }
+
+                    if (annots.Elements.Count > 0)
+                    {
+                        if (pdfPage.Elements.ContainsKey("/Annots"))
+                            pdfPage.Elements["/Annots"] = annots;
+                        else
+                            pdfPage.Elements.Add("/Annots", annots);
                     }
 
                     OnProgress?.Invoke(this, (int)(((i + 1) / (double)totalPages) * 100));
@@ -120,6 +127,47 @@ namespace BookViewer.Services
             {
                 OnError?.Invoke(this, ex.Message);
             }
+        }
+
+        private static PdfDictionary BuildLinkAnnot(PdfDocument doc, double x, double y, double w, double h, string url, string tooltip)
+        {
+            var annot = new PdfDictionary(doc);
+            annot.Elements["/Type"] = new PdfName("/Annot");
+            annot.Elements["/Subtype"] = new PdfName("/Link");
+            annot.Elements["/Rect"] = BuildRect(doc, x, y, x + w, y + h);
+            annot.Elements["/Border"] = new PdfArray(doc, new PdfInteger(0), new PdfInteger(0), new PdfInteger(0));
+
+            var action = new PdfDictionary(doc);
+            action.Elements["/Type"] = new PdfName("/Action");
+            action.Elements["/S"] = new PdfName("/URI");
+            action.Elements["/URI"] = new PdfString(url);
+            annot.Elements["/A"] = action;
+
+            if (!string.IsNullOrEmpty(tooltip))
+                annot.Elements["/Contents"] = new PdfString(tooltip);
+
+            return annot;
+        }
+
+        private static PdfDictionary BuildTextAnnot(PdfDocument doc, double x, double y, double w, double h, string contents)
+        {
+            var annot = new PdfDictionary(doc);
+            annot.Elements["/Type"] = new PdfName("/Annot");
+            annot.Elements["/Subtype"] = new PdfName("/Text");
+            annot.Elements["/Rect"] = BuildRect(doc, x, y, x + w, y + h);
+            annot.Elements["/Name"] = new PdfName("/Note");
+            annot.Elements["/Contents"] = new PdfString(contents ?? "");
+            annot.Elements["/Open"] = new PdfBoolean(false);
+            return annot;
+        }
+
+        private static PdfArray BuildRect(PdfDocument doc, double x1, double y1, double x2, double y2)
+        {
+            return new PdfArray(doc,
+                new PdfReal(x1),
+                new PdfReal(y1),
+                new PdfReal(x2),
+                new PdfReal(y2));
         }
     }
 }
