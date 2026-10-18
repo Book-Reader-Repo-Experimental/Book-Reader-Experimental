@@ -50,10 +50,10 @@ namespace BookViewer.Services
                     string html = await _bookService.BuildPageHtmlForRenderAsync(
                         filePath, includeAnswers, includeTeacherNotes, includeStudentAnswers);
 
-                    // Inject CSS to fix margins, scaling, and force buttons visible
+                    // 1. Inject CSS to flatten the layout and force buttons visible
                     html = InjectPdfCss(html);
 
-                    // Extract base64 images to disk
+                    // 2. Extract base64 images to disk
                     html = await ExtractBase64ImagesAsync(html, tempDir, i);
 
                     var tempPdfPath = Path.Combine(tempDir, $"page_{i}.pdf");
@@ -110,24 +110,40 @@ namespace BookViewer.Services
         padding: 0 !important; 
         width: 768pt !important; 
         height: 1008pt !important; 
-        overflow: hidden !important;
+        overflow: visible !important;
+        background: #fff !important;
     }
-    .page-container { 
-        width: 768pt !important; 
-        height: 1008pt !important; 
-        transform: scale(1) !important; 
-        transform-origin: top left !important;
+    
+    /* Flatten the layout so iText7 doesn't crop or hide things */
+    .page-container, .page-wrapper, pane, pane.base, pane.ori, pane.redAnswer, div, span { 
+        position: relative !important; 
+        display: block !important;
+        width: 100% !important;
+        height: auto !important;
+        transform: none !important;
+        top: auto !important; 
+        left: auto !important; 
         margin: 0 !important;
+        padding: 0 !important;
     }
-    /* Force answer toggle buttons visible */
-    .hideBtn { display: block !important; visibility: visible !important; }
+    
+    /* Make sure images don't overflow */
+    img { 
+        max-width: 100% !important; 
+        height: auto !important; 
+        display: inline-block !important;
+        visibility: visible !important;
+    }
+    
+    /* Force answer buttons visible */
+    .hideBtn { display: inline-block !important; visibility: visible !important; }
     img.redbtn, img.hsgbtn, img.has2btn { 
         display: inline-block !important; 
         visibility: visible !important; 
         opacity: 1 !important;
+        width: 24px !important; 
+        height: 24px !important;
     }
-    /* Force redAnswer overlay visible if includeAnswers is on */
-    pane.redAnswer { display: block !important; }
 </style>
 ";
             if (html.Contains("<head>"))
