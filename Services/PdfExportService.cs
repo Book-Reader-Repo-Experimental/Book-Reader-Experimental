@@ -150,18 +150,6 @@ namespace BookViewer.Services
         {
             try
             {
-                // Register common system fonts 1:1
-#if IOS || MACCATALYST
-                // Ask iOS to extract the actual system fonts
-                RegisterIosFont("Arial", false, false);
-                RegisterIosFont("Arial", true, false);
-                RegisterIosFont("Helvetica", false, false);
-                RegisterIosFont("PingFang SC", false, false);
-                RegisterIosFont("PingFang HK", false, false);
-                RegisterIosFont("PingFang TC", false, false);
-#endif
-                
-                // Register book-embedded fonts
                 var fontDirs = new[] { Path.Combine(bookPath, "FONTS"), Path.Combine(bookPath, "fonts") };
                 foreach (var dir in fontDirs)
                 {
@@ -172,9 +160,18 @@ namespace BookViewer.Services
                         bool isBold = fileName.Contains("bold") || fileName.Contains("bd");
                         bool isItalic = fileName.Contains("italic") || fileName.Contains("it");
                         var familyName = fileName.Replace("-bold", "").Replace("-italic", "").Replace("bold", "").Replace("italic", "").Trim();
+                        
                         _fontResolver.RegisterFont(familyName, isBold, isItalic, file);
                     }
                 }
+
+                // Register 1:1 system fonts for iOS
+#if IOS
+                RegisterIosFont("PingFang HK", false, false);
+                RegisterIosFont("PingFang HK", true, false);
+                RegisterIosFont("PingFang SC", false, false);
+                RegisterIosFont("Helvetica", false, false);
+#endif
             }
             catch (Exception ex)
             {
@@ -187,11 +184,11 @@ namespace BookViewer.Services
 #if IOS
             try
             {
-                var path = BookViewer.Platforms.iOS.IosFontExtractor.GetFontFilePath(familyName, isBold, isItalic);
+                var path = BookViewer.Platforms.iOS.IosFontExtractor.GetExactFontPath(familyName, isBold, isItalic);
                 if (!string.IsNullOrEmpty(path))
                 {
                     _fontResolver.RegisterFont(familyName, isBold, isItalic, path);
-                    System.Diagnostics.Debug.WriteLine($"1:1 Registered iOS Font: {familyName} -> {path}");
+                    System.Diagnostics.Debug.WriteLine($"1:1 Extracted iOS Font: {familyName} -> {path}");
                 }
             }
             catch { }
