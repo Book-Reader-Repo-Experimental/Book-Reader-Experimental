@@ -52,12 +52,18 @@ namespace BookViewer.Services
                     string html = await _bookService.BuildPageHtmlForRenderAsync(
                         filePath, includeAnswers, includeTeacherNotes, includeStudentAnswers);
 
+                    // 1. Preprocess HTML to wrap answers in form field buttons
                     html = InjectAnswerFormFields(html, i);
+
+                    // 2. Inject CSS to force layout and hide button borders
                     html = InjectPdfCss(html);
+
+                    // 3. Extract base64 images to disk
                     html = await ExtractBase64ImagesAsync(html, tempDir, i);
 
                     var tempPdfPath = System.IO.Path.Combine(tempDir, $"page_{i}.pdf");
 
+                    // 4. Convert HTML to PDF
                     using (var writer = new PdfWriter(tempPdfPath))
                     using (var pdf = new PdfDocument(writer))
                     {
@@ -65,12 +71,14 @@ namespace BookViewer.Services
                         HtmlConverter.ConvertToPdf(html, pdf, converterProperties);
                     }
 
+                    // 5. Re-open PDF to inject the interactive toggles
                     using (var reader = new PdfReader(tempPdfPath))
                     using (var pdf = new PdfDocument(reader, new PdfWriter(tempPdfPath + ".tmp")))
                     {
                         InjectToggleActions(pdf, html, i);
                     }
 
+                    // 6. Replace original temp file with the one containing buttons
                     File.Delete(tempPdfPath);
                     File.Move(tempPdfPath + ".tmp", tempPdfPath);
                     tempFiles.Add(tempPdfPath);
@@ -115,6 +123,7 @@ namespace BookViewer.Services
             {
                 var content = m.Groups[1].Value;
                 var fieldId = $"AnswerField_{pageIndex}_{matchCount++}";
+                // We use a text field with a border removed to act as our toggleable area
                 return $"<button id=\"{fieldId}\" class=\"pdf-answer-field\" style=\"display:block; border:none; background:none;\">{content}</button>";
             });
         }
@@ -134,6 +143,7 @@ namespace BookViewer.Services
                 var linkName = buttonMatch.Groups[2].Value;
                 var fieldId = $"AnswerField_{pageIndex}_{linkName}"; 
 
+                // Ensure the target field exists
                 if (form.GetField(fieldId) != null)
                 {
                     var toggleScript = $"var f = this.getField(\"{fieldId}\"); if (f) f.display = (f.display == display.hidden) ? display.visible : display.hidden;";
@@ -142,11 +152,13 @@ namespace BookViewer.Services
                     var styleMatch = Regex.Match(buttonMatch.Value, @"style=""[^""]*left:\s*([\d\.]+)px[^""]*top:\s*([\d\.]+)px");
                     if (styleMatch.Success)
                     {
+                        // Calculate coordinates based on 768x1008 page size
                         float x = float.Parse(styleMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) * 0.75f;
                         float y = 1008 - (float.Parse(styleMatch.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture) * 0.75f) - 24;
 
                         var rect = new Rectangle(x, y, 24, 24);
                         
+                        // Build the invisible pushbutton widget
                         var widgetDict = new PdfDictionary();
                         widgetDict.Put(PdfName.Type, PdfName.Annot);
                         widgetDict.Put(PdfName.Subtype, PdfName.Widget);
@@ -158,8 +170,8 @@ namespace BookViewer.Services
                             new PdfNumber(rect.GetTop())
                         }));
                         widgetDict.Put(PdfName.T, new PdfString($"Toggle_{pageIndex}_{imgId}_{btnCounter++}"));
-                        widgetDict.Put(PdfName.F, new PdfNumber(4));
-                        widgetDict.Put(PdfName.Ff, new PdfNumber(65536));
+                        widgetDict.Put(PdfName.F, new PdfNumber(4)); // Print
+                        widgetDict.Put(PdfName.Ff, new PdfNumber(65536)); // Pushbutton
                         
                         var apDict = new PdfDictionary();
                         apDict.Put(PdfName.N, new PdfDictionary());
@@ -183,7 +195,17 @@ namespace BookViewer.Services
     .hideBtn { display: inline-block !important; visibility: visible !important; }
     img.redbtn, img.hsgbtn, img.has2btn { display: inline-block !important; visibility: visible !important; opacity: 1 !important; }
     img { max-width: 100% !important; height: auto !important; }
-    button.pdf-answer-field { display: block !important; width: 100% !important; border: none !important; background: none !important; color: #000 !important; text-align: left !important; font-family: inherit !important; font-size: inherit !important; }
+    /* Hide the form field border for answer areas */
+    button.pdf-answer-field {
+        display: block !important;
+        width: 100% !important;
+        border: none !important;
+        background: none !important;
+        color: #000 !important;
+        text-align: left !important;
+        font-family: inherit !important;
+        font-size: inherit !important;
+    }
 </style>
 ";
             if (html.Contains("<head>"))
