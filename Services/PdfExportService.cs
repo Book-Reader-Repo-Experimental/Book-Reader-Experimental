@@ -113,23 +113,20 @@ namespace BookViewer.Services
                 }
             }
         }
-
+        
         private string InjectAnswerFormFields(string html, int pageIndex)
         {
-            // Match divs containing answers and capture any linkname or fallback to an index counter
             var regex = new Regex(@"<div\b[^>]*class=""[^""]*\b(?:tbred|tbnote)\b[^""]*""([^>]*)>([\s\S]*?)</div>", RegexOptions.IgnoreCase);
-            var matchCount = 0;
         
             return regex.Replace(html, m =>
             {
                 var attributes = m.Groups[1].Value;
                 var content = m.Groups[2].Value;
         
-                // Extract linkname if it exists in the div, otherwise use sequential index
                 var linkNameMatch = Regex.Match(attributes, @"linkname=""([^""]+)""");
-                var fieldKey = linkNameMatch.Success ? linkNameMatch.Groups[1].Value : matchCount++.ToString();
+                var linkName = linkNameMatch.Success ? linkNameMatch.Groups[1].Value : Guid.NewGuid().ToString("N").Substring(0, 6);
         
-                var fieldId = $"AnswerField_{pageIndex}_{fieldKey}";
+                var fieldId = $"AnswerField_{pageIndex}_{linkName}";
         
                 return $"<input type=\"text\" id=\"{fieldId}\" name=\"{fieldId}\" class=\"pdf-answer-field\" value=\"{content.Replace("\"", "&quot;")}\" readonly=\"readonly\" style=\"display:block; width:100%; border:none; background:none;\" />";
             });
@@ -156,7 +153,6 @@ namespace BookViewer.Services
                 {
                     var actualFieldId = targetField.GetFieldName().ToString();
                     
-                    // JavaScript to toggle field visibility
                     var toggleScript = $"var f = this.getField(\"{actualFieldId}\"); if (f) f.display = (f.display == display.hidden) ? display.visible : display.hidden;";
                     var action = PdfAction.CreateJavaScript(toggleScript);
         
@@ -168,10 +164,9 @@ namespace BookViewer.Services
         
                         var rect = new Rectangle(x, y, 24, 24);
         
-                        // Use iText's high-level push button builder to ensure valid appearance streams and structure
                         var buttonField = PdfButtonFormField.CreatePushButton(pdf, rect, $"Toggle_{pageIndex}_{imgId}_{btnCounter++}", "");
-                        buttonField.SetAdditionalAction(PdfName.U, action); // Mouse-up trigger
-                        buttonField.SetVisibility(PdfFormField.INVISIBLE); // Keep button widget layout functional while letting HTML render the image visually
+                        buttonField.SetAdditionalAction(PdfName.U, action);
+                        buttonField.SetVisibility(PdfFormField.INVISIBLE);
         
                         form.AddField(buttonField, pdfPage);
                     }
