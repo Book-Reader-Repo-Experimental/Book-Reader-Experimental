@@ -57,15 +57,23 @@ namespace BookViewer.Services
                     html = await ExtractBase64ImagesAsync(html, tempDir, i);
 
                     var tempPdfPath = System.IO.Path.Combine(tempDir, $"page_{i}.pdf");
-                    tempFiles.Add(tempPdfPath);
 
                     using (var writer = new PdfWriter(tempPdfPath))
                     using (var pdf = new PdfDocument(writer))
                     {
                         pdf.SetDefaultPageSize(pageSize);
                         HtmlConverter.ConvertToPdf(html, pdf, converterProperties);
+                    }
+
+                    using (var reader = new PdfReader(tempPdfPath))
+                    using (var pdf = new PdfDocument(reader, new PdfWriter(tempPdfPath + ".tmp")))
+                    {
                         InjectToggleActions(pdf, html, i);
                     }
+
+                    File.Delete(tempPdfPath);
+                    File.Move(tempPdfPath + ".tmp", tempPdfPath);
+                    tempFiles.Add(tempPdfPath);
                 }
 
                 OnProgress?.Invoke(this, 100);
@@ -139,7 +147,6 @@ namespace BookViewer.Services
 
                         var rect = new Rectangle(x, y, 24, 24);
                         
-                        // Create a raw dictionary for the button widget
                         var widgetDict = new PdfDictionary();
                         widgetDict.Put(PdfName.Type, PdfName.Annot);
                         widgetDict.Put(PdfName.Subtype, PdfName.Widget);
@@ -151,22 +158,21 @@ namespace BookViewer.Services
                             new PdfNumber(rect.GetTop())
                         }));
                         widgetDict.Put(PdfName.T, new PdfString($"Toggle_{pageIndex}_{imgId}_{btnCounter++}"));
-                        widgetDict.Put(PdfName.F, new PdfNumber(4)); // Print flag
-                        widgetDict.Put(PdfName.Ff, new PdfNumber(65536)); // Pushbutton flag
+                        widgetDict.Put(PdfName.F, new PdfNumber(4));
+                        widgetDict.Put(PdfName.Ff, new PdfNumber(65536));
                         
                         var apDict = new PdfDictionary();
                         apDict.Put(PdfName.N, new PdfDictionary());
                         widgetDict.Put(PdfName.AP, apDict);
-                        
                         widgetDict.Put(PdfName.A, action.GetPdfObject());
 
-                        // Convert to a PdfAnnotation and add it to the page
                         var widgetAnnot = PdfAnnotation.MakeAnnotation(widgetDict);
                         pdfPage.AddAnnotation(widgetAnnot);
                     }
                 }
             }
         }
+
         private string InjectPdfCss(string html)
         {
             var css = @"
