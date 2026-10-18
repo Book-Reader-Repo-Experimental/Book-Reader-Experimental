@@ -6,24 +6,20 @@ namespace BookViewer.Maui
     {
         public static MauiApp CreateMauiApp()
         {
-            // Add this line BEFORE building the app
-            Environment.SetEnvironmentVariable(
-                "ITEXT_BOUNCY_CASTLE_FACTORY_NAME", 
-                "bouncy-castle");
-        
+            // REQUIRED for iText7 to initialize without throwing PdfException
+            Environment.SetEnvironmentVariable("ITEXT_BOUNCY_CASTLE_FACTORY_NAME", "bouncy-castle");
+
             var builder = MauiApp.CreateBuilder();
             builder
                 .UseMauiApp<App>()
                 .ConfigureFonts(fonts =>
                 {
                     fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
-                    fonts.AddFont("OpenSans-Semibold.ttf", "OpenSansSemibold");
                 });
 
 #if DEBUG
             builder.Logging.AddDebug();
 #endif
-
             return builder.Build();
         }
     }
