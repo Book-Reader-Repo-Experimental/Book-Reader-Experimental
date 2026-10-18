@@ -49,10 +49,13 @@ namespace BookViewer.Services
             if (_fontFileMap.ContainsKey(regularKey))
                 return new FontResolverInfo(regularKey);
 
-            return new FontResolverInfo("Arial",
-                isBold && isItalic ? XFontStyle.BoldItalic :
-                isBold ? XFontStyle.Bold :
-                isItalic ? XFontStyle.Italic : XFontStyle.Regular);
+            // Corrected: Use XStyleSimulations instead of XFontStyle
+            var sim = XStyleSimulations.None;
+            if (isBold && isItalic) sim = XStyleSimulations.BoldItalicSimulation;
+            else if (isBold) sim = XStyleSimulations.BoldSimulation;
+            else if (isItalic) sim = XStyleSimulations.ItalicSimulation;
+
+            return new FontResolverInfo("Arial", sim);
         }
     }
 }
