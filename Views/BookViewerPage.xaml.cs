@@ -1,10 +1,6 @@
 using Microsoft.Maui.Controls;
 using Microsoft.Maui.Storage;
-using PdfSharpCore.Pdf;
-using PdfSharpCore.Pdf.IO;
-using Papiro;
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -401,58 +397,35 @@ public partial class BookViewerPage : ContentPage
             ExportPdfButton.IsEnabled = false;
             StatusLabel.Text = "Generating PDF...";
 
-            var pdfService = Handler!.MauiContext!.Services.GetRequiredService<IHtmlToPdfService>();
-            var totalPages = _bookService.PageFiles.Count;
-            var tempFiles = new List<string>();
+            var pdfService = new Services.PdfExportService(_bookService);
 
-            for (int i = 0; i < totalPages; i++)
+            pdfService.RenderPageToImageAsync = async (html) =>
             {
-                StatusLabel.Text = $"Rendering page {i + 1} / {totalPages}...";
-                
-                var filePath = _bookService.PageFiles[i];
-                string html = await _bookService.BuildPageHtmlForRenderAsync(
-                    filePath, includeAnswers, includeTeacherNotes, includeStudentAnswers);
+#if IOS
+                return await BookViewer.Platforms.iOS.WebViewCapture.CaptureHtmlAsync(html, 1024, 1344);
+#elif MACCATALYST
+                return await BookViewer.Platforms.MacCatalyst.WebViewCapture.CaptureHtmlAsync(html, 1024, 1344);
+#elif ANDROID
+                return await BookViewer.Platforms.Android.WebViewCapture.CaptureHtmlAsync(html, 1024, 1344);
+#elif WINDOWS
+                return await BookViewer.Platforms.Windows.WebViewCapture.CaptureHtmlAsync(html, 1024, 1344);
+#else
+                await Task.CompletedTask; return null;
+#endif
+            };
 
-                var tempPath = Path.Combine(exportDir, $"temp_{i}.pdf");
-                
-                // Papiro saves to file natively
-                var result = await pdfService.ConvertAndSaveAsync(html, tempPath);
-                
-                if (result.IsSuccess)
-                {
-                    tempFiles.Add(tempPath);
-                }
-            }
+            var tcs = new TaskCompletionSource<string>();
+            pdfService.OnComplete += (s, path) => tcs.TrySetResult(path);
+            pdfService.OnError += (s, error) => tcs.TrySetException(new Exception(error));
 
-            StatusLabel.Text = "Merging PDF pages...";
-            
-            // Use PdfSharpCore ONLY to merge the files (no text drawing, so no crashes)
-            using (var outputDoc = new PdfDocument())
-            {
-                foreach (var tempFile in tempFiles)
-                {
-                    using (var inputDoc = PdfReader.Open(tempFile, PdfDocumentOpenMode.Import))
-                    {
-                        for (int i = 0; i < inputDoc.PageCount; i++)
-                        {
-                            outputDoc.AddPage(inputDoc.Pages[i]);
-                        }
-                    }
-                }
-                outputDoc.Save(outputPath);
-            }
-
-            // Cleanup temp files
-            foreach (var tempFile in tempFiles)
-            {
-                try { File.Delete(tempFile); } catch { }
-            }
+            await pdfService.ExportBookAsPdfAsync(outputPath, includeAnswers, includeTeacherNotes, includeStudentAnswers);
+            var resultPath = await tcs.Task;
 
             ExportPdfButton.IsEnabled = true;
-            StatusLabel.Text = "PDF Export Complete!";
+            StatusLabel.Text = "PDF export complete!";
 
-            var openNow = await DisplayAlert("Export Complete", $"PDF saved to:\n{outputPath}\n\nOpen it now?", "Open", "Later");
-            if (openNow) await Launcher.Default.OpenAsync(new OpenFileRequest { File = new ReadOnlyFile(outputPath) });
+            var openNow = await DisplayAlert("Export Complete", $"PDF saved to:\n{resultPath}\n\nOpen it now?", "Open", "Later");
+            if (openNow) await Launcher.Default.OpenAsync(new OpenFileRequest { File = new ReadOnlyFile(resultPath) });
         }
         catch (Exception ex)
         {
