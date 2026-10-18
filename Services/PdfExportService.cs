@@ -6,6 +6,8 @@ using iText.Kernel.Geom;
 using iText.Forms;
 using iText.Forms.Fields;
 using iText.Kernel.Pdf.Action;
+using iText.Kernel.Pdf.Annot;
+using iText.Kernel.Pdf.Canvas;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -52,10 +54,10 @@ namespace BookViewer.Services
                     string html = await _bookService.BuildPageHtmlForRenderAsync(
                         filePath, includeAnswers, includeTeacherNotes, includeStudentAnswers);
 
-                    // 1. Preprocess: Convert hidden answers into interactive form fields
-                    html = InjectInteractiveFormFields(html, i);
+                    // 1. Wrap answer/note divs in <button> tags to create PDF form fields
+                    html = InjectAnswerFormFields(html, i);
 
-                    // 2. Inject CSS for layout
+                    // 2. Inject CSS to force layout and hide button borders
                     html = InjectPdfCss(html);
 
                     // 3. Extract base64 images to disk
@@ -69,6 +71,9 @@ namespace BookViewer.Services
                     {
                         pdf.SetDefaultPageSize(pageSize);
                         HtmlConverter.ConvertToPdf(html, pdf, converterProperties);
+
+                        // 4. Inject PDF JavaScript to link buttons to answer fields
+                        InjectToggleActions(pdf, html);
                     }
                 }
 
@@ -102,10 +107,9 @@ namespace BookViewer.Services
             }
         }
 
-        private string InjectInteractiveFormFields(string html, int pageIndex)
+        private string InjectAnswerFormFields(string html, int pageIndex)
         {
-            // Find all hidden answer/note divs
-            // Example: <div class="tbnote">Answer text</div>
+            // Find all hidden answer/note divs and convert them to <button> tags
             var regex = new Regex(@"<div\b[^>]*class=""[^""]*\b(?:tbred|tbnote)\b[^""]*""[^>]*>([\s\S]*?)</div>", RegexOptions.IgnoreCase);
             var matchCount = 0;
 
@@ -113,11 +117,49 @@ namespace BookViewer.Services
             {
                 var content = m.Groups[1].Value;
                 var fieldId = $"AnswerField_{pageIndex}_{matchCount++}";
-                
-                // We wrap the content in a <button> so iText generates a form field
-                // The <button> will have a custom class, which we style to be invisible
                 return $"<button id=""{fieldId}"" class=""pdf-answer-field"" style=""display:block; border:none; background:none;"">{content}</button>";
             });
+        }
+
+        private void InjectToggleActions(PdfDocument pdf, string html)
+        {
+            var form = PdfAcroForm.GetAcroForm(pdf, true);
+
+            // Find all buttons and map them to answer fields
+            // We look for <img class="redbtn"... id="..." ... linkname="...">
+            var buttonRegex = new Regex(@"<img[^>]+class=""[^""]*(?:redbtn|hsgbtn|has2btn)[^""]*""[^>]*id=""([^""]+)""[^>]*linkname=""([^""]+)""", RegexOptions.IgnoreCase);
+            var buttonMatches = buttonRegex.Matches(html);
+
+            foreach (Match buttonMatch in buttonMatches)
+            {
+                var imgId = buttonMatch.Groups[1].Value;
+                var linkName = buttonMatch.Groups[2].Value;
+                
+                // Find the associated answer field (matching linkname to fieldId)
+                var fieldId = $"AnswerField_0_{linkName}"; // Assuming one page for now
+
+                // If the field exists, create a JS action to toggle it
+                if (form.GetField(fieldId) != null)
+                {
+                    var toggleScript = $"var f = this.getField('{fieldId}'); if (f) f.display = (f.display == display.hidden) ? display.visible : display.hidden;";
+                    var action = PdfAction.CreateJavaScript(toggleScript);
+
+                    // Create a transparent checkbox over the image
+                    // NOTE: This uses approximate coordinates from the HTML style
+                    var styleMatch = Regex.Match(buttonMatch.Value, @"style=""[^""]*left:\s*([\d\.]+)px[^""]*top:\s*([\d\.]+)px");
+                    if (styleMatch.Success)
+                    {
+                        float x = float.Parse(styleMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) * 0.75f;
+                        float y = 1008 - (float.Parse(styleMatch.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture) * 0.75f) - 24;
+
+                        var rect = new Rectangle(x, y, 24, 24);
+                        var checkbox = new PdfCheckBoxFormField(pdf.GetDocument(), new PdfString(imgId), pdf.GetDefaultPageSize());
+                        checkbox.SetWidgets(new List<PdfFormAnnotation> { new PdfFormAnnotation(pdf.GetDocument(), rect) });
+                        checkbox.SetAdditionalAction(PdfName.E, action);
+                        form.AddField(checkbox);
+                    }
+                }
+            }
         }
 
         private string InjectPdfCss(string html)
@@ -154,7 +196,7 @@ namespace BookViewer.Services
         max-width: 100% !important; 
         height: auto !important; 
     }
-    /* Hide the text field appearance, we only want the content inside */
+    /* Hide the default button border for our answer fields */
     button.pdf-answer-field {
         display: block !important;
         width: 100% !important;
