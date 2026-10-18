@@ -53,12 +53,18 @@ namespace BookViewer.Services
                     string html = await _bookService.BuildPageHtmlForRenderAsync(
                         filePath, includeAnswers, includeTeacherNotes, includeStudentAnswers);
 
+                    // 1. Preprocess HTML (Convert hidden answers to form fields)
                     html = InjectAnswerFormFields(html, i);
+
+                    // 2. Inject CSS to enforce layout
                     html = InjectPdfCss(html);
+
+                    // 3. Extract base64 images to disk
                     html = await ExtractBase64ImagesAsync(html, tempDir, i);
 
                     var tempPdfPath = System.IO.Path.Combine(tempDir, $"page_{i}.pdf");
 
+                    // 4. Generate the unflattened PDF
                     using (var writer = new PdfWriter(tempPdfPath))
                     using (var pdf = new PdfDocument(writer))
                     {
@@ -66,6 +72,7 @@ namespace BookViewer.Services
                         HtmlConverter.ConvertToPdf(html, pdf, converterProperties);
                     }
 
+                    // 5. Re-open and inject the interactive toggle buttons
                     using (var reader = new PdfReader(tempPdfPath))
                     using (var pdf = new PdfDocument(reader, new PdfWriter(tempPdfPath + ".tmp")))
                     {
@@ -116,7 +123,8 @@ namespace BookViewer.Services
             {
                 var content = m.Groups[1].Value;
                 var fieldId = $"AnswerField_{pageIndex}_{matchCount++}";
-                return $"<button id=\"{fieldId}\" class=\"pdf-answer-field\" style=\"display:block; border:none; background:none;\">{content}</button>";
+                // Use <input> so iText7 generates a real text field
+                return $"<input type=\"text\" id=\"{fieldId}\" class=\"pdf-answer-field\" value=\"{content.Replace("\"", "&quot;")}\" readonly=\"readonly\" style=\"display:block; width:100%; border:none; background:none;\" />";
             });
         }
 
@@ -133,11 +141,31 @@ namespace BookViewer.Services
             {
                 var imgId = buttonMatch.Groups[1].Value;
                 var linkName = buttonMatch.Groups[2].Value;
+                
+                // In our InjectAnswerFormFields, the ID is AnswerField_pageIndex_matchCount
+                // But linkName corresponds to the original HTML's linkname attribute.
+                // iText might have renamed the fields. We find the field by its original name.
                 var fieldId = $"AnswerField_{pageIndex}_{linkName}"; 
-
-                if (form.GetField(fieldId) != null)
+                
+                // If the field doesn't exist directly, try finding it by matching the linkname
+                // against the fields in the form.
+                var targetField = form.GetField(fieldId);
+                if (targetField == null)
                 {
-                    var toggleScript = $"var f = this.getField(\"{fieldId}\"); if (f) f.display = (f.display == display.hidden) ? display.visible : display.hidden;";
+                    foreach (var field in form.GetFormFields().Values)
+                    {
+                        if (field.GetFieldName().ToString().Contains(linkName))
+                        {
+                            targetField = field;
+                            break;
+                        }
+                    }
+                }
+
+                if (targetField != null)
+                {
+                    var actualFieldId = targetField.GetFieldName().ToString();
+                    var toggleScript = $"var f = this.getField(\"{actualFieldId}\"); if (f) f.display = (f.display == display.hidden) ? display.visible : display.hidden;";
                     var action = PdfAction.CreateJavaScript(toggleScript);
 
                     var styleMatch = Regex.Match(buttonMatch.Value, @"style=""[^""]*left:\s*([\d\.]+)px[^""]*top:\s*([\d\.]+)px");
@@ -169,7 +197,6 @@ namespace BookViewer.Services
                         
                         widgetDict.Put(PdfName.A, action.GetPdfObject());
 
-                        // Convert to a PdfAnnotation and add it to the page
                         var widgetAnnot = PdfAnnotation.MakeAnnotation(widgetDict);
                         pdfPage.AddAnnotation(widgetAnnot);
                     }
@@ -187,7 +214,19 @@ namespace BookViewer.Services
     .hideBtn { display: inline-block !important; visibility: visible !important; }
     img.redbtn, img.hsgbtn, img.has2btn { display: inline-block !important; visibility: visible !important; opacity: 1 !important; }
     img { max-width: 100% !important; height: auto !important; }
-    button.pdf-answer-field { display: block !important; width: 100% !important; border: none !important; background: none !important; color: #000 !important; text-align: left !important; font-family: inherit !important; font-size: inherit !important; }
+    
+    /* Style the text field to look like normal text */
+    input.pdf-answer-field {
+        display: block !important;
+        width: 100% !important;
+        border: none !important;
+        background: none !important;
+        color: #000 !important;
+        font-family: inherit !important;
+        font-size: inherit !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
 </style>
 ";
             if (html.Contains("<head>"))
