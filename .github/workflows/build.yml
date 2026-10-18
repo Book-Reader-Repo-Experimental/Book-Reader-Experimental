@@ -39,6 +39,9 @@ jobs:
 
       - name: Build Android APK
         run: |
+          # Force clean the previous build cache
+          rm -rf ./bin ./obj
+          
           dotnet publish ./BookViewer.Maui.csproj \
             -f net9.0-android \
             -p:TargetFrameworks=net9.0-android \
