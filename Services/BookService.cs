@@ -261,6 +261,37 @@ img.resbtn:active { opacity: .6 !important; }
               + '&audio='     + (audio     ? '1' : '0');
           } catch(e) {}
         };
+                
+        // ---- Interactive elements for PDF export ----
+        window.__getInteractiveElements = function() {
+            var elements = [];
+            var pageContainer = document.querySelector('.page-container');
+            if (!pageContainer) return JSON.stringify(elements);
+            
+            var baseRect = pageContainer.getBoundingClientRect();
+            if (baseRect.width === 0 || baseRect.height === 0) return JSON.stringify(elements);
+            
+            var scaleX = 1024 / baseRect.width;
+            var scaleY = 1344 / baseRect.height;
+
+            document.querySelectorAll('img.resbtn').forEach(function(el) {
+                var rect = el.getBoundingClientRect();
+                elements.push({ type: 'link', x: (rect.left - baseRect.left) * scaleX, y: (rect.top - baseRect.top) * scaleY, width: rect.width * scaleX, height: rect.height * scaleY, url: el.getAttribute('data-url') || '', tooltip: el.getAttribute('title') || '' });
+            });
+
+            document.querySelectorAll('img.redbtn, img.hsgbtn, img.has2btn').forEach(function(el) {
+                var rect = el.getBoundingClientRect();
+                elements.push({ type: 'answer', x: (rect.left - baseRect.left) * scaleX, y: (rect.top - baseRect.top) * scaleY, width: rect.width * scaleX, height: rect.height * scaleY, url: el.id || '', tooltip: el.getAttribute('title') || 'Toggle Answer' });
+            });
+
+            document.querySelectorAll('a').forEach(function(el) {
+                var rect = el.getBoundingClientRect();
+                if (rect.width === 0 || rect.height === 0) return;
+                elements.push({ type: 'link', x: (rect.left - baseRect.left) * scaleX, y: (rect.top - baseRect.top) * scaleY, width: rect.width * scaleX, height: rect.height * scaleY, url: el.getAttribute('href') || '', tooltip: el.getAttribute('title') || '' });
+            });
+
+            return JSON.stringify(elements);
+        };
         
         window.getSplitPaneInfo = function(pane){
           if (!pane) return { id:'', bookUID:'', section:'', unit:'', step:'', page:'', split:'50%', tooltip:'' };
