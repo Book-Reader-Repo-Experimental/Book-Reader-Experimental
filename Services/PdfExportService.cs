@@ -147,22 +147,22 @@ namespace BookViewer.Services
                         widgetDict.Put(PdfName.Rect, new PdfArray(pdf, new PdfNumber(rect.GetLeft()), new PdfNumber(rect.GetBottom()), new PdfNumber(rect.GetRight()), new PdfNumber(rect.GetTop())));
                         widgetDict.Put(PdfName.T, new PdfString($"Toggle_{pageIndex}_{imgId}_{btnCounter++}"));
                         widgetDict.Put(PdfName.F, new PdfNumber(4)); // Print flag
+                        widgetDict.Put(PdfName.Ff, new PdfNumber(65536)); // Pushbutton flag
                         
+                        // Required for the widget appearance
                         var apDict = new PdfDictionary(pdf);
                         apDict.Put(PdfName.N, new PdfDictionary(pdf));
                         widgetDict.Put(PdfName.AP, apDict);
                         
                         widgetDict.Put(PdfName.A, action.GetPdfObject());
-                        widgetDict.Put(PdfName.Ff, new PdfNumber(65536)); // Pushbutton flag
 
-                        var widgetAnnot = new PdfWidgetAnnotation(widgetDict);
-                        widgetAnnot.SetPage(pdfPage);
+                        // Convert to a PdfAnnotation and add it to the page
+                        var widgetAnnot = PdfAnnotation.MakeAnnotation(widgetDict);
                         pdfPage.AddAnnotation(widgetAnnot);
                     }
                 }
             }
         }
-
         private string InjectPdfCss(string html)
         {
             var css = @"
