@@ -211,22 +211,29 @@ public partial class BookViewerPage : ContentPage
         _targetStep = step;
     }
 
+    // ============================================================
+    // BRIDGE NAVIGATION
+    // ============================================================
     private async void OnWebViewNavigating(object sender, WebNavigatingEventArgs e)
     {
         var url = e.Url;
         if (string.IsNullOrEmpty(url)) return;
 
-        bool isBridge = url.StartsWith("bookviewer://") || url.Contains("about:blank#");
+        bool isBridge = url.StartsWith("bookviewer://", StringComparison.OrdinalIgnoreCase)
+                     || url.Contains("about:blank#");
         if (!isBridge) return;
 
         e.Cancel = true;
 
+        // ---- Manual parse (never new Uri() on the raw bridge string) ----
         string host, query;
-        if (url.StartsWith("bookviewer://"))
+
+        if (url.StartsWith("bookviewer://", StringComparison.OrdinalIgnoreCase))
         {
-            var uri = new Uri(url);
-            host = uri.Host;
-            query = uri.Query;
+            var rest = url.Substring("bookviewer://".Length);
+            var qIdx = rest.IndexOf('?');
+            if (qIdx >= 0) { host = rest.Substring(0, qIdx); query = rest.Substring(qIdx); }
+            else { host = rest; query = ""; }
         }
         else
         {
@@ -237,11 +244,14 @@ public partial class BookViewerPage : ContentPage
             else { host = rest; query = ""; }
         }
 
+        host = host.Trim().TrimEnd('/');
+        if (string.IsNullOrEmpty(host)) return;
+
         Log($"bridge nav: host='{host}' query='{query}'");
 
         try
         {
-            var q = HttpUtility.ParseQueryString(query);
+            var q = HttpUtility.ParseQueryString(query);   // decodes ONCE
 
             if (host == "splitpane-open")
             {
@@ -302,21 +312,26 @@ public partial class BookViewerPage : ContentPage
             }
             else if (host == "open-resource")
             {
-                var resourceUrl = HttpUtility.UrlDecode(q["url"] ?? "");
-                var resourceDesc = HttpUtility.UrlDecode(q["desc"] ?? "");
-                var openInApp = q["openInApp"] == "1";
-                var audio = q["audio"] == "1";
+                // ParseQueryString already decodes once. Do NOT decode again.
+                var resourceUrl  = q["url"]  ?? "";
+                var resourceDesc = q["desc"] ?? "";
+                var openInApp    = q["openInApp"] == "1";
+                var audio        = q["audio"] == "1";
 
                 Log($"[resource] open url='{resourceUrl}' desc='{resourceDesc}' openInApp={openInApp} audio={audio}");
 
                 if (string.IsNullOrEmpty(resourceUrl)) return;
 
-                // Local file — BookService.DecodeResourceUrl already returned an absolute path
-                // when the file exists on disk.
-                bool isLocal = !resourceUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase) &&
-                               !resourceUrl.StartsWith("data:", StringComparison.OrdinalIgnoreCase) &&
-                               !resourceUrl.StartsWith("//", StringComparison.Ordinal) &&
-                               File.Exists(resourceUrl);
+                // Local file?
+                bool isLocal = false;
+                try
+                {
+                    isLocal = !resourceUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+                           && !resourceUrl.StartsWith("data:", StringComparison.OrdinalIgnoreCase)
+                           && !resourceUrl.StartsWith("//",   StringComparison.Ordinal)
+                           && File.Exists(resourceUrl);
+                }
+                catch { isLocal = false; }
 
                 if (isLocal)
                 {
@@ -324,10 +339,13 @@ public partial class BookViewerPage : ContentPage
                     return;
                 }
 
-                // Remote URL (HTML activity, audio page, external video, etc.)
+                // Remote — guard TryCreate so Launcher doesn't throw "Invalid uri"
                 try
                 {
-                    await Launcher.Default.OpenAsync(resourceUrl);
+                    if (Uri.TryCreate(resourceUrl, UriKind.Absolute, out var remoteUri))
+                        await Launcher.Default.OpenAsync(remoteUri);
+                    else
+                        await DisplayAlert("Cannot open", $"Not a valid URL:\n{resourceUrl}", "OK");
                 }
                 catch (Exception ex)
                 {
@@ -390,10 +408,7 @@ public partial class BookViewerPage : ContentPage
 
     private async void OnContentWebViewNavigated(object sender, WebNavigatedEventArgs e)
     {
-        // Only apply the answer overrides if the rendered page actually defines
-        // window.__setNotes / window.__setRedAnswers. Non-step pages (assessment
-        // pools, raw HTML) don't, and calling into a missing global is a silent
-        // JS error on Android WebView.
+        // Only call the override JS if the page actually defines it.
         if (string.IsNullOrEmpty(_currentContentHtml)) return;
         if (!_currentContentHtml.Contains("__setNotes") &&
             !_currentContentHtml.Contains("__setRedAnswers"))
@@ -634,7 +649,6 @@ public partial class BookViewerPage : ContentPage
             if (newIndex < _bookService.PageFiles.Count) _ = _bookService.LoadPageAsync(newIndex);
             else if (_bookService.CurrentPageIndex < _bookService.PageFiles.Count - 1)
             {
-                // Clamp to the last page that still has a partner, or the final page.
                 int last = _bookService.PageFiles.Count - 1;
                 int target = (last % 2 == 0) ? Math.Max(0, last - 1) : last;
                 _ = _bookService.LoadPageAsync(target);
