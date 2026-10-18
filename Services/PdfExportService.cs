@@ -140,18 +140,22 @@ namespace BookViewer.Services
                         var rect = new Rectangle(x, y, 24, 24);
                         
                         // Create a raw dictionary for the button widget
-                        var widgetDict = new PdfDictionary(pdf);
+                        var widgetDict = new PdfDictionary();
                         widgetDict.Put(PdfName.Type, PdfName.Annot);
                         widgetDict.Put(PdfName.Subtype, PdfName.Widget);
                         widgetDict.Put(PdfName.FT, PdfName.Btn);
-                        widgetDict.Put(PdfName.Rect, new PdfArray(pdf, new PdfNumber(rect.GetLeft()), new PdfNumber(rect.GetBottom()), new PdfNumber(rect.GetRight()), new PdfNumber(rect.GetTop())));
+                        widgetDict.Put(PdfName.Rect, new PdfArray(new PdfObject[] {
+                            new PdfNumber(rect.GetLeft()),
+                            new PdfNumber(rect.GetBottom()),
+                            new PdfNumber(rect.GetRight()),
+                            new PdfNumber(rect.GetTop())
+                        }));
                         widgetDict.Put(PdfName.T, new PdfString($"Toggle_{pageIndex}_{imgId}_{btnCounter++}"));
                         widgetDict.Put(PdfName.F, new PdfNumber(4)); // Print flag
                         widgetDict.Put(PdfName.Ff, new PdfNumber(65536)); // Pushbutton flag
                         
-                        // Required for the widget appearance
-                        var apDict = new PdfDictionary(pdf);
-                        apDict.Put(PdfName.N, new PdfDictionary(pdf));
+                        var apDict = new PdfDictionary();
+                        apDict.Put(PdfName.N, new PdfDictionary());
                         widgetDict.Put(PdfName.AP, apDict);
                         
                         widgetDict.Put(PdfName.A, action.GetPdfObject());
