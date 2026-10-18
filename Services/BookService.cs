@@ -76,7 +76,7 @@ img.resbtn { position: absolute !important; cursor: pointer !important; z-index:
 img.resbtn:active { opacity: .6 !important; }
 ";
 
-        private const string ReaderJsTemplate = @"
+                private const string ReaderJsTemplate = @"
         window.__readerRedAnswersVisible = false;
         window.__readerNotesVisible = false;
         window.__redAnswerOriginalDisplay = new WeakMap();
@@ -102,24 +102,41 @@ img.resbtn:active { opacity: .6 !important; }
         
         window.__toggleByName = function(lid, turnOn){
           if (!lid) return 0;
+
           if (turnOn) {
             var rp = document.querySelector('pane.redAnswer');
             if (rp && rp.style.display === 'none') rp.style.display = '';
           }
-          var hits = document.querySelectorAll('[name=""' + lid + '""], [linkname=""' + lid + '""]');
+
+          var hits = document.querySelectorAll(
+            '[name=""' + lid + '""], [linkname=""' + lid + '""]');
+
           if (hits.length === 0) {
             var byId = document.getElementById(lid);
             if (byId) hits = [byId];
           }
+
           for (var i = 0; i < hits.length; i++) {
             var el = hits[i];
-            var isToggleButton = el.tagName && el.tagName.toLowerCase() === 'img' && (el.classList.contains('redbtn') || el.classList.contains('hsgbtn') || el.classList.contains('has2btn'));
+
+            var isToggleButton = el.tagName &&
+              el.tagName.toLowerCase() === 'img' &&
+              (el.classList.contains('redbtn') ||
+               el.classList.contains('hsgbtn') ||
+               el.classList.contains('has2btn'));
+
             if (isToggleButton) {
               rememberDisplay(el);
-              if (turnOn) { el.classList.remove('hideBtn'); if (el.style.display === 'none') el.style.display = ''; }
-              else { el.classList.add('hideBtn'); el.style.display = 'none'; }
+              if (turnOn) {
+                el.classList.remove('hideBtn');
+                if (el.style.display === 'none') el.style.display = '';
+              } else {
+                el.classList.add('hideBtn');
+                el.style.display = 'none';
+              }
               continue;
             }
+
             var target = null;
             var p = el.parentElement;
             while (p && p !== document.body) {
@@ -140,6 +157,7 @@ img.resbtn:active { opacity: .6 !important; }
         
         window.__setRedAnswers = function(show){
           window.__readerRedAnswersVisible = !!show;
+
           document.querySelectorAll('img.redbtn, img.has2btn, img.hsgbtn').forEach(function(b){
             var t = (b.getAttribute('redanswertype') || b.getAttribute('redAnswerType') || '').toLowerCase();
             if (t === 'teachernotes') return;
@@ -147,12 +165,14 @@ img.resbtn:active { opacity: .6 !important; }
             if (show) { b.classList.remove('hideBtn'); if (b.style.display === 'none') b.style.display = ''; }
             else { b.classList.add('hideBtn'); b.style.display = 'none'; }
           });
+
           var rp = document.querySelector('pane.redAnswer');
           if (rp) {
             rememberDisplay(rp);
             if (show) { if (rp.style.display === 'none') rp.style.display = ''; }
             else rp.style.display = 'none';
           }
+
           if (!show) {
             document.querySelectorAll('svg.tbred, .tbred, has2').forEach(function(el){
               var tn = el.closest ? el.closest('hsg[redanswertype=""teacherNotes""]') : null;
@@ -172,6 +192,7 @@ img.resbtn:active { opacity: .6 !important; }
               h.setAttribute('on', 'false');
             });
           }
+
           if (show) {
             document.querySelectorAll('img.redbtn[linkname], img.hsgbtn[linkname], img.has2btn[linkname]').forEach(function(b){
               var t = (b.getAttribute('redanswertype') || b.getAttribute('redAnswerType') || '').toLowerCase();
@@ -184,10 +205,12 @@ img.resbtn:active { opacity: .6 !important; }
         
         window.__setNotes = function(show){
           window.__readerNotesVisible = !!show;
+
           if (show) {
             var rp = document.querySelector('pane.redAnswer');
             if (rp && rp.style.display === 'none') rp.style.display = '';
           }
+
           document.querySelectorAll('hsg').forEach(function(g){
             var t = (g.getAttribute('redanswertype') || g.getAttribute('redAnswerType') || '').toLowerCase();
             if (t !== 'teachernotes') return;
@@ -198,7 +221,9 @@ img.resbtn:active { opacity: .6 !important; }
               if (lid) window.__toggleByName(lid, turnOn);
             });
           });
-          document.querySelectorAll('img.redbtn[linkname], img.hsgbtn[linkname], img.has2btn[linkname]').forEach(function(b){
+
+          document.querySelectorAll(
+            'img.redbtn[linkname], img.hsgbtn[linkname], img.has2btn[linkname]').forEach(function(b){
             var t = (b.getAttribute('redanswertype') || b.getAttribute('redAnswerType') || '').toLowerCase();
             if (t !== 'teachernotes') return;
             var lid = b.getAttribute('linkname') || b.id;
@@ -247,6 +272,7 @@ img.resbtn:active { opacity: .6 !important; }
           window.__toggleByName(id, turnOn);
         };
         
+        // ---- External resource link (from steps_N_data.xml) ----
         window.__openResource = function(el){
           try {
             var url  = el && el.getAttribute && el.getAttribute('data-url');
@@ -261,69 +287,138 @@ img.resbtn:active { opacity: .6 !important; }
               + '&audio='     + (audio     ? '1' : '0');
           } catch(e) {}
         };
-                
-        // ---- Interactive elements for PDF export ----
-        window.__getInteractiveElements = function() {
-            var elements = [];
+        
+        // ---- 1:1 DOM & Font Extractor for PDF Export ----
+        window.__getPdfDom = function() {
+            var nodes = [];
             var pageContainer = document.querySelector('.page-container');
-            if (!pageContainer) return JSON.stringify(elements);
+            if (!pageContainer) return JSON.stringify(nodes);
             
             var baseRect = pageContainer.getBoundingClientRect();
-            if (baseRect.width === 0 || baseRect.height === 0) return JSON.stringify(elements);
-            
             var scaleX = 1024 / baseRect.width;
             var scaleY = 1344 / baseRect.height;
 
-            document.querySelectorAll('img.resbtn').forEach(function(el) {
-                var rect = el.getBoundingClientRect();
-                elements.push({ type: 'link', x: (rect.left - baseRect.left) * scaleX, y: (rect.top - baseRect.top) * scaleY, width: rect.width * scaleX, height: rect.height * scaleY, url: el.getAttribute('data-url') || '', tooltip: el.getAttribute('title') || '' });
+            var walker = document.createTreeWalker(pageContainer, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
+                acceptNode: function(node) {
+                    if (node.nodeType === Node.TEXT_NODE) {
+                        if (!node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+                        var parent = node.parentElement;
+                        if (!parent) return NodeFilter.FILTER_REJECT;
+                        var tag = parent.tagName.toLowerCase();
+                        if (tag === 'script' || tag === 'style' || tag === 'noscript') return NodeFilter.FILTER_REJECT;
+                        return NodeFilter.FILTER_ACCEPT;
+                    }
+                    if (node.nodeType === Node.ELEMENT_NODE) {
+                        var tag = node.tagName.toLowerCase();
+                        if (tag === 'img') return NodeFilter.FILTER_ACCEPT;
+                        if (tag === 'script' || tag === 'style' || tag === 'noscript') return NodeFilter.FILTER_REJECT;
+                        return NodeFilter.FILTER_SKIP;
+                    }
+                    return NodeFilter.FILTER_SKIP;
+                }
             });
 
-            document.querySelectorAll('img.redbtn, img.hsgbtn, img.has2btn').forEach(function(el) {
-                var rect = el.getBoundingClientRect();
-                elements.push({ type: 'answer', x: (rect.left - baseRect.left) * scaleX, y: (rect.top - baseRect.top) * scaleY, width: rect.width * scaleX, height: rect.height * scaleY, url: el.id || '', tooltip: el.getAttribute('title') || 'Toggle Answer' });
-            });
+            var n;
+            while (n = walker.nextNode()) {
+                if (n.nodeType === Node.TEXT_NODE) {
+                    var range = document.createRange();
+                    range.selectNodeContents(n);
+                    var rects = range.getClientRects();
+                    
+                    for (var i = 0; i < rects.length; i++) {
+                        var r = rects[i];
+                        if (r.width === 0 || r.height === 0) continue;
+                        
+                        var parent = n.parentElement;
+                        var style = window.getComputedStyle(parent);
+                        
+                        // Extract the exact font-family used by the browser
+                        var fontFamily = style.fontFamily.split(',')[0].replace(/['""]/g, '').trim();
 
-            document.querySelectorAll('a').forEach(function(el) {
-                var rect = el.getBoundingClientRect();
-                if (rect.width === 0 || rect.height === 0) return;
-                elements.push({ type: 'link', x: (rect.left - baseRect.left) * scaleX, y: (rect.top - baseRect.top) * scaleY, width: rect.width * scaleX, height: rect.height * scaleY, url: el.getAttribute('href') || '', tooltip: el.getAttribute('title') || '' });
-            });
-
-            return JSON.stringify(elements);
+                        nodes.push({
+                            type: 'text',
+                            text: n.nodeValue,
+                            x: (r.left - baseRect.left) * scaleX,
+                            y: (r.top - baseRect.top) * scaleY,
+                            w: r.width * scaleX,
+                            h: r.height * scaleY,
+                            fontSize: parseFloat(style.fontSize) * scaleX,
+                            color: style.color,
+                            isBold: style.fontWeight === 'bold' || parseInt(style.fontWeight) >= 700,
+                            isItalic: style.fontStyle === 'italic',
+                            fontFamily: fontFamily,
+                            url: parent.closest('a') ? parent.closest('a').href : ''
+                        });
+                    }
+                }
+                else if (n.nodeType === Node.ELEMENT_NODE && n.tagName.toLowerCase() === 'img') {
+                    var r = n.getBoundingClientRect();
+                    if (r.width === 0 || r.height === 0) continue;
+                    
+                    nodes.push({
+                        type: 'image',
+                        src: n.src,
+                        x: (r.left - baseRect.left) * scaleX,
+                        y: (r.top - baseRect.top) * scaleY,
+                        w: r.width * scaleX,
+                        h: r.height * scaleY
+                    });
+                }
+            }
+            
+            return JSON.stringify(nodes);
         };
-        
+
+        // ---- Split-pane controller: move button opens the target book ----
         window.getSplitPaneInfo = function(pane){
           if (!pane) return { id:'', bookUID:'', section:'', unit:'', step:'', page:'', split:'50%', tooltip:'' };
           var id = pane.id || '';
+
           function trim(s){ return (s == null ? '' : ('' + s)).trim(); }
+
           function byId(idList){
             for (var i = 0; i < idList.length; i++) {
               var el = document.getElementById(idList[i]);
-              if (el) { var v = trim(el.innerText || el.textContent); if (v) return v; }
+              if (el) {
+                var v = trim(el.innerText || el.textContent);
+                if (v) return v;
+              }
             }
             return '';
           }
+
           function byAttr(attrs){
-            for (var i = 0; i < attrs.length; i++) { var v = trim(pane.getAttribute(attrs[i])); if (v) return v; }
+            for (var i = 0; i < attrs.length; i++) {
+              var v = trim(pane.getAttribute(attrs[i]));
+              if (v) return v;
+            }
             return '';
           }
+
           function bySuffix(suffixes){
             for (var i = 0; i < suffixes.length; i++) {
               var el = pane.querySelector('[id$=""' + suffixes[i] + '""]');
-              if (el) { var v = trim(el.innerText || el.textContent); if (v) return v; }
+              if (el) {
+                var v = trim(el.innerText || el.textContent);
+                if (v) return v;
+              }
             }
             return '';
           }
+
           function allPaneText(){
             var out = [];
             if (document.createTreeWalker) {
               var walker = document.createTreeWalker(pane, NodeFilter.SHOW_TEXT, null, false);
               var n;
-              while ((n = walker.nextNode())) { var t = trim(n.nodeValue); if (t) out.push(t); }
+              while ((n = walker.nextNode())) {
+                var t = trim(n.nodeValue);
+                if (t) out.push(t);
+              }
             }
             return out;
           }
+
           function extractNumber(haystack, keywords){
             if (!haystack) return '';
             var lower = ('' + haystack).toLowerCase();
@@ -339,25 +434,106 @@ img.resbtn:active { opacity: .6 !important; }
             }
             return '';
           }
-          var bookUID = byId(['BY_SplitPaneBookUID_' + id, 'BY_SplitPaneBookUID']) || byAttr(['data-book-uid','data-bookuid','bookuid','book-uid']) || bySuffix(['BookUID','bookUID','bookuid','book_uid']);
-          var section = byId(['BY_SplitPaneSectionNum_' + id, 'BY_SplitPaneSection_' + id, 'BY_SplitPaneSectionNum']) || byAttr(['data-section','data-section-num','section']) || bySuffix(['SectionNum','Section','section','section_num']);
-          var unit = byId(['BY_SplitPaneUnitNum_' + id, 'BY_SplitPaneUnit_' + id, 'BY_SplitPaneUnitNum']) || byAttr(['data-unit','data-unit-num','unit']) || bySuffix(['UnitNum','Unit','unit','unit_num']);
-          var step = byId(['BY_SplitPaneStepNum_' + id, 'BY_SplitPaneStep_' + id, 'BY_SplitPaneStepNum']) || byAttr(['data-step','data-step-num','step']) || bySuffix(['StepNum','Step','step','step_num']);
-          var page = byId(['BY_SplitPanePageNum_' + id, 'BY_SplitPanePage_' + id, 'BY_SplitPanePageNum']) || byAttr(['data-page','data-page-num','page']) || bySuffix(['PageNum','Page','page','page_num']);
+
+          var bookUID = byId([
+              'BY_SplitPaneBookUID_' + id,
+              'BY_SplitPaneBookUID'
+          ]) || byAttr(['data-book-uid','data-bookuid','bookuid','book-uid'])
+             || bySuffix(['BookUID','bookUID','bookuid','book_uid']);
+
+          var section = byId([
+              'BY_SplitPaneSectionNum_' + id,
+              'BY_SplitPaneSection_' + id,
+              'BY_SplitPaneSectionNum'
+          ]) || byAttr(['data-section','data-section-num','section'])
+             || bySuffix(['SectionNum','Section','section','section_num']);
+
+          var unit = byId([
+              'BY_SplitPaneUnitNum_' + id,
+              'BY_SplitPaneUnit_' + id,
+              'BY_SplitPaneUnitNum'
+          ]) || byAttr(['data-unit','data-unit-num','unit'])
+             || bySuffix(['UnitNum','Unit','unit','unit_num']);
+
+          var step = byId([
+              'BY_SplitPaneStepNum_' + id,
+              'BY_SplitPaneStep_' + id,
+              'BY_SplitPaneStepNum'
+          ]) || byAttr(['data-step','data-step-num','step'])
+             || bySuffix(['StepNum','Step','step','step_num']);
+
+          var page = byId([
+              'BY_SplitPanePageNum_' + id,
+              'BY_SplitPanePage_' + id,
+              'BY_SplitPanePageNum'
+          ]) || byAttr(['data-page','data-page-num','page'])
+             || bySuffix(['PageNum','Page','page','page_num']);
+
           if (!step && page) step = page;
+
           if (!step || !section || !bookUID) {
             var joined = allPaneText().join(' ');
             var outer = trim(pane.outerHTML);
             var blobs = [joined, outer];
-            if (!step) { for (var i = 0; i < blobs.length && !step; i++) step = extractNumber(blobs[i], ['Step #','Step#','Step Number','StepNum','Step','Page #','Page#','Page Number','PageNum','Page','\u6B65\u9AA4','\u9801','\u9875']); }
-            if (!section) { for (var i = 0; i < blobs.length && !section; i++) section = extractNumber(blobs[i], ['Section #','Section#','Section Number','SectionNum','Section']); if (section && !/^s_/i.test(section)) section = 's_' + section; }
-            if (!bookUID) { for (var i = 0; i < blobs.length && !bookUID; i++) bookUID = extractNumber(blobs[i], ['Book UID','BookUID','Book Uid','Book_UID','bookuid']); }
-            if (!unit) { for (var i = 0; i < blobs.length && !unit; i++) unit = extractNumber(blobs[i], ['Unit #','Unit#','Unit Number','UnitNum','Unit']); }
+
+            if (!step) {
+              for (var i = 0; i < blobs.length && !step; i++) {
+                step = extractNumber(blobs[i], [
+                  'Step #','Step#','Step Number','StepNum','Step',
+                  'Page #','Page#','Page Number','PageNum','Page',
+                  '\u6B65\u9AA4','\u9801','\u9875'
+                ]);
+              }
+            }
+            if (!section) {
+              for (var i = 0; i < blobs.length && !section; i++) {
+                section = extractNumber(blobs[i], [
+                  'Section #','Section#','Section Number','SectionNum','Section'
+                ]);
+              }
+              if (section && !/^s_/i.test(section)) section = 's_' + section;
+            }
+            if (!bookUID) {
+              for (var i = 0; i < blobs.length && !bookUID; i++) {
+                bookUID = extractNumber(blobs[i], [
+                  'Book UID','BookUID','Book Uid','Book_UID','bookuid'
+                ]);
+              }
+            }
+            if (!unit) {
+              for (var i = 0; i < blobs.length && !unit; i++) {
+                unit = extractNumber(blobs[i], [
+                  'Unit #','Unit#','Unit Number','UnitNum','Unit'
+                ]);
+              }
+            }
           }
-          var split = byId(['BY_SplitPaneRatio_' + id, 'BY_SplitPaneRatio']) || byAttr(['data-split','data-ratio']) || bySuffix(['Ratio','ratio','Split','split']) || '50%';
-          var tooltip = byId(['BY_SplitPaneTooltips_' + id, 'BY_SplitPaneTooltips']) || byAttr(['data-tooltip','title']) || bySuffix(['Tooltips','Tooltip','tooltip']);
+
+          var split = byId([
+              'BY_SplitPaneRatio_' + id,
+              'BY_SplitPaneRatio'
+          ]) || byAttr(['data-split','data-ratio'])
+             || bySuffix(['Ratio','ratio','Split','split'])
+             || '50%';
+
+          var tooltip = byId([
+              'BY_SplitPaneTooltips_' + id,
+              'BY_SplitPaneTooltips'
+          ]) || byAttr(['data-tooltip','title'])
+             || bySuffix(['Tooltips','Tooltip','tooltip']);
+
           if (!section && unit) section = 's_' + unit;
-          return { id: id, bookUID: bookUID, section: section, unit: unit, step: step, page: page, split: split, tooltip: tooltip };
+
+          return {
+            id: id,
+            bookUID: bookUID,
+            section: section,
+            unit: unit,
+            step: step,
+            page: page,
+            split: split,
+            tooltip: tooltip
+          };
         };
         
         window.BY_SplitPaneATController = {
@@ -390,10 +566,17 @@ img.resbtn:active { opacity: .6 !important; }
         window.BY_SplitPaneController = {
           showSplitPanePage: function(id){
             var sp = document.getElementById(id);
-            if (!sp) { window.__lastSplitPaneLog = 'no element for id=' + id; return; }
+            if (!sp) {
+              window.__lastSplitPaneLog = 'no element for id=' + id;
+              return;
+            }
             var info = window.getSplitPaneInfo(sp);
             window.__lastSplitPaneLog = 'info=' + JSON.stringify(info);
-            var url = 'bookviewer://splitpane-open' + '?bookUID=' + encodeURIComponent(info.bookUID) + '&section=' + encodeURIComponent(info.section) + '&unit=' + encodeURIComponent(info.unit) + '&step=' + encodeURIComponent(info.step);
+            var url = 'bookviewer://splitpane-open'
+                    + '?bookUID=' + encodeURIComponent(info.bookUID)
+                    + '&section=' + encodeURIComponent(info.section)
+                    + '&unit=' + encodeURIComponent(info.unit)
+                    + '&step=' + encodeURIComponent(info.step);
             window.__lastSplitPaneLog += ' url=' + url;
             try { window.location.href = url; } catch(e){ window.__lastSplitPaneLog += ' err=' + e; }
           }
@@ -406,13 +589,19 @@ img.resbtn:active { opacity: .6 !important; }
             var gid = '';
             var a = document.getElementById('BY_assessmentQuestion_' + id);
             if (a) gid = (a.innerText || '').trim();
-            try { window.location.href = 'bookviewer://assessment-open?id=' + encodeURIComponent(id) + '&poolType=' + encodeURIComponent(poolType || '') + '&group=' + encodeURIComponent(gid); } catch(e){}
+            try {
+              window.location.href = 'bookviewer://assessment-open'
+                + '?id=' + encodeURIComponent(id)
+                + '&poolType=' + encodeURIComponent(poolType || '')
+                + '&group=' + encodeURIComponent(gid);
+            } catch(e){}
           },
           closeExerciseView: function(){
             try { window.location.href = 'bookviewer://assessment-close'; } catch(e){}
           }
         };
         
+        // ---- Force every toggle icon visible and clickable ----
         (function(){
           function makeClickable(){
             document.querySelectorAll('img.redbtn, img.has2btn, img.hsgbtn').forEach(function(b){
