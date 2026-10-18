@@ -1,6 +1,5 @@
 using PdfSharpCore.Pdf;
-using PdfSharpCore.Pdf.IO;
-using Papiro;
+using PdfSharpCore.Pdf.Advanced;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -16,7 +15,7 @@ namespace BookViewer.Services
         public event EventHandler<string>? OnComplete;
         public event EventHandler<string>? OnError;
 
-        public Func<string, Task<string?>>? EvaluateJsAsync { get; set; }
+        public Func<string, Task<byte[]?>>? RenderPageToImageAsync { get; set; }
 
         public PdfExportService(BookService bookService)
         {
@@ -29,12 +28,13 @@ namespace BookViewer.Services
             {
                 var totalPages = _bookService.PageFiles.Count;
                 if (totalPages == 0) { OnError?.Invoke(this, "No pages to export"); return; }
+                if (RenderPageToImageAsync == null) { OnError?.Invoke(this, "Render callback not set"); return; }
 
-                var exportDir = Path.GetDirectoryName(outputPath) ?? Path.GetTempPath();
-                var tempFiles = new List<string>();
-                
-                // Get the Papiro service from the DI container
-                var papiro = Handler!.MauiContext!.Services.GetRequiredService<IHtmlToPdfService>();
+                double pageWidthPt = 1024 * 0.75;
+                double pageHeightPt = 1344 * 0.75;
+
+                var document = new PdfDocument();
+                document.Info.Title = _bookService.BookTitle;
 
                 for (int i = 0; i < totalPages; i++)
                 {
@@ -44,39 +44,51 @@ namespace BookViewer.Services
                     string html = await _bookService.BuildPageHtmlForRenderAsync(
                         filePath, includeAnswers, includeTeacherNotes, includeStudentAnswers);
 
-                    var tempPath = Path.Combine(exportDir, $"temp_{i}.pdf");
+                    var imageBytes = await RenderPageToImageAsync(html);
+                    if (imageBytes == null || imageBytes.Length == 0) continue;
 
-                    // Use Papiro for native, 1:1 rendering
-                    var result = await papiro.ConvertAndSaveAsync(html, tempPath);
+                    var pdfPage = document.AddPage();
+                    pdfPage.Width = XUnit.FromPoint(pageWidthPt);
+                    pdfPage.Height = XUnit.FromPoint(pageHeightPt);
+
+                    // MANUAL IMAGE EMBEDDING
+                    var image = new PdfImage(document);
+                    image.Stream.Value = imageBytes;
+                    image.Width = (int)pageWidthPt;
+                    image.Height = (int)pageHeightPt;
                     
-                    if (result.IsSuccess)
-                    {
-                        tempFiles.Add(tempPath);
-                    }
+                    // Create the XObject
+                    var xObject = document.Internals.AddObject(image);
+                    
+                    // Build the content stream manually
+                    var content = new PdfSharpCore.Pdf.Content.Objects.CSequence();
+                    content.Add(new PdfSharpCore.Pdf.Content.Objects.CComment("Page content"));
+                    
+                    // Save graphics state, apply transform, draw image, restore state
+                    var ops = new PdfSharpCore.Pdf.Content.Objects.CArray();
+                    ops.Add(new PdfSharpCore.Pdf.Content.Objects.CInteger(1));
+                    ops.Add(new PdfSharpCore.Pdf.Content.Objects.CInteger(0));
+                    ops.Add(new PdfSharpCore.Pdf.Content.Objects.CInteger(0));
+                    ops.Add(new PdfSharpCore.Pdf.Content.Objects.CInteger(1));
+                    ops.Add(new PdfSharpCore.Pdf.Content.Objects.CInteger(0));
+                    ops.Add(new PdfSharpCore.Pdf.Content.Objects.CInteger(0));
+                    
+                    // cm operator (concatenate matrix)
+                    content.Add(new PdfSharpCore.Pdf.Content.Objects.COperator("cm", ops));
+                    
+                    // Do operator (draw XObject)
+                    content.Add(new PdfSharpCore.Pdf.Content.Objects.COperator("Do", new PdfSharpCore.Pdf.Content.Objects.CName(xObject.Reference)));
+                    
+                    // Q operator (restore state)
+                    content.Add(new PdfSharpCore.Pdf.Content.Objects.COperator("Q"));
+                    
+                    // Write the content
+                    var contentStream = new PdfSharpCore.Pdf.PdfContent(document);
+                    contentStream.CreateStream(content);
+                    pdfPage.Contents.Add(contentStream);
                 }
 
-                // Use PdfSharpCore strictly to merge the PDFs
-                using (var outputDoc = new PdfDocument())
-                {
-                    foreach (var tempFile in tempFiles)
-                    {
-                        using (var inputDoc = PdfReader.Open(tempFile, PdfDocumentOpenMode.Import))
-                        {
-                            for (int i = 0; i < inputDoc.PageCount; i++)
-                            {
-                                outputDoc.AddPage(inputDoc.Pages[i]);
-                            }
-                        }
-                    }
-                    outputDoc.Save(outputPath);
-                }
-
-                // Cleanup
-                foreach (var tempFile in tempFiles)
-                {
-                    try { File.Delete(tempFile); } catch { }
-                }
-
+                document.Save(outputPath);
                 OnComplete?.Invoke(this, outputPath);
             }
             catch (Exception ex)
