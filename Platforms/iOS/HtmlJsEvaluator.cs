@@ -35,6 +35,9 @@ namespace BookViewer.Platforms.iOS
             webView.NavigationDelegate = navDelegate;
             webView.LoadHtmlString(html, new NSUrl("file:///"));
 
+            var timeout = Task.Delay(15000);
+            var completed = await Task.WhenAny(tcs.Task, timeout);
+            if (completed == timeout) return "[]";
             return await tcs.Task;
         }
 
@@ -43,7 +46,7 @@ namespace BookViewer.Platforms.iOS
             private readonly Func<Task> _onFinished;
             private bool _hasRun;
             public JsEvalNavigationDelegate(Func<Task> onFinished) { _onFinished = onFinished; }
-            public override async void DidFinishNavigation(WKWebView webView, WKNavigation navigation)
+            public override async void DidFinishNavigation(WKWebView webView, WKNavigation? navigation)
             {
                 if (_hasRun) return;
                 _hasRun = true;
