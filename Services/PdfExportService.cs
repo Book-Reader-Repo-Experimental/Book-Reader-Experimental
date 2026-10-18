@@ -116,89 +116,64 @@ namespace BookViewer.Services
 
         private string InjectAnswerFormFields(string html, int pageIndex)
         {
-            var regex = new Regex(@"<div\b[^>]*class=""[^""]*\b(?:tbred|tbnote)\b[^""]*""[^>]*>([\s\S]*?)</div>", RegexOptions.IgnoreCase);
+            // Match divs containing answers and capture any linkname or fallback to an index counter
+            var regex = new Regex(@"<div\b[^>]*class=""[^""]*\b(?:tbred|tbnote)\b[^""]*""([^>]*)>([\s\S]*?)</div>", RegexOptions.IgnoreCase);
             var matchCount = 0;
-
+        
             return regex.Replace(html, m =>
             {
-                var content = m.Groups[1].Value;
-                var fieldId = $"AnswerField_{pageIndex}_{matchCount++}";
-                // Use <input> so iText7 generates a real text field
-                return $"<input type=\"text\" id=\"{fieldId}\" class=\"pdf-answer-field\" value=\"{content.Replace("\"", "&quot;")}\" readonly=\"readonly\" style=\"display:block; width:100%; border:none; background:none;\" />";
+                var attributes = m.Groups[1].Value;
+                var content = m.Groups[2].Value;
+        
+                // Extract linkname if it exists in the div, otherwise use sequential index
+                var linkNameMatch = Regex.Match(attributes, @"linkname=""([^""]+)""");
+                var fieldKey = linkNameMatch.Success ? linkNameMatch.Groups[1].Value : matchCount++.ToString();
+        
+                var fieldId = $"AnswerField_{pageIndex}_{fieldKey}";
+        
+                return $"<input type=\"text\" id=\"{fieldId}\" name=\"{fieldId}\" class=\"pdf-answer-field\" value=\"{content.Replace("\"", "&quot;")}\" readonly=\"readonly\" style=\"display:block; width:100%; border:none; background:none;\" />";
             });
         }
-
+        
         private void InjectToggleActions(PdfDocument pdf, string html, int pageIndex)
         {
             var form = PdfAcroForm.GetAcroForm(pdf, true);
             var buttonRegex = new Regex(@"<img[^>]+class=""[^""]*(?:redbtn|hsgbtn|has2btn)[^""]*""[^>]*id=""([^""]+)""[^>]*linkname=""([^""]+)""", RegexOptions.IgnoreCase);
             var buttonMatches = buttonRegex.Matches(html);
-
+        
             int btnCounter = 0;
             var pdfPage = pdf.GetPage(1);
-
+        
             foreach (Match buttonMatch in buttonMatches)
             {
                 var imgId = buttonMatch.Groups[1].Value;
                 var linkName = buttonMatch.Groups[2].Value;
                 
-                // In our InjectAnswerFormFields, the ID is AnswerField_pageIndex_matchCount
-                // But linkName corresponds to the original HTML's linkname attribute.
-                // iText might have renamed the fields. We find the field by its original name.
-                var fieldId = $"AnswerField_{pageIndex}_{linkName}"; 
-                
-                // If the field doesn't exist directly, try finding it by matching the linkname
-                // against the fields in the form.
+                var fieldId = $"AnswerField_{pageIndex}_{linkName}";
                 var targetField = form.GetField(fieldId);
-                if (targetField == null)
-                {
-                    foreach (var field in form.GetFormFields().Values)
-                    {
-                        if (field.GetFieldName().ToString().Contains(linkName))
-                        {
-                            targetField = field;
-                            break;
-                        }
-                    }
-                }
-
+        
                 if (targetField != null)
                 {
                     var actualFieldId = targetField.GetFieldName().ToString();
+                    
+                    // JavaScript to toggle field visibility
                     var toggleScript = $"var f = this.getField(\"{actualFieldId}\"); if (f) f.display = (f.display == display.hidden) ? display.visible : display.hidden;";
                     var action = PdfAction.CreateJavaScript(toggleScript);
-
+        
                     var styleMatch = Regex.Match(buttonMatch.Value, @"style=""[^""]*left:\s*([\d\.]+)px[^""]*top:\s*([\d\.]+)px");
                     if (styleMatch.Success)
                     {
                         float x = float.Parse(styleMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) * 0.75f;
                         float y = 1008 - (float.Parse(styleMatch.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture) * 0.75f) - 24;
-
+        
                         var rect = new Rectangle(x, y, 24, 24);
-                        
-                        // Create a raw dictionary for the button widget
-                        var widgetDict = new PdfDictionary();
-                        widgetDict.Put(PdfName.Type, PdfName.Annot);
-                        widgetDict.Put(PdfName.Subtype, PdfName.Widget);
-                        widgetDict.Put(PdfName.FT, PdfName.Btn);
-                        widgetDict.Put(PdfName.Rect, new PdfArray(new PdfObject[] {
-                            new PdfNumber(rect.GetLeft()),
-                            new PdfNumber(rect.GetBottom()),
-                            new PdfNumber(rect.GetRight()),
-                            new PdfNumber(rect.GetTop())
-                        }));
-                        widgetDict.Put(PdfName.T, new PdfString($"Toggle_{pageIndex}_{imgId}_{btnCounter++}"));
-                        widgetDict.Put(PdfName.F, new PdfNumber(4)); // Print flag
-                        widgetDict.Put(PdfName.Ff, new PdfNumber(65536)); // Pushbutton flag
-                        
-                        var apDict = new PdfDictionary();
-                        apDict.Put(PdfName.N, new PdfDictionary());
-                        widgetDict.Put(PdfName.AP, apDict);
-                        
-                        widgetDict.Put(PdfName.A, action.GetPdfObject());
-
-                        var widgetAnnot = PdfAnnotation.MakeAnnotation(widgetDict);
-                        pdfPage.AddAnnotation(widgetAnnot);
+        
+                        // Use iText's high-level push button builder to ensure valid appearance streams and structure
+                        var buttonField = PdfButtonFormField.CreatePushButton(pdf, rect, $"Toggle_{pageIndex}_{imgId}_{btnCounter++}", "");
+                        buttonField.SetAdditionalAction(PdfName.U, action); // Mouse-up trigger
+                        buttonField.SetVisibility(PdfFormField.INVISIBLE); // Keep button widget layout functional while letting HTML render the image visually
+        
+                        form.AddField(buttonField, pdfPage);
                     }
                 }
             }
