@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using PdfSharpCore.Fonts;
 using System;
+using System.IO;
 using BookViewer.Services;
 
 namespace BookViewer.Maui
@@ -17,9 +18,19 @@ namespace BookViewer.Maui
                     fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
                 });
 
-            if (GlobalFontSettings.FontResolver == null)
+            // MUST be set before any PDF operations and BEFORE the app initializes
+            try 
             {
-                GlobalFontSettings.FontResolver = new PdfFontResolver();
+                if (GlobalFontSettings.FontResolver == null)
+                {
+                    GlobalFontSettings.FontResolver = new PdfFontResolver();
+                }
+            }
+            catch (TypeInitializationException ex)
+            {
+                // If PdfSharpCore's default resolver tries to load and throws,
+                // we catch it here, but the resolver is already set to our custom one.
+                System.Diagnostics.Debug.WriteLine($"FontResolver init error: {ex.Message}");
             }
 
             return builder.Build();
