@@ -4,7 +4,6 @@ using iText.Kernel.Pdf;
 using iText.Kernel.Utils;
 using iText.Kernel.Geom;
 using iText.Forms;
-using iText.Forms.Fields;
 using iText.Kernel.Pdf.Action;
 using iText.Kernel.Pdf.Annot;
 using System;
@@ -53,13 +52,8 @@ namespace BookViewer.Services
                     string html = await _bookService.BuildPageHtmlForRenderAsync(
                         filePath, includeAnswers, includeTeacherNotes, includeStudentAnswers);
 
-                    // 1. Wrap answer/note divs in <button> tags to create PDF form fields
                     html = InjectAnswerFormFields(html, i);
-
-                    // 2. Inject CSS to force layout and hide button borders
                     html = InjectPdfCss(html);
-
-                    // 3. Extract base64 images to disk
                     html = await ExtractBase64ImagesAsync(html, tempDir, i);
 
                     var tempPdfPath = System.IO.Path.Combine(tempDir, $"page_{i}.pdf");
@@ -70,8 +64,6 @@ namespace BookViewer.Services
                     {
                         pdf.SetDefaultPageSize(pageSize);
                         HtmlConverter.ConvertToPdf(html, pdf, converterProperties);
-
-                        // 4. Inject PDF JavaScript to link buttons to answer fields
                         InjectToggleActions(pdf, html, i);
                     }
                 }
@@ -108,7 +100,6 @@ namespace BookViewer.Services
 
         private string InjectAnswerFormFields(string html, int pageIndex)
         {
-            // Find all hidden answer/note divs and convert them to <button> tags
             var regex = new Regex(@"<div\b[^>]*class=""[^""]*\b(?:tbred|tbnote)\b[^""]*""[^>]*>([\s\S]*?)</div>", RegexOptions.IgnoreCase);
             var matchCount = 0;
 
@@ -123,7 +114,6 @@ namespace BookViewer.Services
         private void InjectToggleActions(PdfDocument pdf, string html, int pageIndex)
         {
             var form = PdfAcroForm.GetAcroForm(pdf, true);
-
             var buttonRegex = new Regex(@"<img[^>]+class=""[^""]*(?:redbtn|hsgbtn|has2btn)[^""]*""[^>]*id=""([^""]+)""[^>]*linkname=""([^""]+)""", RegexOptions.IgnoreCase);
             var buttonMatches = buttonRegex.Matches(html);
 
@@ -134,7 +124,6 @@ namespace BookViewer.Services
             {
                 var imgId = buttonMatch.Groups[1].Value;
                 var linkName = buttonMatch.Groups[2].Value;
-                
                 var fieldId = $"AnswerField_{pageIndex}_{linkName}"; 
 
                 if (form.GetField(fieldId) != null)
@@ -150,19 +139,25 @@ namespace BookViewer.Services
 
                         var rect = new Rectangle(x, y, 24, 24);
                         
-                        var field = new PdfTextFormField(pdf, new PdfString($"Toggle_{pageIndex}_{imgId}_{btnCounter++}"));
-                        field.SetAdditionalAction(PdfName.E, action);
+                        // Create a raw dictionary for the button widget
+                        var widgetDict = new PdfDictionary(pdf);
+                        widgetDict.Put(PdfName.Type, PdfName.Annot);
+                        widgetDict.Put(PdfName.Subtype, PdfName.Widget);
+                        widgetDict.Put(PdfName.FT, PdfName.Btn);
+                        widgetDict.Put(PdfName.Rect, new PdfArray(pdf, new PdfNumber(rect.GetLeft()), new PdfNumber(rect.GetBottom()), new PdfNumber(rect.GetRight()), new PdfNumber(rect.GetTop())));
+                        widgetDict.Put(PdfName.T, new PdfString($"Toggle_{pageIndex}_{imgId}_{btnCounter++}"));
+                        widgetDict.Put(PdfName.F, new PdfNumber(4)); // Print flag
                         
-                        var widget = new PdfWidgetAnnotation(rect);
-                        widget.SetPage(pdfPage);
-                        widget.SetParent(field.GetPdfObject());
+                        var apDict = new PdfDictionary(pdf);
+                        apDict.Put(PdfName.N, new PdfDictionary(pdf));
+                        widgetDict.Put(PdfName.AP, apDict);
                         
-                        widget.SetBorder(new PdfArray(pdf, new PdfNumber(0), new PdfNumber(0), new PdfNumber(0)));
-                        widget.SetBackgroundColor(new iText.Kernel.Colors.DeviceRgb(1f, 1f, 1f));
+                        widgetDict.Put(PdfName.A, action.GetPdfObject());
+                        widgetDict.Put(PdfName.Ff, new PdfNumber(65536)); // Pushbutton flag
 
-                        pdfPage.AddAnnotation(widget);
-                        
-                        form.AddField(field);
+                        var widgetAnnot = new PdfWidgetAnnotation(widgetDict);
+                        widgetAnnot.SetPage(pdfPage);
+                        pdfPage.AddAnnotation(widgetAnnot);
                     }
                 }
             }
@@ -172,47 +167,13 @@ namespace BookViewer.Services
         {
             var css = @"
 <style>
-    @page { 
-        size: 768pt 1008pt; 
-        margin: 0 !important; 
-    }
-    html, body { 
-        margin: 0 !important; 
-        padding: 0 !important; 
-        width: 768pt !important; 
-        height: 1008pt !important; 
-        overflow: visible !important;
-        background: #fff !important;
-    }
-    .page-container { 
-        position: relative !important;
-        width: 768pt !important; 
-        height: 1008pt !important; 
-        transform: scale(1) !important; 
-        transform-origin: top left !important;
-        margin: 0 !important;
-    }
+    @page { size: 768pt 1008pt; margin: 0 !important; }
+    html, body { margin: 0 !important; padding: 0 !important; width: 768pt !important; height: 1008pt !important; overflow: visible !important; background: #fff !important; }
+    .page-container { position: relative !important; width: 768pt !important; height: 1008pt !important; transform: scale(1) !important; transform-origin: top left !important; margin: 0 !important; }
     .hideBtn { display: inline-block !important; visibility: visible !important; }
-    img.redbtn, img.hsgbtn, img.has2btn { 
-        display: inline-block !important; 
-        visibility: visible !important; 
-        opacity: 1 !important;
-    }
-    img { 
-        max-width: 100% !important; 
-        height: auto !important; 
-    }
-    /* Hide the default button border for our answer fields */
-    button.pdf-answer-field {
-        display: block !important;
-        width: 100% !important;
-        border: none !important;
-        background: none !important;
-        color: #000 !important;
-        text-align: left !important;
-        font-family: inherit !important;
-        font-size: inherit !important;
-    }
+    img.redbtn, img.hsgbtn, img.has2btn { display: inline-block !important; visibility: visible !important; opacity: 1 !important; }
+    img { max-width: 100% !important; height: auto !important; }
+    button.pdf-answer-field { display: block !important; width: 100% !important; border: none !important; background: none !important; color: #000 !important; text-align: left !important; font-family: inherit !important; font-size: inherit !important; }
 </style>
 ";
             if (html.Contains("<head>"))
