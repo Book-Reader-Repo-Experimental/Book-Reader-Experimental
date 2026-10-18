@@ -1,5 +1,5 @@
+using PdfSharpCore.Drawing;
 using PdfSharpCore.Pdf;
-using PdfSharpCore.Pdf.Advanced;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -44,7 +44,6 @@ namespace BookViewer.Services
                     string html = await _bookService.BuildPageHtmlForRenderAsync(
                         filePath, includeAnswers, includeTeacherNotes, includeStudentAnswers);
 
-                    // 1. Capture the WebView as an image (PNG)
                     byte[]? imageBytes = null;
                     try
                     {
@@ -55,58 +54,19 @@ namespace BookViewer.Services
                         System.Diagnostics.Debug.WriteLine($"Capture error page {i + 1}: {ex.Message}");
                     }
 
-                    if (imageBytes == null || imageBytes.Length == 0)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"Skipping page {i + 1} (no image)");
-                        continue;
-                    }
+                    if (imageBytes == null || imageBytes.Length == 0) continue;
 
-                    // 2. Add Page
                     var pdfPage = document.AddPage();
                     pdfPage.Width = XUnit.FromPoint(pageWidthPt);
                     pdfPage.Height = XUnit.FromPoint(pageHeightPt);
 
-                    // 3. Manually embed the image as a PDF XObject
-                    var pdfImage = new PdfImage(document);
-                    pdfImage.Stream.Value = imageBytes;
-                    
-                    // Register the image in the document
-                    var xObject = document.Internals.AddObject(pdfImage);
-                    pdfImage.Reference = xObject.Reference;
-
-                    // 4. Create the drawing instructions manually
-                    // We use a graphics transformation matrix to scale the image to fit the page.
-                    // PDF coordinate system starts at bottom-left, so we translate to (0, 0) and scale.
-                    var content = new PdfSharpCore.Pdf.PdfContent(document);
-                    
-                    // Save state
-                    content.Append("q\n");
-                    
-                    // Matrix: [width 0 0 height 0 0] cm (maps image to page size)
-                    // We format using InvariantCulture to avoid decimal comma issues in some locales.
-                    string cmCommand = string.Format(System.Globalization.CultureInfo.InvariantCulture, 
-                        "{0} 0 0 {1} 0 0 cm\n", 
-                        pageWidthPt, pageHeightPt);
-                    content.Append(cmCommand);
-                    
-                    // Draw the image ( /Im0 Do )
-                    content.Append("/Im0 Do\n");
-                    
-                    // Restore state
-                    content.Append("Q\n");
-
-                    // Create the stream for the page content
-                    var pageContent = new PdfSharpCore.Pdf.PdfContent(document);
-                    pageContent.CreateStream(content.ToString());
-                    
-                    // Add the content stream to the page
-                    pdfPage.Contents.Add(pageContent);
-
-                    // 5. Register the image in the page's Resources dictionary
-                    var resources = new PdfResources();
-                    resources.Elements["/XObject"] = new PdfDictionary(document);
-                    ((PdfDictionary)resources.Elements["/XObject"]).Elements["/Im0"] = xObject.Reference;
-                    pdfPage.Elements["/Resources"] = resources;
+                    using (var gfx = XGraphics.FromPdfPage(pdfPage))
+                    using (var ms = new MemoryStream(imageBytes))
+                    {
+                        var img = XImage.FromStream(() => ms);
+                        gfx.DrawImage(img, 0, 0, pageWidthPt, pageHeightPt);
+                        img.Dispose();
+                    }
                 }
 
                 document.Save(outputPath);
