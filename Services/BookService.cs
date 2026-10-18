@@ -70,26 +70,9 @@ pane.redAnswer .tbred { pointer-events: none; }
 hsg { pointer-events: auto; }
 img.hsgbtn[redanswertype='teacherNotes'], img.redbtn[redanswertype='teacherNotes'], img.has2btn[redanswertype='teacherNotes'] { pointer-events: auto !important; cursor: pointer !important; }
 .copyright { display: none !important; }
-
-/* Hide the grey author-tool panel next to the move button */
-tohide, tohide *, splitpane tohide, splitpane tohide * {
-    display: none !important;
-    visibility: hidden !important;
-}
+tohide, tohide *, splitpane tohide, splitpane tohide * { display: none !important; visibility: hidden !important; }
 .btn_h, .btn_h_m { display: none !important; }
-
-/* External resource button injected from steps_N_data.xml */
-img.resbtn {
-    position: absolute !important;
-    cursor: pointer !important;
-    z-index: 9999 !important;
-    width: 32px !important;
-    height: 32px !important;
-    display: block !important;
-    visibility: visible !important;
-    pointer-events: auto !important;
-    opacity: 1 !important;
-}
+img.resbtn { position: absolute !important; cursor: pointer !important; z-index: 9999 !important; width: 32px !important; height: 32px !important; display: block !important; visibility: visible !important; pointer-events: auto !important; opacity: 1 !important; }
 img.resbtn:active { opacity: .6 !important; }
 ";
 
@@ -119,41 +102,24 @@ img.resbtn:active { opacity: .6 !important; }
         
         window.__toggleByName = function(lid, turnOn){
           if (!lid) return 0;
-
           if (turnOn) {
             var rp = document.querySelector('pane.redAnswer');
             if (rp && rp.style.display === 'none') rp.style.display = '';
           }
-
-          var hits = document.querySelectorAll(
-            '[name=""' + lid + '""], [linkname=""' + lid + '""]');
-
+          var hits = document.querySelectorAll('[name=""' + lid + '""], [linkname=""' + lid + '""]');
           if (hits.length === 0) {
             var byId = document.getElementById(lid);
             if (byId) hits = [byId];
           }
-
           for (var i = 0; i < hits.length; i++) {
             var el = hits[i];
-
-            var isToggleButton = el.tagName &&
-              el.tagName.toLowerCase() === 'img' &&
-              (el.classList.contains('redbtn') ||
-               el.classList.contains('hsgbtn') ||
-               el.classList.contains('has2btn'));
-
+            var isToggleButton = el.tagName && el.tagName.toLowerCase() === 'img' && (el.classList.contains('redbtn') || el.classList.contains('hsgbtn') || el.classList.contains('has2btn'));
             if (isToggleButton) {
               rememberDisplay(el);
-              if (turnOn) {
-                el.classList.remove('hideBtn');
-                if (el.style.display === 'none') el.style.display = '';
-              } else {
-                el.classList.add('hideBtn');
-                el.style.display = 'none';
-              }
+              if (turnOn) { el.classList.remove('hideBtn'); if (el.style.display === 'none') el.style.display = ''; }
+              else { el.classList.add('hideBtn'); el.style.display = 'none'; }
               continue;
             }
-
             var target = null;
             var p = el.parentElement;
             while (p && p !== document.body) {
@@ -174,7 +140,6 @@ img.resbtn:active { opacity: .6 !important; }
         
         window.__setRedAnswers = function(show){
           window.__readerRedAnswersVisible = !!show;
-
           document.querySelectorAll('img.redbtn, img.has2btn, img.hsgbtn').forEach(function(b){
             var t = (b.getAttribute('redanswertype') || b.getAttribute('redAnswerType') || '').toLowerCase();
             if (t === 'teachernotes') return;
@@ -182,14 +147,12 @@ img.resbtn:active { opacity: .6 !important; }
             if (show) { b.classList.remove('hideBtn'); if (b.style.display === 'none') b.style.display = ''; }
             else { b.classList.add('hideBtn'); b.style.display = 'none'; }
           });
-
           var rp = document.querySelector('pane.redAnswer');
           if (rp) {
             rememberDisplay(rp);
             if (show) { if (rp.style.display === 'none') rp.style.display = ''; }
             else rp.style.display = 'none';
           }
-
           if (!show) {
             document.querySelectorAll('svg.tbred, .tbred, has2').forEach(function(el){
               var tn = el.closest ? el.closest('hsg[redanswertype=""teacherNotes""]') : null;
@@ -209,7 +172,6 @@ img.resbtn:active { opacity: .6 !important; }
               h.setAttribute('on', 'false');
             });
           }
-
           if (show) {
             document.querySelectorAll('img.redbtn[linkname], img.hsgbtn[linkname], img.has2btn[linkname]').forEach(function(b){
               var t = (b.getAttribute('redanswertype') || b.getAttribute('redAnswerType') || '').toLowerCase();
@@ -222,12 +184,10 @@ img.resbtn:active { opacity: .6 !important; }
         
         window.__setNotes = function(show){
           window.__readerNotesVisible = !!show;
-
           if (show) {
             var rp = document.querySelector('pane.redAnswer');
             if (rp && rp.style.display === 'none') rp.style.display = '';
           }
-
           document.querySelectorAll('hsg').forEach(function(g){
             var t = (g.getAttribute('redanswertype') || g.getAttribute('redAnswerType') || '').toLowerCase();
             if (t !== 'teachernotes') return;
@@ -238,9 +198,7 @@ img.resbtn:active { opacity: .6 !important; }
               if (lid) window.__toggleByName(lid, turnOn);
             });
           });
-
-          document.querySelectorAll(
-            'img.redbtn[linkname], img.hsgbtn[linkname], img.has2btn[linkname]').forEach(function(b){
+          document.querySelectorAll('img.redbtn[linkname], img.hsgbtn[linkname], img.has2btn[linkname]').forEach(function(b){
             var t = (b.getAttribute('redanswertype') || b.getAttribute('redAnswerType') || '').toLowerCase();
             if (t !== 'teachernotes') return;
             var lid = b.getAttribute('linkname') || b.id;
@@ -289,7 +247,6 @@ img.resbtn:active { opacity: .6 !important; }
           window.__toggleByName(id, turnOn);
         };
         
-        // ---- External resource link (from steps_N_data.xml) ----
         window.__openResource = function(el){
           try {
             var url  = el && el.getAttribute && el.getAttribute('data-url');
@@ -305,56 +262,37 @@ img.resbtn:active { opacity: .6 !important; }
           } catch(e) {}
         };
         
-        // ---- Split-pane controller: move button opens the target book ----
         window.getSplitPaneInfo = function(pane){
           if (!pane) return { id:'', bookUID:'', section:'', unit:'', step:'', page:'', split:'50%', tooltip:'' };
           var id = pane.id || '';
-
           function trim(s){ return (s == null ? '' : ('' + s)).trim(); }
-
           function byId(idList){
             for (var i = 0; i < idList.length; i++) {
               var el = document.getElementById(idList[i]);
-              if (el) {
-                var v = trim(el.innerText || el.textContent);
-                if (v) return v;
-              }
+              if (el) { var v = trim(el.innerText || el.textContent); if (v) return v; }
             }
             return '';
           }
-
           function byAttr(attrs){
-            for (var i = 0; i < attrs.length; i++) {
-              var v = trim(pane.getAttribute(attrs[i]));
-              if (v) return v;
-            }
+            for (var i = 0; i < attrs.length; i++) { var v = trim(pane.getAttribute(attrs[i])); if (v) return v; }
             return '';
           }
-
           function bySuffix(suffixes){
             for (var i = 0; i < suffixes.length; i++) {
               var el = pane.querySelector('[id$=""' + suffixes[i] + '""]');
-              if (el) {
-                var v = trim(el.innerText || el.textContent);
-                if (v) return v;
-              }
+              if (el) { var v = trim(el.innerText || el.textContent); if (v) return v; }
             }
             return '';
           }
-
           function allPaneText(){
             var out = [];
             if (document.createTreeWalker) {
               var walker = document.createTreeWalker(pane, NodeFilter.SHOW_TEXT, null, false);
               var n;
-              while ((n = walker.nextNode())) {
-                var t = trim(n.nodeValue);
-                if (t) out.push(t);
-              }
+              while ((n = walker.nextNode())) { var t = trim(n.nodeValue); if (t) out.push(t); }
             }
             return out;
           }
-
           function extractNumber(haystack, keywords){
             if (!haystack) return '';
             var lower = ('' + haystack).toLowerCase();
@@ -370,106 +308,25 @@ img.resbtn:active { opacity: .6 !important; }
             }
             return '';
           }
-
-          var bookUID = byId([
-              'BY_SplitPaneBookUID_' + id,
-              'BY_SplitPaneBookUID'
-          ]) || byAttr(['data-book-uid','data-bookuid','bookuid','book-uid'])
-             || bySuffix(['BookUID','bookUID','bookuid','book_uid']);
-
-          var section = byId([
-              'BY_SplitPaneSectionNum_' + id,
-              'BY_SplitPaneSection_' + id,
-              'BY_SplitPaneSectionNum'
-          ]) || byAttr(['data-section','data-section-num','section'])
-             || bySuffix(['SectionNum','Section','section','section_num']);
-
-          var unit = byId([
-              'BY_SplitPaneUnitNum_' + id,
-              'BY_SplitPaneUnit_' + id,
-              'BY_SplitPaneUnitNum'
-          ]) || byAttr(['data-unit','data-unit-num','unit'])
-             || bySuffix(['UnitNum','Unit','unit','unit_num']);
-
-          var step = byId([
-              'BY_SplitPaneStepNum_' + id,
-              'BY_SplitPaneStep_' + id,
-              'BY_SplitPaneStepNum'
-          ]) || byAttr(['data-step','data-step-num','step'])
-             || bySuffix(['StepNum','Step','step','step_num']);
-
-          var page = byId([
-              'BY_SplitPanePageNum_' + id,
-              'BY_SplitPanePage_' + id,
-              'BY_SplitPanePageNum'
-          ]) || byAttr(['data-page','data-page-num','page'])
-             || bySuffix(['PageNum','Page','page','page_num']);
-
+          var bookUID = byId(['BY_SplitPaneBookUID_' + id, 'BY_SplitPaneBookUID']) || byAttr(['data-book-uid','data-bookuid','bookuid','book-uid']) || bySuffix(['BookUID','bookUID','bookuid','book_uid']);
+          var section = byId(['BY_SplitPaneSectionNum_' + id, 'BY_SplitPaneSection_' + id, 'BY_SplitPaneSectionNum']) || byAttr(['data-section','data-section-num','section']) || bySuffix(['SectionNum','Section','section','section_num']);
+          var unit = byId(['BY_SplitPaneUnitNum_' + id, 'BY_SplitPaneUnit_' + id, 'BY_SplitPaneUnitNum']) || byAttr(['data-unit','data-unit-num','unit']) || bySuffix(['UnitNum','Unit','unit','unit_num']);
+          var step = byId(['BY_SplitPaneStepNum_' + id, 'BY_SplitPaneStep_' + id, 'BY_SplitPaneStepNum']) || byAttr(['data-step','data-step-num','step']) || bySuffix(['StepNum','Step','step','step_num']);
+          var page = byId(['BY_SplitPanePageNum_' + id, 'BY_SplitPanePage_' + id, 'BY_SplitPanePageNum']) || byAttr(['data-page','data-page-num','page']) || bySuffix(['PageNum','Page','page','page_num']);
           if (!step && page) step = page;
-
           if (!step || !section || !bookUID) {
             var joined = allPaneText().join(' ');
             var outer = trim(pane.outerHTML);
             var blobs = [joined, outer];
-
-            if (!step) {
-              for (var i = 0; i < blobs.length && !step; i++) {
-                step = extractNumber(blobs[i], [
-                  'Step #','Step#','Step Number','StepNum','Step',
-                  'Page #','Page#','Page Number','PageNum','Page',
-                  '\u6B65\u9AA4','\u9801','\u9875'
-                ]);
-              }
-            }
-            if (!section) {
-              for (var i = 0; i < blobs.length && !section; i++) {
-                section = extractNumber(blobs[i], [
-                  'Section #','Section#','Section Number','SectionNum','Section'
-                ]);
-              }
-              if (section && !/^s_/i.test(section)) section = 's_' + section;
-            }
-            if (!bookUID) {
-              for (var i = 0; i < blobs.length && !bookUID; i++) {
-                bookUID = extractNumber(blobs[i], [
-                  'Book UID','BookUID','Book Uid','Book_UID','bookuid'
-                ]);
-              }
-            }
-            if (!unit) {
-              for (var i = 0; i < blobs.length && !unit; i++) {
-                unit = extractNumber(blobs[i], [
-                  'Unit #','Unit#','Unit Number','UnitNum','Unit'
-                ]);
-              }
-            }
+            if (!step) { for (var i = 0; i < blobs.length && !step; i++) step = extractNumber(blobs[i], ['Step #','Step#','Step Number','StepNum','Step','Page #','Page#','Page Number','PageNum','Page','\u6B65\u9AA4','\u9801','\u9875']); }
+            if (!section) { for (var i = 0; i < blobs.length && !section; i++) section = extractNumber(blobs[i], ['Section #','Section#','Section Number','SectionNum','Section']); if (section && !/^s_/i.test(section)) section = 's_' + section; }
+            if (!bookUID) { for (var i = 0; i < blobs.length && !bookUID; i++) bookUID = extractNumber(blobs[i], ['Book UID','BookUID','Book Uid','Book_UID','bookuid']); }
+            if (!unit) { for (var i = 0; i < blobs.length && !unit; i++) unit = extractNumber(blobs[i], ['Unit #','Unit#','Unit Number','UnitNum','Unit']); }
           }
-
-          var split = byId([
-              'BY_SplitPaneRatio_' + id,
-              'BY_SplitPaneRatio'
-          ]) || byAttr(['data-split','data-ratio'])
-             || bySuffix(['Ratio','ratio','Split','split'])
-             || '50%';
-
-          var tooltip = byId([
-              'BY_SplitPaneTooltips_' + id,
-              'BY_SplitPaneTooltips'
-          ]) || byAttr(['data-tooltip','title'])
-             || bySuffix(['Tooltips','Tooltip','tooltip']);
-
+          var split = byId(['BY_SplitPaneRatio_' + id, 'BY_SplitPaneRatio']) || byAttr(['data-split','data-ratio']) || bySuffix(['Ratio','ratio','Split','split']) || '50%';
+          var tooltip = byId(['BY_SplitPaneTooltips_' + id, 'BY_SplitPaneTooltips']) || byAttr(['data-tooltip','title']) || bySuffix(['Tooltips','Tooltip','tooltip']);
           if (!section && unit) section = 's_' + unit;
-
-          return {
-            id: id,
-            bookUID: bookUID,
-            section: section,
-            unit: unit,
-            step: step,
-            page: page,
-            split: split,
-            tooltip: tooltip
-          };
+          return { id: id, bookUID: bookUID, section: section, unit: unit, step: step, page: page, split: split, tooltip: tooltip };
         };
         
         window.BY_SplitPaneATController = {
@@ -502,17 +359,10 @@ img.resbtn:active { opacity: .6 !important; }
         window.BY_SplitPaneController = {
           showSplitPanePage: function(id){
             var sp = document.getElementById(id);
-            if (!sp) {
-              window.__lastSplitPaneLog = 'no element for id=' + id;
-              return;
-            }
+            if (!sp) { window.__lastSplitPaneLog = 'no element for id=' + id; return; }
             var info = window.getSplitPaneInfo(sp);
             window.__lastSplitPaneLog = 'info=' + JSON.stringify(info);
-            var url = 'bookviewer://splitpane-open'
-                    + '?bookUID=' + encodeURIComponent(info.bookUID)
-                    + '&section=' + encodeURIComponent(info.section)
-                    + '&unit=' + encodeURIComponent(info.unit)
-                    + '&step=' + encodeURIComponent(info.step);
+            var url = 'bookviewer://splitpane-open' + '?bookUID=' + encodeURIComponent(info.bookUID) + '&section=' + encodeURIComponent(info.section) + '&unit=' + encodeURIComponent(info.unit) + '&step=' + encodeURIComponent(info.step);
             window.__lastSplitPaneLog += ' url=' + url;
             try { window.location.href = url; } catch(e){ window.__lastSplitPaneLog += ' err=' + e; }
           }
@@ -525,19 +375,13 @@ img.resbtn:active { opacity: .6 !important; }
             var gid = '';
             var a = document.getElementById('BY_assessmentQuestion_' + id);
             if (a) gid = (a.innerText || '').trim();
-            try {
-              window.location.href = 'bookviewer://assessment-open'
-                + '?id=' + encodeURIComponent(id)
-                + '&poolType=' + encodeURIComponent(poolType || '')
-                + '&group=' + encodeURIComponent(gid);
-            } catch(e){}
+            try { window.location.href = 'bookviewer://assessment-open?id=' + encodeURIComponent(id) + '&poolType=' + encodeURIComponent(poolType || '') + '&group=' + encodeURIComponent(gid); } catch(e){}
           },
           closeExerciseView: function(){
             try { window.location.href = 'bookviewer://assessment-close'; } catch(e){}
           }
         };
         
-        // ---- Force every toggle icon visible and clickable ----
         (function(){
           function makeClickable(){
             document.querySelectorAll('img.redbtn, img.has2btn, img.hsgbtn').forEach(function(b){
@@ -572,7 +416,6 @@ img.resbtn:active { opacity: .6 !important; }
         private string GetLogFilePath()
         {
             if (!string.IsNullOrEmpty(_logFilePath)) return _logFilePath;
-
             try
             {
                 var candidates = new List<string>
@@ -582,7 +425,6 @@ img.resbtn:active { opacity: .6 !important; }
                     Path.Combine(Path.GetTempPath(), "BookViewerLogs"),
                     Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "BookViewer", "Logs"),
                 };
-
                 foreach (var folder in candidates)
                 {
                     try
@@ -597,25 +439,17 @@ img.resbtn:active { opacity: .6 !important; }
                 }
             }
             catch { }
-
             return "";
         }
 
         public string GetLogPath() => GetLogFilePath();
-
-        public string[] GetRecentLogs()
-        {
-            lock (_logBuffer) return _logBuffer.ToArray();
-        }
-
+        public string[] GetRecentLogs() { lock (_logBuffer) return _logBuffer.ToArray(); }
         public string GetLogFilePathOrEmpty() => _logFilePath ?? "";
 
         private void Log(string message)
         {
             string logMessage = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} - {message}";
-
             System.Diagnostics.Debug.WriteLine(logMessage);
-
             try
             {
                 lock (_logBuffer)
@@ -625,7 +459,6 @@ img.resbtn:active { opacity: .6 !important; }
                 }
             }
             catch { }
-
             try
             {
                 var path = GetLogFilePath();
@@ -635,12 +468,7 @@ img.resbtn:active { opacity: .6 !important; }
                 }
             }
             catch { }
-
-            try
-            {
-                OnStatusChanged?.Invoke(this, message.Length < 80 ? message : message.Substring(0, 77) + "...");
-            }
-            catch { }
+            try { OnStatusChanged?.Invoke(this, message.Length < 80 ? message : message.Substring(0, 77) + "..."); } catch { }
         }
 
         public event EventHandler<List<string>> OnPagesLoaded;
@@ -857,7 +685,6 @@ img.resbtn:active { opacity: .6 !important; }
                             }
                         }
                     }
-                    Log($"[unit-map] built {_unitFirstSection.Count} unit→section mappings");
                 }
                 catch (Exception ex) { Log($"Error parsing book.xml: {ex.Message}"); }
 
@@ -1014,14 +841,9 @@ img.resbtn:active { opacity: .6 !important; }
 
         public Task<string> BuildTwoPageHtmlAsync()
         {
-            if (_currentPageIndex < 0 || _pageFiles.Count == 0)
-                return Task.FromResult(_currentPageHtml);
-
-            if (!_twoPageSpread || _currentPageIndex + 1 >= _pageFiles.Count)
-                return Task.FromResult(_currentPageHtml);
-
-            if (string.IsNullOrEmpty(_nextPageHtml))
-                return Task.FromResult(_currentPageHtml);
+            if (_currentPageIndex < 0 || _pageFiles.Count == 0) return Task.FromResult(_currentPageHtml);
+            if (!_twoPageSpread || _currentPageIndex + 1 >= _pageFiles.Count) return Task.FromResult(_currentPageHtml);
+            if (string.IsNullOrEmpty(_nextPageHtml)) return Task.FromResult(_currentPageHtml);
 
             string ExtractBody(string html)
             {
@@ -1029,7 +851,6 @@ img.resbtn:active { opacity: .6 !important; }
                 var m = Regex.Match(html, @"<body[^>]*>([\s\S]*?)</body>", RegexOptions.IgnoreCase);
                 return m.Success ? m.Groups[1].Value : html;
             }
-
             string ExtractStyles(string html)
             {
                 if (string.IsNullOrEmpty(html)) return "";
@@ -1038,13 +859,11 @@ img.resbtn:active { opacity: .6 !important; }
                     sb.AppendLine(m.Groups[1].Value);
                 return sb.ToString();
             }
-
             string StripFontFaces(string css)
             {
                 if (string.IsNullOrEmpty(css)) return "";
                 return Regex.Replace(css, @"@font-face\s*\{[^}]*\}", "", RegexOptions.IgnoreCase);
             }
-
             string Scope(string css, string scope)
             {
                 if (string.IsNullOrEmpty(css)) return "";
@@ -1056,17 +875,12 @@ img.resbtn:active { opacity: .6 !important; }
                     var trimmed = t.TrimStart();
                     if (trimmed.StartsWith("@")) { sb.Append(t).Append('\n'); continue; }
                     if (trimmed.StartsWith("/*")) { sb.Append(t).Append('\n'); continue; }
-
                     var brace = t.IndexOf('{');
                     if (brace < 0) { sb.Append(t).Append('\n'); continue; }
-
                     var sel = t.Substring(0, brace).Trim();
                     var rest = t.Substring(brace);
                     if (string.IsNullOrEmpty(sel)) { sb.Append(t).Append('\n'); continue; }
-
-                    var newSel = string.Join(",", sel.Split(',')
-                        .Select(s => scope + " " + s.Trim())
-                        .Where(s => s.Length > scope.Length + 1));
+                    var newSel = string.Join(",", sel.Split(',').Select(s => scope + " " + s.Trim()).Where(s => s.Length > scope.Length + 1));
                     sb.Append(newSel).Append(' ').Append(rest).Append('\n');
                 }
                 return sb.ToString();
@@ -1074,20 +888,15 @@ img.resbtn:active { opacity: .6 !important; }
 
             string leftBody = ExtractBody(_currentPageHtml);
             string rightBody = ExtractBody(_nextPageHtml);
-
             string leftCssRaw = ExtractStyles(_currentPageHtml);
             string rightCssRaw = ExtractStyles(_nextPageHtml);
-
             string leftCss = Scope(StripFontFaces(leftCssRaw), ".page-left");
             string rightCss = Scope(StripFontFaces(rightCssRaw), ".page-right");
-
             string overlayCss = OverlayCssTemplate;
-
             string surround = SurroundColor;
             string zoom = _currentZoom.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
             var sb = new StringBuilder(leftBody.Length + rightBody.Length + leftCss.Length + rightCss.Length + _lastFontCss.Length + overlayCss.Length + ReaderJsTemplate.Length + 4096);
-
             sb.Append("<!DOCTYPE html><html><head><meta charset='UTF-8'>");
             sb.Append("<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes'>");
             sb.Append("<style>");
@@ -1115,7 +924,6 @@ img.resbtn:active { opacity: .6 !important; }
             if (step <= 0) return -1;
             var wanted = "steps_" + step;
             var wantedAlt = "step_" + step;
-
             string sectionKey = (section ?? "").Replace('\\', '/').Trim();
             if (sectionKey.Contains('/'))
                 sectionKey = sectionKey.Substring(sectionKey.LastIndexOf('/') + 1);
@@ -1124,7 +932,6 @@ img.resbtn:active { opacity: .6 !important; }
             if (!string.IsNullOrEmpty(sectionKey))
             {
                 acceptableFolders.Add(sectionKey);
-
                 var numMatch = Regex.Match(sectionKey, @"\d+");
                 if (numMatch.Success)
                 {
@@ -1139,12 +946,9 @@ img.resbtn:active { opacity: .6 !important; }
             {
                 var name = Path.GetFileNameWithoutExtension(_pageFiles[i]);
                 if (name != wanted && name != wantedAlt) continue;
-
                 var dir = Path.GetFileName(Path.GetDirectoryName(_pageFiles[i]) ?? "");
                 if (acceptableFolders.Count > 0 && !acceptableFolders.Contains(dir))
                     continue;
-
-                Log($"[FindPageIndex] PASS1 hit: section='{sectionKey}' step={step} -> idx={i} file={_pageFiles[i]}");
                 return i;
             }
 
@@ -1156,43 +960,29 @@ img.resbtn:active { opacity: .6 !important; }
                 {
                     var dir = Path.GetFileName(Path.GetDirectoryName(_pageFiles[i]) ?? "");
                     if (!acceptableFolders.Contains(dir)) continue;
-
                     var name = Path.GetFileNameWithoutExtension(_pageFiles[i]);
                     var m = Regex.Match(name ?? "", @"^steps?_(\d+)$", RegexOptions.IgnoreCase);
                     if (!m.Success) continue;
-
                     if (int.TryParse(m.Groups[1].Value, out int fileStep))
                     {
                         int delta = Math.Abs(fileStep - step);
                         if (delta < bestDelta) { bestDelta = delta; bestIdx = i; }
                     }
                 }
-                if (bestIdx >= 0)
-                {
-                    Log($"[FindPageIndex] PASS2 hit: section='{sectionKey}' step={step} -> idx={bestIdx} file={_pageFiles[bestIdx]}");
-                    return bestIdx;
-                }
+                if (bestIdx >= 0) return bestIdx;
             }
 
             for (int i = 0; i < _pageFiles.Count; i++)
             {
                 var name = Path.GetFileNameWithoutExtension(_pageFiles[i]);
-                if (name == wanted || name == wantedAlt)
-                {
-                    Log($"[FindPageIndex] PASS3 (filename-only) hit: section='{sectionKey}' step={step} -> idx={i} file={_pageFiles[i]}");
-                    return i;
-                }
+                if (name == wanted || name == wantedAlt) return i;
             }
-
-            Log($"[FindPageIndex] NO MATCH: section='{sectionKey}' step={step}");
             return -1;
         }
 
         public string FindPoolFile(string groupId)
         {
-            if (string.IsNullOrEmpty(groupId) || string.IsNullOrEmpty(_currentBookPath))
-                return null;
-
+            if (string.IsNullOrEmpty(groupId) || string.IsNullOrEmpty(_currentBookPath)) return null;
             var candidates = new List<string>
             {
                 Path.Combine(_currentBookPath, "ola", groupId + ".html"),
@@ -1202,7 +992,6 @@ img.resbtn:active { opacity: .6 !important; }
                 Path.Combine(_currentBookPath, "ola", "q" + groupId + ".html"),
                 Path.Combine(_currentBookPath, "ola", "question_" + groupId + ".html"),
             };
-
             if (Directory.Exists(_currentBookPath))
             {
                 foreach (var s in Directory.GetDirectories(_currentBookPath, "s_*"))
@@ -1212,21 +1001,16 @@ img.resbtn:active { opacity: .6 !important; }
                     candidates.Add(Path.Combine(s, "ola", groupId, "index.html"));
                 }
             }
-
             foreach (var c in candidates)
                 if (File.Exists(c)) { Log($"[pool] found {groupId} at {c}"); return c; }
-
             try
             {
                 var hits = Directory.GetFiles(_currentBookPath, groupId + ".html", SearchOption.AllDirectories);
-                if (hits.Length > 0) { Log($"[pool] found via search: {hits[0]}"); return hits[0]; }
-
+                if (hits.Length > 0) return hits[0];
                 hits = Directory.GetFiles(_currentBookPath, "*" + groupId + "*.html", SearchOption.AllDirectories);
-                if (hits.Length > 0) { Log($"[pool] fuzzy match: {hits[0]}"); return hits[0]; }
+                if (hits.Length > 0) return hits[0];
             }
             catch { }
-
-            Log($"[pool] not found: {groupId}");
             return null;
         }
 
@@ -1236,7 +1020,6 @@ img.resbtn:active { opacity: .6 !important; }
             {
                 var raw = await File.ReadAllTextAsync(poolFilePath);
                 var poolDir = Path.GetDirectoryName(poolFilePath) ?? _currentBookPath;
-
                 if (!Regex.IsMatch(raw, @"<html", RegexOptions.IgnoreCase))
                 {
                     raw = "<!DOCTYPE html><html><head>" +
@@ -1245,14 +1028,11 @@ img.resbtn:active { opacity: .6 !important; }
                           "<style>body{margin:0;padding:16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}</style>" +
                           "</head><body>" + raw + "</body></html>";
                 }
-
                 raw = InlineAllAssets(raw, poolDir);
-
                 raw = raw.Replace("</body>",
                     "<script>" +
                     "window.__assessment_complete = function(){ window.location.href='bookviewer://assessment-complete'; };" +
                     "</script></body>");
-
                 return raw;
             }
             catch (Exception ex)
@@ -1268,12 +1048,9 @@ img.resbtn:active { opacity: .6 !important; }
             {
                 string directory = Path.GetDirectoryName(filePath) ?? "";
                 string fileName = Path.GetFileName(filePath) ?? "";
-
-                if (!IsPureStepsFile(fileName))
-                    return htmlContent;
+                if (!IsPureStepsFile(fileName)) return htmlContent;
 
                 string nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
-
                 string redFilePath = Path.Combine(directory, nameWithoutExt + "_redAnswer.html");
                 bool hasRedFile = File.Exists(redFilePath);
 
@@ -1287,9 +1064,7 @@ img.resbtn:active { opacity: .6 !important; }
                 _lastFontCss = fontCss;
 
                 int pageWidth = 1024, pageHeight = 1344;
-                var rezMatch = Regex.Match(htmlContent,
-                    @"id\s*=\s*[""']rez[""'][^>]*style\s*=\s*[""'][^""']*width\s*:\s*(\d+)px[^""']*height\s*:\s*(\d+)px",
-                    RegexOptions.IgnoreCase);
+                var rezMatch = Regex.Match(htmlContent, @"id\s*=\s*[""']rez[""'][^>]*style\s*=\s*[""'][^""']*width\s*:\s*(\d+)px[^""']*height\s*:\s*(\d+)px", RegexOptions.IgnoreCase);
                 if (rezMatch.Success)
                 {
                     if (int.TryParse(rezMatch.Groups[1].Value, out int w)) pageWidth = w;
@@ -1301,50 +1076,18 @@ img.resbtn:active { opacity: .6 !important; }
 
                 string skeleton = htmlContent;
 
-                skeleton = Regex.Replace(skeleton,
-                    @"(<pane\s+class=""base""[^>]*>)([\s\S]*?)(</pane>)",
-                    m => m.Groups[1].Value + baseHtml + m.Groups[3].Value,
-                    RegexOptions.IgnoreCase);
+                skeleton = Regex.Replace(skeleton, @"(<pane\s+class=""base""[^>]*>)([\s\S]*?)(</pane>)", m => m.Groups[1].Value + baseHtml + m.Groups[3].Value, RegexOptions.IgnoreCase);
+                skeleton = Regex.Replace(skeleton, @"(<pane\s+class=""ori""[^>]*>)([\s\S]*?)(</pane>)", m => m.Groups[1].Value + oriHtml + m.Groups[3].Value, RegexOptions.IgnoreCase);
+                skeleton = Regex.Replace(skeleton, @"(<pane\s+class=""redAnswer""[^>]*>)([\s\S]*?)(</pane>)", m => m.Groups[1].Value + redHtml + m.Groups[3].Value, RegexOptions.IgnoreCase);
 
-                skeleton = Regex.Replace(skeleton,
-                    @"(<pane\s+class=""ori""[^>]*>)([\s\S]*?)(</pane>)",
-                    m => m.Groups[1].Value + oriHtml + m.Groups[3].Value,
-                    RegexOptions.IgnoreCase);
-
-                skeleton = Regex.Replace(skeleton,
-                    @"(<pane\s+class=""redAnswer""[^>]*>)([\s\S]*?)(</pane>)",
-                    m => m.Groups[1].Value + redHtml + m.Groups[3].Value,
-                    RegexOptions.IgnoreCase);
-
-                // Inject external resource buttons
-                Log($"[res] about to build resbtn for {nameWithoutExt} in {directory}");
                 var resButtons = await BuildResourceButtonsAsync(directory, nameWithoutExt);
-                Log($"[res] got {resButtons?.Length ?? 0} chars of resbtn HTML");
                 if (!string.IsNullOrEmpty(resButtons))
                 {
                     skeleton = skeleton + resButtons;
-                    Log($"[res] injected at end. new skeleton length={skeleton.Length}");
                 }
 
                 skeleton = InlineAllAssets(skeleton, directory);
-
                 var finalHtml = BuildFinalHtml(skeleton, fontCss, pageWidth, pageHeight, fileName);
-
-                var hasRes = finalHtml.Contains("class='resbtn'") || finalHtml.Contains("class=\"resbtn\"");
-                Log($"[res] FINAL contains resbtn={hasRes}");
-
-                var idx = finalHtml.IndexOf("class='resbtn'");
-                if (idx < 0) idx = finalHtml.IndexOf("class=\"resbtn\"");
-                if (idx >= 0)
-                {
-                    var start = Math.Max(0, idx - 60);
-                    var end = Math.Min(finalHtml.Length, idx + 260);
-                    Log($"[res] snippet: {finalHtml.Substring(start, end - start)}");
-                }
-                else
-                {
-                    Log($"[res] resbtn NOT in final HTML. skeleton contains? {skeleton.Contains("class='resbtn'")}");
-                }
 
                 return finalHtml;
             }
@@ -1359,39 +1102,18 @@ img.resbtn:active { opacity: .6 !important; }
         // RESOURCE BUTTONS
         // ============================================================
 
-        /// <summary>
-        /// Read steps_N_data.xml, parse &lt;links&gt; items, and generate an &lt;img class="resbtn"&gt;
-        /// for each, positioned at (x,y), with the resolved icon inlined and the
-        /// target URL stored on data-url. Clicking calls window.__openResource(this).
-        /// </summary>
         private async Task<string> BuildResourceButtonsAsync(string pageDir, string nameWithoutExt)
         {
             try
             {
                 var dataXmlPath = Path.Combine(pageDir, nameWithoutExt + "_data.xml");
-                Log($"[res] looking for data xml at: {dataXmlPath}");
-                if (!File.Exists(dataXmlPath))
-                {
-                    Log($"[res] NOT FOUND: {dataXmlPath}");
-                    return "";
-                }
+                if (!File.Exists(dataXmlPath)) return "";
 
                 var raw = await File.ReadAllTextAsync(dataXmlPath);
-                Log($"[res] read data xml, length={raw.Length}, head='{raw.Substring(0, Math.Min(80, raw.Length))}'");
-
                 var doc = new XmlDocument();
-                try { doc.LoadXml(raw); }
-                catch (Exception xex)
-                {
-                    Log($"[res] XML parse error: {xex.Message}");
-                    return "";
-                }
+                try { doc.LoadXml(raw); } catch { return ""; }
 
-                var items = doc.SelectNodes("//links/array/item");
-                if (items == null || items.Count == 0)
-                    items = doc.SelectNodes("//links//item");
-
-                Log($"[res] found {items?.Count ?? 0} <links><item> nodes");
+                var items = doc.SelectNodes("//links/array/item") ?? doc.SelectNodes("//links//item");
                 if (items == null || items.Count == 0) return "";
 
                 var sb = new StringBuilder();
@@ -1404,7 +1126,6 @@ img.resbtn:active { opacity: .6 !important; }
                     var iconPath = item.SelectSingleNode("icon")?.InnerText ?? "";
                     var desc = item.SelectSingleNode("desc")?.InnerText ?? "";
 
-                    // Prefer device-specific URLs, then generic <path>
                     var url = FirstNonEmpty(item,
                         "teacheriospath", "studentiospath",
                         "teacherandroidpath", "studentandroidpath",
@@ -1416,27 +1137,27 @@ img.resbtn:active { opacity: .6 !important; }
                     var openInApp = !string.IsNullOrEmpty(item.SelectSingleNode("openinapp")?.InnerText?.Trim());
                     var audioCont = !string.IsNullOrEmpty(item.SelectSingleNode("audiocontplay")?.InnerText?.Trim());
 
-                    Log($"[res] item[{i}] raw x='{xStr}' y='{yStr}' icon='{iconPath}' url='{(url?.Length > 60 ? url.Substring(0, 60) + "..." : url)}' openInApp={openInApp} audio={audioCont}");
+                    if (string.IsNullOrEmpty(url)) continue;
+                    if (!double.TryParse(xStr, out double x)) continue;
+                    if (!double.TryParse(yStr, out double y)) continue;
 
-                    if (string.IsNullOrEmpty(url)) { Log($"[res] item[{i}] SKIP empty url"); continue; }
-                    if (!double.TryParse(xStr, out double x)) { Log($"[res] item[{i}] SKIP bad x"); continue; }
-                    if (!double.TryParse(yStr, out double y)) { Log($"[res] item[{i}] SKIP bad y"); continue; }
-
-                    url = DecodeResourceUrl(url);
+                    // Two-pass decode
+                    url = Uri.UnescapeDataString(Uri.UnescapeDataString(url));
                     desc = DecodeDesc(desc);
+
+                    // Resolve relative paths against page dir or shared folder
+                    url = ResolveResourceUrl(url, pageDir);
 
                     string iconDataUri = "";
                     if (!string.IsNullOrEmpty(iconPath))
                     {
                         var resolved = ResolveIconPath(iconPath, pageDir);
-                        Log($"[res] item[{i}] resolved icon='{resolved ?? "(null)"}'");
                         if (!string.IsNullOrEmpty(resolved))
                             iconDataUri = ToIconDataUri(resolved);
                     }
 
                     if (string.IsNullOrEmpty(iconDataUri))
                     {
-                        Log($"[res] item[{i}] no icon → fallback blue dot");
                         iconDataUri = "data:image/svg+xml;base64," + Convert.ToBase64String(Encoding.UTF8.GetBytes(
                             "<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'><circle cx='12' cy='12' r='10' fill='#0A84FF'/><path d='M8 12 L16 12 M12 8 L12 16' stroke='white' stroke-width='2'/></svg>"));
                     }
@@ -1457,12 +1178,11 @@ img.resbtn:active { opacity: .6 !important; }
                     sb.Append("onclick='__openResource(this)' />");
                 }
 
-                Log($"[res] built {sb.Length} chars of resbtn HTML (from {items.Count} items)");
                 return sb.ToString();
             }
             catch (Exception ex)
             {
-                Log($"[res] BuildResourceButtonsAsync EXCEPTION: {ex.Message}\n{ex.StackTrace}");
+                Log($"[res] BuildResourceButtonsAsync EXCEPTION: {ex.Message}");
                 return "";
             }
         }
@@ -1477,62 +1197,74 @@ img.resbtn:active { opacity: .6 !important; }
             return "";
         }
 
-        /// <summary>
-        /// Decode %25 → %, then %RESOURCES% → &lt;bookRoot&gt;/resources.
-        /// Returns an absolute path if the local file exists, otherwise returns
-        /// the decoded URL/relative path.
-        /// </summary>
-        private string DecodeResourceUrl(string raw)
+        private string ResolveResourceUrl(string url, string pageDir)
         {
-            if (string.IsNullOrEmpty(raw)) return raw;
+            if (string.IsNullOrEmpty(url)) return url;
+            if (url.StartsWith("http", StringComparison.OrdinalIgnoreCase)) return url;
+            if (url.StartsWith("data:", StringComparison.OrdinalIgnoreCase)) return url;
 
-            // Two layers of percent-encoding: %2525 → %25 → %, then %XX → char
-            var s = Uri.UnescapeDataString(raw);   // %25RESOURCES%25 → %RESOURCES%
-            s = Uri.UnescapeDataString(s);         // %E4%B8%AD → 中
+            var booksRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "BookViewer", "Books");
+            var sharedResources = Path.Combine(booksRoot, "resources");
 
-            // %RESOURCES% maps to <bookRoot>/resources/
-            s = s.Replace("%RESOURCES%/", "resources/")
-                 .Replace("%RESOURCES%",  "resources");
-
-            if (s.StartsWith("http", StringComparison.OrdinalIgnoreCase) ||
-                s.StartsWith("data:", StringComparison.OrdinalIgnoreCase) ||
-                s.StartsWith("//", StringComparison.Ordinal))
+            // 1. %RESOURCES% → shared folder first, then per-book fallback
+            if (url.Contains("%RESOURCES%"))
             {
-                return s;
-            }
-
-            // Probe both "resources/" and "resource/" spellings — older zips
-            // sometimes root at singular resource/.
-            var candidates = new List<string> { s };
-            if (s.StartsWith("resources/", StringComparison.OrdinalIgnoreCase))
-                candidates.Add("resource/" + s.Substring("resources/".Length));
-            if (s.StartsWith("resource/", StringComparison.OrdinalIgnoreCase))
-                candidates.Add("resources/" + s.Substring("resource/".Length));
-
-            foreach (var c in candidates)
-            {
-                try
+                var rel = url.Replace("%RESOURCES%/", "").Replace("%RESOURCES%", "").TrimStart('/');
+                var candidates = new[]
                 {
-                    var local = Path.GetFullPath(Path.Combine(_currentBookPath, c.Replace('/', Path.DirectorySeparatorChar)));
-                    if (File.Exists(local))
+                    Path.Combine(sharedResources, rel.Replace('/', Path.DirectorySeparatorChar)),
+                    Path.Combine(_currentBookPath, "resources", rel.Replace('/', Path.DirectorySeparatorChar)),
+                    Path.Combine(_currentBookPath, rel.Replace('/', Path.DirectorySeparatorChar)),
+                };
+                foreach (var c in candidates)
+                {
+                    var disk = Path.GetFullPath(c);
+                    if (File.Exists(disk))
                     {
-                        Log($"[res] url resolved to local file: {local}");
-                        return local;
+                        Log($"[res] %RESOURCES% → {disk}");
+                        return disk;
                     }
                 }
-                catch { }
+                Log($"[res] %RESOURCES% NOT FOUND for '{rel}'");
             }
 
-            return s;
+            // 2. ../X → walk up from pageDir
+            if (url.StartsWith("../") || url.StartsWith("..\\"))
+            {
+                var disk = Path.GetFullPath(Path.Combine(pageDir, url.Replace('/', Path.DirectorySeparatorChar)));
+                if (File.Exists(disk))
+                {
+                    Log($"[res] ../ → {disk}");
+                    return disk;
+                }
+                // Cross-book fallback (e.g., ../book_9999/resources/...)
+                if (url.StartsWith("../book_", StringComparison.OrdinalIgnoreCase))
+                {
+                    var booksDir = Path.GetDirectoryName(_currentBookPath.TrimEnd(Path.DirectorySeparatorChar));
+                    if (!string.IsNullOrEmpty(booksDir))
+                    {
+                        var crossDisk = Path.GetFullPath(Path.Combine(booksDir, url.Substring(3).Replace('/', Path.DirectorySeparatorChar)));
+                        if (File.Exists(crossDisk)) return crossDisk;
+                    }
+                }
+            }
+
+            // 3. Relative X → pageDir, then book root
+            var pageLocal = Path.GetFullPath(Path.Combine(pageDir, url.Replace('/', Path.DirectorySeparatorChar)));
+            if (File.Exists(pageLocal)) return pageLocal;
+
+            var bookLocal = Path.GetFullPath(Path.Combine(_currentBookPath, url.Replace('/', Path.DirectorySeparatorChar)));
+            if (File.Exists(bookLocal)) return bookLocal;
+
+            Log($"[res] UNRESOLVED: {url} (pageDir={pageDir}, bookPath={_currentBookPath})");
+            return url;
         }
 
         private static string DecodeDesc(string raw)
         {
             if (string.IsNullOrEmpty(raw)) return raw;
-            // Handle non-standard %uXXXX first (used for CJK in the source books)
             var s = Regex.Replace(raw, @"%u([0-9A-Fa-f]{4})",
                 m => ((char)Convert.ToInt32(m.Groups[1].Value, 16)).ToString());
-            // Then standard %XX
             return Uri.UnescapeDataString(s);
         }
 
@@ -1545,32 +1277,31 @@ img.resbtn:active { opacity: .6 !important; }
                 if (q >= 0) clean = clean.Substring(0, q);
 
                 var tried = new List<string>();
-
                 var combined = Path.GetFullPath(Path.Combine(pageDir, clean));
                 tried.Add(combined);
-                if (File.Exists(combined)) { Log($"[res] icon found (A): {combined}"); return combined; }
+                if (File.Exists(combined)) return combined;
 
                 combined = Path.GetFullPath(Path.Combine(_currentBookPath, clean.TrimStart('.', '/')));
                 tried.Add(combined);
-                if (File.Exists(combined)) { Log($"[res] icon found (B): {combined}"); return combined; }
+                if (File.Exists(combined)) return combined;
 
                 var fname = Path.GetFileName(clean);
                 combined = Path.GetFullPath(Path.Combine(_currentBookPath, "images", fname));
                 tried.Add(combined);
-                if (File.Exists(combined)) { Log($"[res] icon found (C): {combined}"); return combined; }
+                if (File.Exists(combined)) return combined;
 
                 combined = Path.GetFullPath(Path.Combine(_currentBookPath, "images", "svgIcon", fname));
                 tried.Add(combined);
-                if (File.Exists(combined)) { Log($"[res] icon found (D): {combined}"); return combined; }
+                if (File.Exists(combined)) return combined;
 
-                // Plain svgIcon/ at root and at page dir (no leading ../images/)
+                // Plain svgIcon/ at root and at page dir
                 combined = Path.GetFullPath(Path.Combine(_currentBookPath, "svgIcon", fname));
                 tried.Add(combined);
-                if (File.Exists(combined)) { Log($"[res] icon found (D2): {combined}"); return combined; }
+                if (File.Exists(combined)) return combined;
 
                 combined = Path.GetFullPath(Path.Combine(pageDir, "..", "images", "svgIcon", fname));
                 tried.Add(combined);
-                if (File.Exists(combined)) { Log($"[res] icon found (D3): {combined}"); return combined; }
+                if (File.Exists(combined)) return combined;
 
                 var up = pageDir;
                 for (int i = 0; i < 3; i++)
@@ -1578,15 +1309,10 @@ img.resbtn:active { opacity: .6 !important; }
                     up = Path.GetDirectoryName(up) ?? up;
                     combined = Path.GetFullPath(Path.Combine(up, clean));
                     tried.Add(combined);
-                    if (File.Exists(combined)) { Log($"[res] icon found (E{i + 1}): {combined}"); return combined; }
+                    if (File.Exists(combined)) return combined;
                 }
-
-                Log($"[res] icon NOT FOUND for '{iconPath}' in {pageDir}. Tried:\n  {string.Join("\n  ", tried)}");
             }
-            catch (Exception ex)
-            {
-                Log($"[res] ResolveIconPath error: {ex.Message}");
-            }
+            catch { }
             return null;
         }
 
@@ -1622,15 +1348,8 @@ img.resbtn:active { opacity: .6 !important; }
         private static string StripAnswerDivs(string html)
         {
             if (string.IsNullOrEmpty(html)) return html;
-
-            html = Regex.Replace(html,
-                @"<div\b[^>]*class=""[^""]*\b(?:tbred|tbnote)\b[^""]*""[^>]*>[\s\S]*?</div>",
-                "", RegexOptions.IgnoreCase);
-
-            html = Regex.Replace(html,
-                @"<svg\b[^>]*class=""[^""]*\btbred\b[^""]*""[^>]*>[\s\S]*?</svg>",
-                "", RegexOptions.IgnoreCase);
-
+            html = Regex.Replace(html, @"<div\b[^>]*class=""[^""]*\b(?:tbred|tbnote)\b[^""]*""[^>]*>[\s\S]*?</div>", "", RegexOptions.IgnoreCase);
+            html = Regex.Replace(html, @"<svg\b[^>]*class=""[^""]*\btbred\b[^""]*""[^>]*>[\s\S]*?</svg>", "", RegexOptions.IgnoreCase);
             return html;
         }
 
@@ -1648,17 +1367,14 @@ img.resbtn:active { opacity: .6 !important; }
                 var q = clean.IndexOfAny(new[] { '?', '#' });
                 if (q >= 0) clean = clean.Substring(0, q);
                 clean = clean.Replace('\\', '/').TrimStart('.', '/');
-
                 var segments = clean.Split('/').ToList();
 
                 for (int drop = 0; drop <= 3 && drop < segments.Count; drop++)
                 {
                     var tail = string.Join("/", segments.Skip(drop));
                     if (string.IsNullOrEmpty(tail)) continue;
-
                     var c = Path.GetFullPath(Path.Combine(pageDir, tail));
                     if (File.Exists(c)) return c;
-
                     var up = pageDir;
                     for (int i = 0; i < 2; i++)
                     {
@@ -1666,34 +1382,26 @@ img.resbtn:active { opacity: .6 !important; }
                         c = Path.GetFullPath(Path.Combine(up, tail));
                         if (File.Exists(c)) return c;
                     }
-
                     c = Path.GetFullPath(Path.Combine(_currentBookPath, tail));
                     if (File.Exists(c)) return c;
-
                     var fname = Path.GetFileName(tail);
                     c = Path.GetFullPath(Path.Combine(_currentBookPath, "images", fname));
                     if (File.Exists(c)) return c;
-
                     c = Path.GetFullPath(Path.Combine(pageDir, "images", fname));
                     if (File.Exists(c)) return c;
-
-                    var sects = Directory.Exists(_currentBookPath)
-                        ? Directory.GetDirectories(_currentBookPath, "s_*")
-                        : Array.Empty<string>();
+                    var sects = Directory.Exists(_currentBookPath) ? Directory.GetDirectories(_currentBookPath, "s_*") : Array.Empty<string>();
                     foreach (var s in sects)
                     {
                         c = Path.GetFullPath(Path.Combine(s, "images", fname));
                         if (File.Exists(c)) return c;
                     }
                 }
-
                 return null;
             }
 
             string ToDataUri(string diskPath)
             {
                 if (_assetCache.TryGetValue(diskPath, out var cached)) return cached;
-
                 try
                 {
                     var bytes = File.ReadAllBytes(diskPath);
@@ -1721,40 +1429,17 @@ img.resbtn:active { opacity: .6 !important; }
                 if (string.IsNullOrEmpty(raw)) return raw;
                 if (raw.StartsWith("data:") || raw.StartsWith("http") || raw.StartsWith("//"))
                     return raw;
-
                 var disk = FindOnDisk(raw);
-                if (disk == null)
-                {
-                    Log($"[asset-miss] {raw} (pageDir={pageDir})");
-                    return raw;
-                }
+                if (disk == null) return raw;
                 var uri = ToDataUri(disk);
                 return uri ?? raw;
             }
 
-            html = Regex.Replace(html,
-                @"(\bsrc\s*=\s*"")([^""]+)("")",
-                m => m.Groups[1].Value + Resolve(m.Groups[2].Value) + m.Groups[3].Value,
-                RegexOptions.IgnoreCase);
-            html = Regex.Replace(html,
-                @"(\bsrc\s*=\s*')([^']+)(')",
-                m => m.Groups[1].Value + Resolve(m.Groups[2].Value) + m.Groups[3].Value,
-                RegexOptions.IgnoreCase);
-
-            html = Regex.Replace(html,
-                @"(\bhref\s*=\s*"")([^""]+)("")",
-                m => m.Groups[1].Value + Resolve(m.Groups[2].Value) + m.Groups[3].Value,
-                RegexOptions.IgnoreCase);
-            html = Regex.Replace(html,
-                @"(\bhref\s*=\s*')([^']+)(')",
-                m => m.Groups[1].Value + Resolve(m.Groups[2].Value) + m.Groups[3].Value,
-                RegexOptions.IgnoreCase);
-
-            html = Regex.Replace(html,
-                @"url\(\s*['""]?([^'"")\s]+)['""]?\s*\)",
-                m => "url('" + Resolve(m.Groups[1].Value) + "')",
-                RegexOptions.IgnoreCase);
-
+            html = Regex.Replace(html, @"(\bsrc\s*=\s*"")([^""]+)("")", m => m.Groups[1].Value + Resolve(m.Groups[2].Value) + m.Groups[3].Value, RegexOptions.IgnoreCase);
+            html = Regex.Replace(html, @"(\bsrc\s*=\s*')([^']+)(')", m => m.Groups[1].Value + Resolve(m.Groups[2].Value) + m.Groups[3].Value, RegexOptions.IgnoreCase);
+            html = Regex.Replace(html, @"(\bhref\s*=\s*"")([^""]+)("")", m => m.Groups[1].Value + Resolve(m.Groups[2].Value) + m.Groups[3].Value, RegexOptions.IgnoreCase);
+            html = Regex.Replace(html, @"(\bhref\s*=\s*')([^']+)(')", m => m.Groups[1].Value + Resolve(m.Groups[2].Value) + m.Groups[3].Value, RegexOptions.IgnoreCase);
+            html = Regex.Replace(html, @"url\(\s*['""]?([^'"")\s]+)['""]?\s*\)", m => "url('" + Resolve(m.Groups[1].Value) + "')", RegexOptions.IgnoreCase);
             return html;
         }
 
@@ -1787,10 +1472,8 @@ img.resbtn:active { opacity: .6 !important; }
             try
             {
                 if (_fontCache.TryGetValue(directory, out var cached)) return cached;
-
                 string fontCss = "";
                 string fontCssPath = "";
-
                 var fontCssFiles = Directory.GetFiles(directory, "*_font.css");
                 if (fontCssFiles.Length > 0) fontCssPath = fontCssFiles[0];
                 else
@@ -1802,68 +1485,61 @@ img.resbtn:active { opacity: .6 !important; }
                 if (!string.IsNullOrEmpty(fontCssPath) && File.Exists(fontCssPath))
                 {
                     fontCss = await File.ReadAllTextAsync(fontCssPath);
-
-                    fontCss = Regex.Replace(fontCss,
-                        @"url\(\s*['""]?([^'"")\s]+)['""]?\s*\)",
-                        m =>
+                    fontCss = Regex.Replace(fontCss, @"url\(\s*['""]?([^'"")\s]+)['""]?\s*\)", m =>
+                    {
+                        var raw = m.Groups[1].Value;
+                        if (raw.StartsWith("data:") || raw.StartsWith("http")) return m.Value;
+                        var name = Path.GetFileName(raw.Replace('\\', '/'));
+                        var q = name.IndexOfAny(new[] { '?', '#' });
+                        if (q >= 0) name = name.Substring(0, q);
+                        var candidates = new List<string>
                         {
-                            var raw = m.Groups[1].Value;
-                            if (raw.StartsWith("data:") || raw.StartsWith("http")) return m.Value;
-
-                            var name = Path.GetFileName(raw.Replace('\\', '/'));
-                            var q = name.IndexOfAny(new[] { '?', '#' });
-                            if (q >= 0) name = name.Substring(0, q);
-
-                            var candidates = new List<string>();
-                            candidates.Add(Path.Combine(_currentBookPath, "FONTS", name));
-                            candidates.Add(Path.Combine(_currentBookPath, "fonts", name));
-                            candidates.Add(Path.Combine(directory, "FONTS", name));
-                            candidates.Add(Path.Combine(directory, "fonts", name));
-                            candidates.Add(Path.Combine(directory, name));
-                            candidates.Add(Path.Combine(directory, "images", name));
-                            candidates.Add(Path.Combine(_currentBookPath, "images", name));
-                            candidates.Add(Path.Combine(_currentBookPath, name));
-                            if (Directory.Exists(_currentBookPath))
+                            Path.Combine(_currentBookPath, "FONTS", name),
+                            Path.Combine(_currentBookPath, "fonts", name),
+                            Path.Combine(directory, "FONTS", name),
+                            Path.Combine(directory, "fonts", name),
+                            Path.Combine(directory, name),
+                            Path.Combine(directory, "images", name),
+                            Path.Combine(_currentBookPath, "images", name),
+                            Path.Combine(_currentBookPath, name)
+                        };
+                        if (Directory.Exists(_currentBookPath))
+                        {
+                            foreach (var s in Directory.GetDirectories(_currentBookPath, "s_*"))
                             {
-                                foreach (var s in Directory.GetDirectories(_currentBookPath, "s_*"))
-                                {
-                                    candidates.Add(Path.Combine(s, "images", name));
-                                    candidates.Add(Path.Combine(s, name));
-                                }
+                                candidates.Add(Path.Combine(s, "images", name));
+                                candidates.Add(Path.Combine(s, name));
                             }
-
-                            foreach (var c in candidates)
+                        }
+                        foreach (var c in candidates)
+                        {
+                            if (File.Exists(c))
                             {
-                                if (File.Exists(c))
+                                try
                                 {
-                                    try
+                                    var bytes = File.ReadAllBytes(c);
+                                    var ext = Path.GetExtension(c).ToLowerInvariant();
+                                    var mime = ext switch
                                     {
-                                        var bytes = File.ReadAllBytes(c);
-                                        var ext = Path.GetExtension(c).ToLowerInvariant();
-                                        var mime = ext switch
-                                        {
-                                            ".ttf" => "font/ttf",
-                                            ".otf" => "font/otf",
-                                            ".woff" => "font/woff",
-                                            ".woff2" => "font/woff2",
-                                            ".svg" => "image/svg+xml",
-                                            ".png" => "image/png",
-                                            ".jpg" or ".jpeg" => "image/jpeg",
-                                            ".gif" => "image/gif",
-                                            ".webp" => "image/webp",
-                                            _ => "application/octet-stream"
-                                        };
-                                        var uri = $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
-                                        return "url('" + uri + "')";
-                                    }
-                                    catch { }
+                                        ".ttf" => "font/ttf",
+                                        ".otf" => "font/otf",
+                                        ".woff" => "font/woff",
+                                        ".woff2" => "font/woff2",
+                                        ".svg" => "image/svg+xml",
+                                        ".png" => "image/png",
+                                        ".jpg" or ".jpeg" => "image/jpeg",
+                                        ".gif" => "image/gif",
+                                        ".webp" => "image/webp",
+                                        _ => "application/octet-stream"
+                                    };
+                                    var uri = $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
+                                    return "url('" + uri + "')";
                                 }
+                                catch { }
                             }
-
-                            Log($"[css-asset-miss] {raw} (dir={directory})");
-                            return m.Value;
-                        });
-
+                        }
+                        return m.Value;
+                    });
                     _fontCache[directory] = fontCss;
                     return fontCss;
                 }
