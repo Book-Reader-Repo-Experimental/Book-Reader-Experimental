@@ -10,7 +10,7 @@ namespace BookViewer.Services
 {
     public class PdfDomElement
     {
-        public string Type { get; set; } = "";
+        public string Type { get; set; } = ""; 
         public double X { get; set; }
         public double Y { get; set; }
         public double W { get; set; }
@@ -64,9 +64,26 @@ namespace BookViewer.Services
 
                     var json = await EvaluateJsAsync(html);
                     var elements = new List<PdfDomElement>();
+                    
+                    // Parse JSON with quotes handling for Windows
                     if (!string.IsNullOrEmpty(json) && json != "[]" && json != "null")
                     {
-                        try { elements = JsonSerializer.Deserialize<List<PdfDomElement>>(json) ?? new(); } catch { }
+                        try
+                        {
+                            var parsed = JsonSerializer.Deserialize<List<PdfDomElement>>(json);
+                            if (parsed != null) elements = parsed;
+                        }
+                        catch
+                        {
+                            // If JsonSerializer fails due to quotes, try to fix
+                            try
+                            {
+                                var cleanJson = json.Trim('"').Replace("\\\"", "\"");
+                                var parsed = JsonSerializer.Deserialize<List<PdfDomElement>>(cleanJson);
+                                if (parsed != null) elements = parsed;
+                            }
+                            catch { }
+                        }
                     }
 
                     var pdfPage = document.AddPage();
@@ -83,7 +100,7 @@ namespace BookViewer.Services
                         foreach (var el in elements)
                         {
                             double x = el.X * 0.75;
-                            double y = el.Y * 0.75;
+                            double y = el.Y * 0.75; 
                             double w = el.W * 0.75;
                             double h = el.H * 0.75;
 
@@ -94,7 +111,7 @@ namespace BookViewer.Services
                                 else if (el.IsBold) style = XFontStyle.Bold;
                                 else if (el.IsItalic) style = XFontStyle.Italic;
 
-                                var font = new XFont("Courier New", Math.Max(1, el.FontSize * 0.75), style);
+                                var font = new XFont("Arial", Math.Max(1, el.FontSize * 0.75), style);
                                 var rect = new XRect(x, y, w, h);
                                 gfx.DrawString(el.Text.Trim(), font, XBrushes.Black, rect, XStringFormats.TopLeft);
 
