@@ -13,7 +13,7 @@ namespace BookViewer.Platforms.Windows
         {
             try
             {
-                var hostControl = new Microsoft.UI.Xaml.Controls.Grid { Width = 1024, Height = 1344 };
+                var hostControl = new Grid { Width = 1024, Height = 1344 };
                 var webView = new Microsoft.UI.Xaml.Controls.WebView2 { Width = 1024, Height = 1344 };
                 hostControl.Children.Add(webView);
 
@@ -37,7 +37,7 @@ namespace BookViewer.Platforms.Windows
 
                 var js = "window.__getInteractiveElements ? window.__getInteractiveElements() : '[]'";
                 var result = await webView.CoreWebView2.ExecuteScriptAsync(js);
-                
+
                 webView.Close();
                 return result ?? "[]";
             }
