@@ -1,7 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
     <PropertyGroup>
         <TargetFrameworks>net9.0-android;net9.0-ios;net9.0-maccatalyst</TargetFrameworks>
-        <DefineConstants>$(DefineConstants);PDFSHARP_CUSTOM_FONT_RESOLVER</DefineConstants>
         <OutputType>Exe</OutputType>
         <UseMaui>true</UseMaui>
         <SingleProject>true</SingleProject>
@@ -41,14 +40,7 @@
         <PackageReference Include="Microsoft.Maui.Controls" Version="9.0.0" />
         <PackageReference Include="Microsoft.Maui.Controls.Compatibility" Version="9.0.0" />
         <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="9.0.0" />
-        <PackageReference Include="PdfSharpCore" Version="1.3.65" />
-    </ItemGroup>
-
-    <ItemGroup>
-        <PackageReference Include="Microsoft.Maui.Controls" Version="9.0.0" />
-        <PackageReference Include="Microsoft.Maui.Controls.Compatibility" Version="9.0.0" />
-        <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="9.0.0" />
-        <PackageReference Include="PdfSharpCore" Version="1.3.65" />
+        <PackageReference Include="CwSoftware.Papiro" Version="1.0.11" />
     </ItemGroup>
 
     <ItemGroup>
