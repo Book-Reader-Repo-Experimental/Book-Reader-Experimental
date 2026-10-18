@@ -32,7 +32,7 @@ namespace BookViewer.Services
                 var totalPages = _bookService.PageFiles.Count;
                 if (totalPages == 0) { OnError?.Invoke(this, "No pages to export"); return; }
 
-                var tempDir = Path.Combine(Path.GetTempPath(), "BookViewerPdfExport");
+                var tempDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "BookViewerPdfExport");
                 if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
                 Directory.CreateDirectory(tempDir);
 
@@ -50,13 +50,13 @@ namespace BookViewer.Services
                     string html = await _bookService.BuildPageHtmlForRenderAsync(
                         filePath, includeAnswers, includeTeacherNotes, includeStudentAnswers);
 
-                    // 1. Inject CSS to flatten the layout and force buttons visible
+                    // Inject CSS to flatten the layout and force buttons visible
                     html = InjectPdfCss(html);
 
-                    // 2. Extract base64 images to disk
+                    // Extract base64 images to disk
                     html = await ExtractBase64ImagesAsync(html, tempDir, i);
 
-                    var tempPdfPath = Path.Combine(tempDir, $"page_{i}.pdf");
+                    var tempPdfPath = System.IO.Path.Combine(tempDir, $"page_{i}.pdf");
                     tempFiles.Add(tempPdfPath);
 
                     using (var writer = new PdfWriter(tempPdfPath))
@@ -162,7 +162,7 @@ namespace BookViewer.Services
                 var base64 = match.Groups[3].Value;
 
                 var fileName = $"img_{pageIndex}_{Guid.NewGuid().ToString("N").Substring(0, 8)}.{ext}";
-                var filePath = Path.Combine(tempDir, fileName);
+                var filePath = System.IO.Path.Combine(tempDir, fileName);
 
                 try
                 {
