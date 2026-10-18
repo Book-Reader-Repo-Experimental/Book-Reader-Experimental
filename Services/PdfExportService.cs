@@ -1,10 +1,8 @@
 using PdfSharpCore.Drawing;
-using PdfSharpCore.Fonts;
 using PdfSharpCore.Pdf;
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 
@@ -30,7 +28,6 @@ namespace BookViewer.Services
     public class PdfExportService
     {
         private readonly BookService _bookService;
-        private readonly PdfFontResolver _fontResolver;
 
         public event EventHandler<int>? OnProgress;
         public event EventHandler<string>? OnComplete;
@@ -41,7 +38,6 @@ namespace BookViewer.Services
         public PdfExportService(BookService bookService)
         {
             _bookService = bookService;
-            _fontResolver = GlobalFontSettings.FontResolver as PdfFontResolver ?? new PdfFontResolver();
         }
 
         public async Task ExportBookAsPdfAsync(string outputPath, bool includeAnswers, bool includeTeacherNotes, bool includeStudentAnswers)
@@ -52,14 +48,11 @@ namespace BookViewer.Services
                 if (totalPages == 0) { OnError?.Invoke(this, "No pages to export"); return; }
                 if (EvaluateJsAsync == null) { OnError?.Invoke(this, "JS evaluation callback not set"); return; }
 
-                RegisterBookFonts(_bookService.CurrentBookPath);
-
                 double pageWidthPt = 1024 * 0.75;
                 double pageHeightPt = 1344 * 0.75;
 
                 var document = new PdfDocument();
                 document.Info.Title = _bookService.BookTitle;
-                document.Info.Creator = "BookViewer";
 
                 for (int i = 0; i < totalPages; i++)
                 {
@@ -80,9 +73,8 @@ namespace BookViewer.Services
                     pdfPage.Width = XUnit.FromPoint(pageWidthPt);
                     pdfPage.Height = XUnit.FromPoint(pageHeightPt);
 
-                    // FIX: Do NOT use 'using var gfx' here. 
-                    // It must be explicitly disposed AFTER all drawing is done.
-                    var gfx = XGraphics.FromPdfPage(pdfPage);
+                    // FIX: Use XGraphicsPdfPageOptions.Append
+                    var gfx = XGraphics.FromPdfPage(pdfPage, XGraphicsPdfPageOptions.Append);
                     try
                     {
                         gfx.DrawRectangle(XBrushes.White, 0, 0, pageWidthPt, pageHeightPt);
@@ -92,28 +84,21 @@ namespace BookViewer.Services
                         foreach (var el in elements)
                         {
                             double x = el.X * 0.75;
-                            // PDF Y-axis starts from the bottom, so we invert
-                            double y = pageHeightPt - ((el.Y + el.H) * 0.75);
+                            double y = el.Y * 0.75; 
                             double w = el.W * 0.75;
                             double h = el.H * 0.75;
 
                             if (el.Type == "text" && !string.IsNullOrWhiteSpace(el.Text))
                             {
-                                var brush = ParseColor(el.Color);
-
-                                var style = XFontStyle.Regular;
-                                if (el.IsBold && el.IsItalic) style = XFontStyle.BoldItalic;
-                                else if (el.IsBold) style = XFontStyle.Bold;
-                                else if (el.IsItalic) style = XFontStyle.Italic;
-
-                                var font = new XFont(el.FontFamily, Math.Max(1, el.FontSize * 0.75), style);
-                                var rect = new XRect(x, y, w, h);
+                                var font = new XFont("Courier New", Math.Max(1, el.FontSize * 0.75), XFontStyle.Regular);
                                 
-                                gfx.DrawString(el.Text.Trim(), font, brush, rect, XStringFormats.TopLeft);
+                                var rect = new XRect(x, y, w, h);
+                                gfx.DrawString(el.Text.Trim(), font, XBrushes.Black, rect, XStringFormats.TopLeft);
 
                                 if (!string.IsNullOrEmpty(el.Url))
                                 {
-                                    annots.Elements.Add(BuildLinkAnnot(document, x, y, w, h, el.Url, el.Text));
+                                    double pdfY = pageHeightPt - (y + h);
+                                    annots.Elements.Add(BuildLinkAnnot(document, x, pdfY, w, h, el.Url, el.Text));
                                 }
                             }
                             else if (el.Type == "image")
@@ -142,11 +127,8 @@ namespace BookViewer.Services
                     }
                     finally
                     {
-                        // Force PdfSharpCore to flush the drawing commands into the page's content stream
                         gfx.Dispose();
                     }
-
-                    OnProgress?.Invoke(this, (int)(((i + 1) / (double)totalPages) * 100));
                 }
 
                 document.Save(outputPath);
@@ -156,55 +138,6 @@ namespace BookViewer.Services
             {
                 OnError?.Invoke(this, ex.Message);
             }
-        }
-
-        private void RegisterBookFonts(string bookPath)
-        {
-            try
-            {
-                var fontDirs = new[] { Path.Combine(bookPath, "FONTS"), Path.Combine(bookPath, "fonts") };
-                foreach (var dir in fontDirs)
-                {
-                    if (!Directory.Exists(dir)) continue;
-                    foreach (var file in Directory.GetFiles(dir, "*.ttf").Concat(Directory.GetFiles(dir, "*.otf")))
-                    {
-                        var fileName = Path.GetFileNameWithoutExtension(file).ToLower();
-                        bool isBold = fileName.Contains("bold") || fileName.Contains("bd");
-                        bool isItalic = fileName.Contains("italic") || fileName.Contains("it");
-                        var familyName = fileName.Replace("-bold", "").Replace("-italic", "").Replace("bold", "").Replace("italic", "").Trim();
-                        
-                        _fontResolver.RegisterFont(familyName, isBold, isItalic, file);
-                    }
-                }
-
-#if IOS
-                RegisterIosFont("PingFang HK", false, false);
-                RegisterIosFont("PingFang HK", true, false);
-                RegisterIosFont("PingFang SC", false, false);
-                RegisterIosFont("PingFang SC", true, false);
-                RegisterIosFont("Helvetica", false, false);
-                RegisterIosFont("Helvetica", true, false);
-#endif
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"RegisterBookFonts error: {ex.Message}");
-            }
-        }
-
-        private void RegisterIosFont(string familyName, bool isBold, bool isItalic)
-        {
-#if IOS
-            try
-            {
-                var path = BookViewer.Platforms.iOS.IosFontExtractor.GetExactFontPath(familyName, isBold, isItalic);
-                if (!string.IsNullOrEmpty(path) && File.Exists(path))
-                {
-                    _fontResolver.RegisterFont(familyName, isBold, isItalic, path);
-                }
-            }
-            catch { }
-#endif
         }
 
         private async Task<byte[]?> LoadImageBytesAsync(string src)
@@ -224,37 +157,6 @@ namespace BookViewer.Services
             }
             catch { }
             return null;
-        }
-
-        private static XBrush ParseColor(string cssColor)
-        {
-            try
-            {
-                if (cssColor.StartsWith("rgb"))
-                {
-                    var parts = cssColor.Substring(cssColor.IndexOf("(") + 1).TrimEnd(')').Split(',');
-                    return new XSolidBrush(XColor.FromArgb(
-                        int.Parse(parts[0].Trim()),
-                        int.Parse(parts[1].Trim()),
-                        int.Parse(parts[2].Trim())));
-                }
-                if (cssColor.StartsWith("#"))
-                {
-                    var hex = cssColor.Substring(1);
-                    if (hex.Length == 3)
-                        return new XSolidBrush(XColor.FromArgb(
-                            Convert.ToInt32($"{hex[0]}{hex[0]}", 16),
-                            Convert.ToInt32($"{hex[1]}{hex[1]}", 16),
-                            Convert.ToInt32($"{hex[2]}{hex[2]}", 16)));
-                    if (hex.Length >= 6)
-                        return new XSolidBrush(XColor.FromArgb(
-                            Convert.ToInt32(hex.Substring(0, 2), 16),
-                            Convert.ToInt32(hex.Substring(2, 2), 16),
-                            Convert.ToInt32(hex.Substring(4, 2), 16)));
-                }
-            }
-            catch { }
-            return XBrushes.Black;
         }
 
         private static PdfDictionary BuildLinkAnnot(PdfDocument doc, double x, double y, double w, double h, string url, string tooltip)
