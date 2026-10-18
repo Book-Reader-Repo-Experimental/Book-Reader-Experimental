@@ -1,6 +1,10 @@
 using Microsoft.Maui.Controls;
 using Microsoft.Maui.Storage;
+using PdfSharpCore.Pdf;
+using PdfSharpCore.Pdf.IO;
+using Papiro;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -397,48 +401,58 @@ public partial class BookViewerPage : ContentPage
             ExportPdfButton.IsEnabled = false;
             StatusLabel.Text = "Generating PDF...";
 
-            var pdfService = Handler!.MauiContext!.Services.GetRequiredService<IHtmlToPdfConverter>();
+            var pdfService = Handler!.MauiContext!.Services.GetRequiredService<IHtmlToPdfService>();
             var totalPages = _bookService.PageFiles.Count;
-            bool firstPage = true;
+            var tempFiles = new List<string>();
 
             for (int i = 0; i < totalPages; i++)
             {
-                StatusLabel.Text = $"Generating PDF: Page {i + 1} / {totalPages}";
+                StatusLabel.Text = $"Rendering page {i + 1} / {totalPages}...";
                 
                 var filePath = _bookService.PageFiles[i];
                 string html = await _bookService.BuildPageHtmlForRenderAsync(
                     filePath, includeAnswers, includeTeacherNotes, includeStudentAnswers);
 
-                // Use Papiro to convert the HTML to PDF
-                byte[] pdfBytes = await pdfService.ConvertToPdfAsync(html, new PdfOptions
+                var tempPath = Path.Combine(exportDir, $"temp_{i}.pdf");
+                
+                // Papiro saves to file natively
+                var result = await pdfService.ConvertAndSaveAsync(html, tempPath);
+                
+                if (result.IsSuccess)
                 {
-                    PageSize = new PageSize(768, 1008), // 1024x1344 scaled by 0.75
-                    Orientation = PageOrientation.Portrait,
-                    Margin = new Thickness(0),
-                });
+                    tempFiles.Add(tempPath);
+                }
+            }
 
-                if (firstPage)
+            StatusLabel.Text = "Merging PDF pages...";
+            
+            // Use PdfSharpCore ONLY to merge the files (no text drawing, so no crashes)
+            using (var outputDoc = new PdfDocument())
+            {
+                foreach (var tempFile in tempFiles)
                 {
-                    await File.WriteAllBytesAsync(outputPath, pdfBytes);
-                    firstPage = false;
+                    using (var inputDoc = PdfReader.Open(tempFile, PdfDocumentOpenMode.Import))
+                    {
+                        for (int i = 0; i < inputDoc.PageCount; i++)
+                        {
+                            outputDoc.AddPage(inputDoc.Pages[i]);
+                        }
+                    }
                 }
-                else
-                {
-                    // Note: Merging PDFs requires a helper, or we can just save separate files.
-                    // For simplicity, Papiro doesn't have a built-in merger, so we'll concatenate them manually
-                    // or save as separate files. 
-                    // We will save as separate files for now to ensure it works.
-                    var partPath = Path.Combine(exportDir, $"{safe}_part_{i}.pdf");
-                    await File.WriteAllBytesAsync(partPath, pdfBytes);
-                }
+                outputDoc.Save(outputPath);
+            }
+
+            // Cleanup temp files
+            foreach (var tempFile in tempFiles)
+            {
+                try { File.Delete(tempFile); } catch { }
             }
 
             ExportPdfButton.IsEnabled = true;
             StatusLabel.Text = "PDF Export Complete!";
 
-            // Since Papiro creates one PDF per page, we recommend opening the first page, 
-            // or we can use a PDF merger library later.
-            await Launcher.Default.OpenAsync(new OpenFileRequest { File = new ReadOnlyFile(outputPath) });
+            var openNow = await DisplayAlert("Export Complete", $"PDF saved to:\n{outputPath}\n\nOpen it now?", "Open", "Later");
+            if (openNow) await Launcher.Default.OpenAsync(new OpenFileRequest { File = new ReadOnlyFile(outputPath) });
         }
         catch (Exception ex)
         {
