@@ -32,13 +32,12 @@
         <WindowsPackageType Condition="'$(TargetFramework)' == 'net9.0-windows10.0.19041.0'">None</WindowsPackageType>
     </PropertyGroup>
 
+    <!-- SINGLE ItemGroup for Packages -->
     <ItemGroup>
-        <PackageReference Include="CwSoftware.Papiro" Version="1.0.2" />
         <PackageReference Include="Microsoft.Maui.Controls" Version="9.0.0" />
         <PackageReference Include="Microsoft.Maui.Controls.Compatibility" Version="9.0.0" />
         <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="9.0.0" />
         <PackageReference Include="PdfSharpCore" Version="1.3.65" />
-        <PackageReference Include="CwSoftware.Papiro" Version="1.0.11" />
     </ItemGroup>
 
     <ItemGroup>
