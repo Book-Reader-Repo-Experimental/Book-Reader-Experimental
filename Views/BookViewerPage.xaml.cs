@@ -155,69 +155,35 @@ public partial class BookViewerPage : ContentPage
             if (!string.IsNullOrEmpty(_targetSectionId) && _targetStep > 0)
             {
                 int idx = _bookService.FindPageIndex(_targetSectionId, _targetStep);
-                Log($"FindPageIndex('{_targetSectionId}', {_targetStep}) -> {idx}");
-                if (idx >= 0 && idx < _bookService.PageFiles.Count)
-                {
-                    await _bookService.LoadPageAsync(idx);
-                    return;
-                }
+                if (idx >= 0 && idx < _bookService.PageFiles.Count) { await _bookService.LoadPageAsync(idx); return; }
                 int first = _bookService.GetFirstIndexOfSection(_targetSectionId);
-                Log($"GetFirstIndexOfSection('{_targetSectionId}') -> {first}");
-                if (first >= 0 && first < _bookService.PageFiles.Count)
-                {
-                    await _bookService.LoadPageAsync(first);
-                    return;
-                }
+                if (first >= 0 && first < _bookService.PageFiles.Count) { await _bookService.LoadPageAsync(first); return; }
             }
 
             if (!string.IsNullOrEmpty(_targetSectionId))
             {
                 int idx = _bookService.GetFirstIndexOfSection(_targetSectionId);
-                if (idx < 0 && _startFolio > 0)
-                    idx = _bookService.GetIndexForSectionFolio(_targetSectionId, _startFolio);
-                Log($"section-only lookup -> {idx}");
-                if (idx >= 0 && idx < _bookService.PageFiles.Count)
-                {
-                    await _bookService.LoadPageAsync(idx);
-                    return;
-                }
+                if (idx < 0 && _startFolio > 0) idx = _bookService.GetIndexForSectionFolio(_targetSectionId, _startFolio);
+                if (idx >= 0 && idx < _bookService.PageFiles.Count) { await _bookService.LoadPageAsync(idx); return; }
             }
 
             if (_startFolio > 0)
             {
                 int idx = _bookService.GetIndexForFolio(_startFolio);
-                Log($"GetIndexForFolio({_startFolio}) -> {idx}");
-                if (idx >= 0 && idx < _bookService.PageFiles.Count)
-                {
-                    await _bookService.LoadPageAsync(idx);
-                    return;
-                }
+                if (idx >= 0 && idx < _bookService.PageFiles.Count) { await _bookService.LoadPageAsync(idx); return; }
             }
-
-            Log("No target matched — leaving on page 0");
         };
     }
 
-    public BookViewerPage(string bookFolder, string sectionId, int startFolio)
-        : this(bookFolder, startFolio)
-    {
-        _targetSectionId = sectionId;
-    }
-
-    public BookViewerPage(string bookFolder, string sectionId, int step, int startFolio)
-        : this(bookFolder, startFolio)
-    {
-        _targetSectionId = sectionId;
-        _targetStep = step;
-    }
+    public BookViewerPage(string bookFolder, string sectionId, int startFolio) : this(bookFolder, startFolio) { _targetSectionId = sectionId; }
+    public BookViewerPage(string bookFolder, string sectionId, int step, int startFolio) : this(bookFolder, startFolio) { _targetSectionId = sectionId; _targetStep = step; }
 
     private async void OnWebViewNavigating(object? sender, WebNavigatingEventArgs e)
     {
         var url = e.Url;
         if (string.IsNullOrEmpty(url)) return;
 
-        bool isBridge = url.StartsWith("bookviewer://", StringComparison.OrdinalIgnoreCase)
-                     || url.Contains("about:blank#");
+        bool isBridge = url.StartsWith("bookviewer://", StringComparison.OrdinalIgnoreCase) || url.Contains("about:blank#");
         if (!isBridge) return;
 
         e.Cancel = true;
@@ -251,9 +217,8 @@ public partial class BookViewerPage : ContentPage
                 var bookUid = q["bookUID"];
                 var section = q["section"] ?? "";
                 var unit = q["unit"] ?? "";
-                var stepStr = q["step"] ?? "";
                 int step = 0;
-                int.TryParse(stepStr, out step);
+                int.TryParse(q["step"] ?? "", out step);
 
                 if (string.IsNullOrEmpty(section) && !string.IsNullOrEmpty(unit))
                 {
@@ -263,25 +228,14 @@ public partial class BookViewerPage : ContentPage
 
                 if (string.IsNullOrEmpty(bookUid)) return;
 
-                var targetFolder = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-                    "BookViewer", "Books", "book_" + bookUid);
+                var targetFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "BookViewer", "Books", "book_" + bookUid);
+                if (!Directory.Exists(targetFolder)) { await DisplayAlert("Not found", $"Book folder not found:\nbook_{bookUid}", "OK"); return; }
 
-                if (!Directory.Exists(targetFolder))
-                {
-                    await DisplayAlert("Not found", $"Book folder not found:\nbook_{bookUid}", "OK");
-                    return;
-                }
-
-                var viewer = new BookViewerPage(targetFolder, section, step, 0);
-                await Navigation.PushAsync(viewer);
+                await Navigation.PushAsync(new BookViewerPage(targetFolder, section, step, 0));
             }
             else if (host == "assessment-open")
             {
-                var elId = q["id"] ?? "";
-                var poolType = q["poolType"] ?? "ASSESSMENT";
-                var groupFromUrl = q["group"] ?? "";
-                await OpenAssessmentAsync(elId, poolType, groupFromUrl);
+                await OpenAssessmentAsync(q["id"] ?? "", q["poolType"] ?? "ASSESSMENT", q["group"] ?? "");
             }
             else if (host == "assessment-close" || host == "assessment-complete")
             {
@@ -289,49 +243,28 @@ public partial class BookViewerPage : ContentPage
             }
             else if (host == "open-resource")
             {
-                var resourceUrl  = q["url"]  ?? "";
-                var resourceDesc = q["desc"] ?? "";
-                var openInApp    = q["openInApp"] == "1";
-                var audio        = q["audio"] == "1";
-
+                var resourceUrl = q["url"] ?? "";
                 if (string.IsNullOrEmpty(resourceUrl)) return;
 
                 if (resourceUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
                 {
                     try
                     {
-                        if (Uri.TryCreate(resourceUrl, UriKind.Absolute, out var remoteUri))
-                            await Launcher.Default.OpenAsync(remoteUri);
-                        else
-                            await DisplayAlert("Cannot open", $"Not a valid URL:\n{resourceUrl}", "OK");
+                        if (Uri.TryCreate(resourceUrl, UriKind.Absolute, out var remoteUri)) await Launcher.Default.OpenAsync(remoteUri);
+                        else await DisplayAlert("Cannot open", $"Not a valid URL:\n{resourceUrl}", "OK");
                     }
-                    catch (Exception ex)
-                    {
-                        await DisplayAlert("Cannot open link", ex.Message, "OK");
-                    }
+                    catch (Exception ex) { await DisplayAlert("Cannot open link", ex.Message, "OK"); }
                     return;
                 }
 
                 string absolutePath = resourceUrl;
-                if (!Path.IsPathRooted(resourceUrl))
-                {
-                    absolutePath = Path.Combine(_bookService.CurrentBookPath, resourceUrl.Replace('/', Path.DirectorySeparatorChar));
-                }
+                if (!Path.IsPathRooted(resourceUrl)) absolutePath = Path.Combine(_bookService.CurrentBookPath, resourceUrl.Replace('/', Path.DirectorySeparatorChar));
 
-                if (File.Exists(absolutePath))
-                {
-                    await OpenLocalResourceAsync(absolutePath, openInApp);
-                }
-                else
-                {
-                    await DisplayAlert("File Not Found", $"Could not find the file:\n{absolutePath}", "OK");
-                }
+                if (File.Exists(absolutePath)) await OpenLocalResourceAsync(absolutePath, q["openInApp"] == "1");
+                else await DisplayAlert("File Not Found", $"Could not find the file:\n{absolutePath}", "OK");
             }
         }
-        catch (Exception ex)
-        {
-            Log($"bridge nav error: {ex.Message}");
-        }
+        catch (Exception ex) { Log($"bridge nav error: {ex.Message}"); }
     }
 
     private async Task OpenLocalResourceAsync(string path, bool forceApp)
@@ -340,68 +273,34 @@ public partial class BookViewerPage : ContentPage
         try
         {
 #if ANDROID
-            var ok = Platforms.Android.FileOpener.OpenFile(path);
-            if (!ok)
-            {
-                await Share.Default.RequestAsync(new ShareFileRequest
-                {
-                    Title = fileName,
-                    File = new ShareFile(path)
-                });
-            }
+            if (!Platforms.Android.FileOpener.OpenFile(path)) await Share.Default.RequestAsync(new ShareFileRequest { Title = fileName, File = new ShareFile(path) });
 #elif IOS
-            await Share.Default.RequestAsync(new ShareFileRequest
-            {
-                Title = fileName,
-                File = new ShareFile(path)
-            });
+            await Share.Default.RequestAsync(new ShareFileRequest { Title = fileName, File = new ShareFile(path) });
 #elif MACCATALYST
-            var ok = Platforms.MacCatalyst.FileOpener.OpenFile(path);
-            if (!ok)
-            {
-                await Launcher.Default.OpenAsync(new OpenFileRequest { File = new ReadOnlyFile(path) });
-            }
+            if (!Platforms.MacCatalyst.FileOpener.OpenFile(path)) await Launcher.Default.OpenAsync(new OpenFileRequest { File = new ReadOnlyFile(path) });
 #elif WINDOWS
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = Path.GetFullPath(path),
-                UseShellExecute = true
-            });
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = Path.GetFullPath(path), UseShellExecute = true });
 #else
             await Launcher.Default.OpenAsync(new OpenFileRequest { File = new ReadOnlyFile(path) });
 #endif
         }
-        catch (Exception ex)
-        {
-            await DisplayAlert("Cannot open", ex.Message, "OK");
-        }
+        catch (Exception ex) { await DisplayAlert("Cannot open", ex.Message, "OK"); }
     }
 
     private async void OnContentWebViewNavigated(object? sender, WebNavigatedEventArgs e)
     {
         if (string.IsNullOrEmpty(_currentContentHtml)) return;
-        if (!_currentContentHtml.Contains("__setNotes") &&
-            !_currentContentHtml.Contains("__setRedAnswers"))
-        {
-            return;
-        }
-        await ApplyAnswerOverridesAsync();
+        if (_currentContentHtml.Contains("__setNotes") || _currentContentHtml.Contains("__setRedAnswers")) await ApplyAnswerOverridesAsync();
     }
 
     private async Task ApplyAnswerOverridesAsync()
     {
         try
         {
-            var notesJs = $"window.__setNotes({(_showTeacherNotes ? "true" : "false")})";
-            await ContentWebView.EvaluateJavaScriptAsync(notesJs);
-
-            var answersJs = $"window.__setRedAnswers({(_showStudentAnswers ? "true" : "false")})";
-            await ContentWebView.EvaluateJavaScriptAsync(answersJs);
+            await ContentWebView.EvaluateJavaScriptAsync($"window.__setNotes({(_showTeacherNotes ? "true" : "false")})");
+            await ContentWebView.EvaluateJavaScriptAsync($"window.__setRedAnswers({(_showStudentAnswers ? "true" : "false")})");
         }
-        catch (Exception ex)
-        {
-            Log($"[override] apply err: {ex.Message}");
-        }
+        catch { }
     }
 
     private async Task OpenAssessmentAsync(string elId, string poolType, string groupFromUrl = null)
@@ -411,24 +310,13 @@ public partial class BookViewerPage : ContentPage
             var groupId = groupFromUrl;
             if (string.IsNullOrEmpty(groupId))
             {
-                var m = Regex.Match(_currentContentHtml ?? "",
-                    @"id=""BY_assessmentQuestion_" + Regex.Escape(elId) + @"""[^>]*>([^<]+)<",
-                    RegexOptions.IgnoreCase);
+                var m = Regex.Match(_currentContentHtml ?? "", @"id=""BY_assessmentQuestion_" + Regex.Escape(elId) + @"""[^>]*>([^<]+)<", RegexOptions.IgnoreCase);
                 if (m.Success) groupId = m.Groups[1].Value.Trim();
             }
-
-            if (string.IsNullOrEmpty(groupId))
-            {
-                await DisplayAlert("Missing group", "No question group id for " + elId, "OK");
-                return;
-            }
+            if (string.IsNullOrEmpty(groupId)) { await DisplayAlert("Missing group", "No question group id for " + elId, "OK"); return; }
 
             var poolPath = _bookService.FindPoolFile(groupId);
-            if (string.IsNullOrEmpty(poolPath) || !File.Exists(poolPath))
-            {
-                await DisplayAlert("Not found", $"Interactive activity not found for group {groupId}.", "OK");
-                return;
-            }
+            if (string.IsNullOrEmpty(poolPath) || !File.Exists(poolPath)) { await DisplayAlert("Not found", $"Interactive activity not found for group {groupId}.", "OK"); return; }
 
             var html = await _bookService.BuildPoolHtmlAsync(poolPath, groupId);
 
@@ -437,10 +325,7 @@ public partial class BookViewerPage : ContentPage
             AssessmentOverlay.IsVisible = true;
             ContentWebView.IsVisible = false;
         }
-        catch (Exception ex)
-        {
-            await DisplayAlert("Error", ex.Message, "OK");
-        }
+        catch (Exception ex) { await DisplayAlert("Error", ex.Message, "OK"); }
     }
 
     private void CloseAssessment()
@@ -451,12 +336,7 @@ public partial class BookViewerPage : ContentPage
     }
 
     private void OnAssessmentCloseClicked(object sender, EventArgs e) => CloseAssessment();
-
-    private async void OnAssessmentBackClicked(object sender, EventArgs e)
-    {
-        try { await AssessmentWebView.EvaluateJavaScriptAsync("history.back()"); }
-        catch { CloseAssessment(); }
-    }
+    private async void OnAssessmentBackClicked(object sender, EventArgs e) { try { await AssessmentWebView.EvaluateJavaScriptAsync("history.back()"); } catch { CloseAssessment(); } }
 
     private async Task UpdateTwoPageLayoutAsync()
     {
@@ -464,32 +344,17 @@ public partial class BookViewerPage : ContentPage
         {
             var combined = await _bookService.BuildTwoPageHtmlAsync();
             ContentWebView.Source = new HtmlWebViewSource { Html = combined };
-            ContentWebView.IsVisible = true;
         }
-        else
-        {
-            ContentWebView.Source = new HtmlWebViewSource { Html = _currentContentHtml };
-            ContentWebView.IsVisible = true;
-        }
-
+        else ContentWebView.Source = new HtmlWebViewSource { Html = _currentContentHtml };
+        
+        ContentWebView.IsVisible = true;
         NextPageWebView.IsVisible = false;
         RightColumn.Width = new GridLength(0);
         UpdateUI();
     }
 
-    private async void OnTeacherNotesClicked(object sender, EventArgs e)
-    {
-        _showTeacherNotes = !_showTeacherNotes;
-        UpdateTeacherButton();
-        await ApplyAnswerOverridesAsync();
-    }
-
-    private async void OnStudentAnswersClicked(object sender, EventArgs e)
-    {
-        _showStudentAnswers = !_showStudentAnswers;
-        UpdateStudentButton();
-        await ApplyAnswerOverridesAsync();
-    }
+    private async void OnTeacherNotesClicked(object sender, EventArgs e) { _showTeacherNotes = !_showTeacherNotes; UpdateTeacherButton(); await ApplyAnswerOverridesAsync(); }
+    private async void OnStudentAnswersClicked(object sender, EventArgs e) { _showStudentAnswers = !_showStudentAnswers; UpdateStudentButton(); await ApplyAnswerOverridesAsync(); }
 
     private void UpdateTeacherButton()
     {
@@ -522,7 +387,6 @@ public partial class BookViewerPage : ContentPage
             {
                 includeTeacherNotes = await DisplayAlert("Answer Type", "Include Teacher Notes?", "Yes", "No");
                 includeStudentAnswers = await DisplayAlert("Answer Type", "Include Student Answers?", "Yes", "No");
-                if (!includeTeacherNotes && !includeStudentAnswers) includeAnswers = false;
             }
 
             var safe = string.Join("_", _bookService.BookTitle.Split(Path.GetInvalidFileNameChars()));
@@ -535,24 +399,30 @@ public partial class BookViewerPage : ContentPage
 
             var pdfService = new Services.PdfExportService(_bookService);
             
+            pdfService.OnProgress += (s, pct) => Dispatcher.Dispatch(() => StatusLabel.Text = $"PDF Progress: {pct}%");
+            pdfService.OnError += (s, err) => Dispatcher.Dispatch(() => StatusLabel.Text = $"PDF Error: {err}");
+
             pdfService.EvaluateJsAsync = async (html) =>
             {
+                Dispatcher.Dispatch(() => StatusLabel.Text = "Extracting DOM...");
+                
 #if IOS
-                return await BookViewer.Platforms.iOS.HtmlJsEvaluator.EvaluateInteractiveElementsAsync(html);
+                var res = await BookViewer.Platforms.iOS.HtmlJsEvaluator.EvaluateInteractiveElementsAsync(html);
 #elif MACCATALYST
-                return await BookViewer.Platforms.MacCatalyst.HtmlJsEvaluator.EvaluateInteractiveElementsAsync(html);
+                var res = await BookViewer.Platforms.MacCatalyst.HtmlJsEvaluator.EvaluateInteractiveElementsAsync(html);
 #elif ANDROID
-                return await BookViewer.Platforms.Android.HtmlJsEvaluator.EvaluateInteractiveElementsAsync(html);
+                var res = await BookViewer.Platforms.Android.HtmlJsEvaluator.EvaluateInteractiveElementsAsync(html);
 #elif WINDOWS
-                return await BookViewer.Platforms.Windows.HtmlJsEvaluator.EvaluateInteractiveElementsAsync(html);
+                var res = await BookViewer.Platforms.Windows.HtmlJsEvaluator.EvaluateInteractiveElementsAsync(html);
 #else
-                await Task.CompletedTask; return "[]";
+                var res = "[]";
 #endif
+                Dispatcher.Dispatch(() => StatusLabel.Text = $"DOM String Length: {res?.Length ?? 0}");
+                return res;
             };
 
             var tcs = new TaskCompletionSource<string>();
             pdfService.OnComplete += (s, path) => tcs.TrySetResult(path);
-            pdfService.OnError += (s, error) => tcs.TrySetException(new Exception(error));
 
             await pdfService.ExportBookAsPdfAsync(outputPath, includeAnswers, includeTeacherNotes, includeStudentAnswers);
             var resultPath = await tcs.Task;
