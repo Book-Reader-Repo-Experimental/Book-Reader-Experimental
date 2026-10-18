@@ -35,7 +35,7 @@ namespace BookViewer.Platforms.Windows
                 await tcs.Task;
                 await Task.Delay(300);
 
-                var js = "window.__getInteractiveElements ? window.__getInteractiveElements() : '[]'";
+                var js = "window.__getPdfDom ? window.__getPdfDom() : '[]'";
                 var result = await webView.CoreWebView2.ExecuteScriptAsync(js);
 
                 webView.Close();
