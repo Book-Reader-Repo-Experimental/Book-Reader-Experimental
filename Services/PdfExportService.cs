@@ -165,8 +165,13 @@ namespace BookViewer.Services
                         var rect = new Rectangle(x, y, 24, 24);
                         var fieldName = $"Toggle_{pageIndex}_{imgId}_{btnCounter++}";
         
-                        // CreatePushButton is a static method on PdfFormField, not PdfButtonFormField
-                        var buttonField = PdfFormField.CreatePushButton(pdf, rect, fieldName, "");
+                        // Use the builder pattern (iText 7.2+ / 8.x) instead of the removed
+                        // static factory PdfFormField.CreatePushButton.
+                        var buttonField = new PushButtonFormFieldBuilder(pdf, fieldName)
+                            .SetWidgetRectangle(rect)
+                            .SetCaption("")
+                            .CreatePushButton();
+                        
                         buttonField.SetAdditionalAction(PdfName.U, action);
                         
                         foreach (var w in buttonField.GetWidgets())
