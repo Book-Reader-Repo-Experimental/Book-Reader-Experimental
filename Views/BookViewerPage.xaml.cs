@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Web;
 using Color = Microsoft.Maui.Graphics.Color;
+using BookViewer.Services; // <-- ADD THIS LINE
 
 namespace BookViewer.Views;
 
