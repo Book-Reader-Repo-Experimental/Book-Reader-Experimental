@@ -1,5 +1,5 @@
-using PdfSharpCore.Drawing;
 using PdfSharpCore.Pdf;
+using PdfSharpCore.Pdf.Advanced;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -54,19 +54,42 @@ namespace BookViewer.Services
                         System.Diagnostics.Debug.WriteLine($"Capture error page {i + 1}: {ex.Message}");
                     }
 
-                    if (imageBytes == null || imageBytes.Length == 0) continue;
+                    if (imageBytes == null || imageBytes.Length == 0)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Skipping page {i + 1} (no image)");
+                        continue;
+                    }
 
                     var pdfPage = document.AddPage();
-                    pdfPage.Width = XUnit.FromPoint(pageWidthPt);
-                    pdfPage.Height = XUnit.FromPoint(pageHeightPt);
+                    pdfPage.Width = PdfSharpCore.Drawing.XUnit.FromPoint(pageWidthPt);
+                    pdfPage.Height = PdfSharpCore.Drawing.XUnit.FromPoint(pageHeightPt);
 
-                    using (var gfx = XGraphics.FromPdfPage(pdfPage))
-                    using (var ms = new MemoryStream(imageBytes))
-                    {
-                        var img = XImage.FromStream(() => ms);
-                        gfx.DrawImage(img, 0, 0, pageWidthPt, pageHeightPt);
-                        img.Dispose();
-                    }
+                    // MANUAL IMAGE EMBEDDING (Bypasses XGraphics)
+                    var pdfImage = new PdfImage(document);
+                    pdfImage.Stream.Value = imageBytes;
+                    pdfImage.Width = (int)pageWidthPt;
+                    pdfImage.Height = (int)pageHeightPt;
+                    
+                    var xObject = document.Internals.AddObject(pdfImage);
+                    
+                    var content = new PdfSharpCore.Pdf.PdfContent(document);
+                    content.Append("q\n");
+                    
+                    string cmCommand = string.Format(System.Globalization.CultureInfo.InvariantCulture, 
+                        "{0} 0 0 {1} 0 0 cm\n", pageWidthPt, pageHeightPt);
+                    content.Append(cmCommand);
+                    
+                    content.Append("/Im0 Do\n");
+                    content.Append("Q\n");
+
+                    var pageContent = new PdfSharpCore.Pdf.PdfContent(document);
+                    pageContent.CreateStream(content.ToString());
+                    pdfPage.Contents.Add(pageContent);
+
+                    var resources = new PdfResources();
+                    resources.Elements["/XObject"] = new PdfDictionary(document);
+                    ((PdfDictionary)resources.Elements["/XObject"]).Elements["/Im0"] = xObject.Reference;
+                    pdfPage.Elements["/Resources"] = resources;
                 }
 
                 document.Save(outputPath);
