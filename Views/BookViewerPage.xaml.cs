@@ -211,7 +211,7 @@ public partial class BookViewerPage : ContentPage
         _targetStep = step;
     }
 
-    private async void OnWebViewNavigating(object sender, WebNavigatingEventArgs e)
+    private async void OnWebViewNavigating(object? sender, WebNavigatingEventArgs e)
     {
         var url = e.Url;
         if (string.IsNullOrEmpty(url)) return;
@@ -377,7 +377,7 @@ public partial class BookViewerPage : ContentPage
         }
     }
 
-    private async void OnContentWebViewNavigated(object sender, WebNavigatedEventArgs e)
+    private async void OnContentWebViewNavigated(object? sender, WebNavigatedEventArgs e)
     {
         if (string.IsNullOrEmpty(_currentContentHtml)) return;
         if (!_currentContentHtml.Contains("__setNotes") &&
@@ -535,21 +535,6 @@ public partial class BookViewerPage : ContentPage
 
             var pdfService = new Services.PdfExportService(_bookService);
             
-            pdfService.RenderPageToImageAsync = async (html) =>
-            {
-#if IOS
-                return await BookViewer.Platforms.iOS.WebViewCapture.CaptureHtmlAsync(html, 1024, 1344);
-#elif MACCATALYST
-                return await BookViewer.Platforms.MacCatalyst.WebViewCapture.CaptureHtmlAsync(html, 1024, 1344);
-#elif ANDROID
-                return await BookViewer.Platforms.Android.WebViewCapture.CaptureHtmlAsync(html, 1024, 1344);
-#elif WINDOWS
-                return await BookViewer.Platforms.Windows.WebViewCapture.CaptureHtmlAsync(html, 1024, 1344);
-#else
-                await Task.CompletedTask; return null;
-#endif
-            };
-
             pdfService.EvaluateJsAsync = async (html) =>
             {
 #if IOS
