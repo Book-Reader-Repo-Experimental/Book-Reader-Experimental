@@ -12,7 +12,7 @@ namespace BookViewer.Services
 {
     public class PdfDomElement
     {
-        public string Type { get; set; } = "";
+        public string Type { get; set; } = ""; // "text" or "image"
         public double X { get; set; }
         public double Y { get; set; }
         public double W { get; set; }
@@ -23,7 +23,7 @@ namespace BookViewer.Services
         public string Color { get; set; } = "#000000";
         public bool IsBold { get; set; }
         public bool IsItalic { get; set; }
-        public string FontFamily { get; set; } = ""; // The exact CSS family name
+        public string FontFamily { get; set; } = "Arial";
         public string Url { get; set; } = "";
     }
 
@@ -41,12 +41,9 @@ namespace BookViewer.Services
         public PdfExportService(BookService bookService)
         {
             _bookService = bookService;
-            _fontResolver = new PdfFontResolver();
             
-            if (GlobalFontSettings.FontResolver == null)
-            {
-                GlobalFontSettings.FontResolver = _fontResolver;
-            }
+            // Cast the global resolver to our custom type so we can register book fonts
+            _fontResolver = GlobalFontSettings.FontResolver as PdfFontResolver ?? new PdfFontResolver();
         }
 
         public async Task ExportBookAsPdfAsync(string outputPath, bool includeAnswers, bool includeTeacherNotes, bool includeStudentAnswers)
@@ -57,7 +54,6 @@ namespace BookViewer.Services
                 if (totalPages == 0) { OnError?.Invoke(this, "No pages to export"); return; }
                 if (EvaluateJsAsync == null) { OnError?.Invoke(this, "JS evaluation callback not set"); return; }
 
-                // 1. Register the exact fonts used in the book
                 RegisterBookFonts(_bookService.CurrentBookPath);
 
                 double pageWidthPt = 1024 * 0.75;
@@ -101,17 +97,13 @@ namespace BookViewer.Services
                         if (el.Type == "text" && !string.IsNullOrWhiteSpace(el.Text))
                         {
                             var brush = ParseColor(el.Color);
-                            
-                            // Use the exact font family name the WebView used
-                            string fontFamily = string.IsNullOrWhiteSpace(el.FontFamily) ? "Arial" : el.FontFamily;
-                            
+
                             var style = XFontStyle.Regular;
                             if (el.IsBold && el.IsItalic) style = XFontStyle.BoldItalic;
                             else if (el.IsBold) style = XFontStyle.Bold;
                             else if (el.IsItalic) style = XFontStyle.Italic;
 
-                            var font = new XFont(fontFamily, Math.Max(1, el.FontSize * 0.75), style);
-                            
+                            var font = new XFont(el.FontFamily, Math.Max(1, el.FontSize * 0.75), style);
                             var rect = new XRect(x, y, w, h);
                             gfx.DrawString(el.Text.Trim(), font, brush, rect, XStringFormats.TopLeft);
 
@@ -160,9 +152,7 @@ namespace BookViewer.Services
         {
             try
             {
-                // Find all TTF/OTF files the book downloaded in its FONTS folder
                 var fontDirs = new[] { Path.Combine(bookPath, "FONTS"), Path.Combine(bookPath, "fonts") };
-                
                 foreach (var dir in fontDirs)
                 {
                     if (!Directory.Exists(dir)) continue;
@@ -170,12 +160,9 @@ namespace BookViewer.Services
                     foreach (var file in Directory.GetFiles(dir, "*.ttf").Concat(Directory.GetFiles(dir, "*.otf")))
                     {
                         var fileName = Path.GetFileNameWithoutExtension(file).ToLower();
-                        
-                        // Determine style from filename
                         bool isBold = fileName.Contains("bold") || fileName.Contains("bd");
                         bool isItalic = fileName.Contains("italic") || fileName.Contains("it");
-                        
-                        // Determine family name from filename (strip out style suffixes)
+
                         var familyName = fileName
                             .Replace("-bold", "").Replace("-italic", "").Replace("-bd", "").Replace("-it", "")
                             .Replace("bold", "").Replace("italic", "").Trim();
@@ -185,22 +172,19 @@ namespace BookViewer.Services
                     }
                 }
 
-                // Also register system CJK fallbacks by copying them to the cache or pointing to platform paths
-                // On iOS/Android, we can register built-in system fonts by pointing to their files.
 #if ANDROID
                 var systemFonts = new Dictionary<string, string>
                 {
                     { "sans-serif", "/system/fonts/Roboto-Regular.ttf" },
-                    { "sans-serif-bold", "/system/fonts/Roboto-Bold.ttf" },
+                    { "sans-serif", "/system/fonts/Roboto-Bold.ttf" },
                     { "serif", "/system/fonts/NotoSerif-Regular.ttf" },
-                    { "monospace", "/system/fonts/DroidSansMono.ttf" }
                 };
                 foreach (var kvp in systemFonts)
                 {
                     if (File.Exists(kvp.Value))
                     {
-                        var fam = kvp.Key.Replace("-bold", "");
-                        _fontResolver.RegisterFont(fam, kvp.Key.Contains("bold"), false, kvp.Value);
+                        bool isBold = kvp.Value.Contains("Bold");
+                        _fontResolver.RegisterFont(kvp.Key, isBold, false, kvp.Value);
                     }
                 }
 #endif
@@ -215,8 +199,8 @@ namespace BookViewer.Services
                 {
                     if (File.Exists(kvp.Value))
                     {
-                        var fam = kvp.Key.Replace("-Bold", "");
-                        _fontResolver.RegisterFont(fam, kvp.Key.Contains("Bold"), false, kvp.Value);
+                        bool isBold = kvp.Key.Contains("Bold");
+                        _fontResolver.RegisterFont(kvp.Key.Replace("-Bold", ""), isBold, false, kvp.Value);
                     }
                 }
 #endif
