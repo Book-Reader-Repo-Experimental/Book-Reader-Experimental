@@ -3,6 +3,10 @@ using iText.Html2pdf.Resolver.Font;
 using iText.Kernel.Pdf;
 using iText.Kernel.Utils;
 using iText.Kernel.Geom;
+using iText.Forms;
+using iText.Forms.Fields;
+using iText.Kernel.Pdf.Action;
+using iText.Kernel.Pdf.Annot;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -39,7 +43,6 @@ namespace BookViewer.Services
                 var converterProperties = new ConverterProperties();
                 converterProperties.SetFontProvider(new DefaultFontProvider(true, true, true));
 
-                // 1024x1344 pixels at 96 DPI = 768x1008 points
                 var pageSize = new PageSize(768f, 1008f);
 
                 for (int i = 0; i < totalPages; i++)
@@ -50,10 +53,7 @@ namespace BookViewer.Services
                     string html = await _bookService.BuildPageHtmlForRenderAsync(
                         filePath, includeAnswers, includeTeacherNotes, includeStudentAnswers);
 
-                    // 1. Inject CSS to enforce correct page size, keep absolute positioning, and force buttons visible
                     html = InjectPdfCss(html);
-
-                    // 2. Extract base64 images to disk
                     html = await ExtractBase64ImagesAsync(html, tempDir, i);
 
                     var tempPdfPath = System.IO.Path.Combine(tempDir, $"page_{i}.pdf");
@@ -113,8 +113,6 @@ namespace BookViewer.Services
         overflow: visible !important;
         background: #fff !important;
     }
-    
-    /* Keep absolute positioning for the page container but scale it */
     .page-container { 
         position: relative !important;
         width: 768pt !important; 
@@ -123,16 +121,12 @@ namespace BookViewer.Services
         transform-origin: top left !important;
         margin: 0 !important;
     }
-    
-    /* Force answer/notes toggle buttons to be visible */
     .hideBtn { display: inline-block !important; visibility: visible !important; }
     img.redbtn, img.hsgbtn, img.has2btn { 
         display: inline-block !important; 
         visibility: visible !important; 
         opacity: 1 !important;
     }
-    
-    /* Ensure images don't break the layout */
     img { 
         max-width: 100% !important; 
         height: auto !important; 
