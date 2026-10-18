@@ -165,12 +165,14 @@ namespace BookViewer.Services
                     }
                 }
 
-                // Register 1:1 system fonts for iOS
+                // Extract exact system fonts from iOS
 #if IOS
                 RegisterIosFont("PingFang HK", false, false);
                 RegisterIosFont("PingFang HK", true, false);
                 RegisterIosFont("PingFang SC", false, false);
+                RegisterIosFont("PingFang SC", true, false);
                 RegisterIosFont("Helvetica", false, false);
+                RegisterIosFont("Helvetica", true, false);
 #endif
             }
             catch (Exception ex)
@@ -185,10 +187,10 @@ namespace BookViewer.Services
             try
             {
                 var path = BookViewer.Platforms.iOS.IosFontExtractor.GetExactFontPath(familyName, isBold, isItalic);
-                if (!string.IsNullOrEmpty(path))
+                if (!string.IsNullOrEmpty(path) && File.Exists(path))
                 {
                     _fontResolver.RegisterFont(familyName, isBold, isItalic, path);
-                    System.Diagnostics.Debug.WriteLine($"1:1 Extracted iOS Font: {familyName} -> {path}");
+                    System.Diagnostics.Debug.WriteLine($"1:1 Registered iOS Font: {familyName} -> {path}");
                 }
             }
             catch { }
