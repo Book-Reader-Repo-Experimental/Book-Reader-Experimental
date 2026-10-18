@@ -211,9 +211,6 @@ public partial class BookViewerPage : ContentPage
         _targetStep = step;
     }
 
-    // ============================================================
-    // BRIDGE NAVIGATION
-    // ============================================================
     private async void OnWebViewNavigating(object sender, WebNavigatingEventArgs e)
     {
         var url = e.Url;
@@ -225,9 +222,7 @@ public partial class BookViewerPage : ContentPage
 
         e.Cancel = true;
 
-        // Manual parse: never new Uri() on the raw bridge string
         string host, query;
-
         if (url.StartsWith("bookviewer://", StringComparison.OrdinalIgnoreCase))
         {
             var rest = url.Substring("bookviewer://".Length);
@@ -247,11 +242,9 @@ public partial class BookViewerPage : ContentPage
         host = host.Trim().TrimEnd('/');
         if (string.IsNullOrEmpty(host)) return;
 
-        Log($"bridge nav: host='{host}' query='{query}'");
-
         try
         {
-            var q = HttpUtility.ParseQueryString(query);   // decodes ONCE
+            var q = HttpUtility.ParseQueryString(query);
 
             if (host == "splitpane-open")
             {
@@ -259,26 +252,14 @@ public partial class BookViewerPage : ContentPage
                 var section = q["section"] ?? "";
                 var unit = q["unit"] ?? "";
                 var stepStr = q["step"] ?? "";
-
                 int step = 0;
                 int.TryParse(stepStr, out step);
 
                 if (string.IsNullOrEmpty(section) && !string.IsNullOrEmpty(unit))
                 {
                     var mapped = _bookService.GetFirstSectionFolderForUnit(unit);
-                    if (!string.IsNullOrEmpty(mapped))
-                    {
-                        section = mapped;
-                        Log($"[splitpane] mapped unit '{unit}' -> section '{section}'");
-                    }
-                    else
-                    {
-                        Log($"[splitpane] no unit→section mapping for unit '{unit}'");
-                        section = unit;
-                    }
+                    section = !string.IsNullOrEmpty(mapped) ? mapped : unit;
                 }
-
-                Log($"splitpane-open bookUID='{bookUid}' section='{section}' unit='{unit}' step='{step}'");
 
                 if (string.IsNullOrEmpty(bookUid)) return;
 
@@ -306,22 +287,15 @@ public partial class BookViewerPage : ContentPage
             {
                 CloseAssessment();
             }
-            else if (host == "splitpane-delete")
-            {
-                Log("splitpane delete " + q["bookUID"]);
-            }
             else if (host == "open-resource")
             {
-                var resourceUrl  = q["url"]  ?? ""; // Already decoded once by ParseQueryString
+                var resourceUrl  = q["url"]  ?? "";
                 var resourceDesc = q["desc"] ?? "";
                 var openInApp    = q["openInApp"] == "1";
                 var audio        = q["audio"] == "1";
 
-                Log($"[resource] open url='{resourceUrl}' desc='{resourceDesc}' openInApp={openInApp} audio={audio}");
-
                 if (string.IsNullOrEmpty(resourceUrl)) return;
 
-                // 1. Check if it's a remote URL
                 if (resourceUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
                 {
                     try
@@ -333,30 +307,24 @@ public partial class BookViewerPage : ContentPage
                     }
                     catch (Exception ex)
                     {
-                        Log($"[resource] open remote err: {ex.Message}");
                         await DisplayAlert("Cannot open link", ex.Message, "OK");
                     }
                     return;
                 }
 
-                // 2. It's a local file path (e.g., "resources/K20107_pp.pptx").
                 string absolutePath = resourceUrl;
-                
                 if (!Path.IsPathRooted(resourceUrl))
                 {
-                    // Resolve relative paths against the book's root folder
                     absolutePath = Path.Combine(_bookService.CurrentBookPath, resourceUrl.Replace('/', Path.DirectorySeparatorChar));
                 }
 
-                // 3. Verify it exists and open it
                 if (File.Exists(absolutePath))
                 {
                     await OpenLocalResourceAsync(absolutePath, openInApp);
                 }
                 else
                 {
-                    Log($"[resource] File NOT FOUND at resolved path: {absolutePath}");
-                    await DisplayAlert("File Not Found", $"Could not find the file:\n{absolutePath}\n\nCheck if the book downloaded completely.", "OK");
+                    await DisplayAlert("File Not Found", $"Could not find the file:\n{absolutePath}", "OK");
                 }
             }
         }
@@ -375,7 +343,6 @@ public partial class BookViewerPage : ContentPage
             var ok = Platforms.Android.FileOpener.OpenFile(path);
             if (!ok)
             {
-                Log($"[resource] Android FileOpener returned false, falling back to share");
                 await Share.Default.RequestAsync(new ShareFileRequest
                 {
                     Title = fileName,
@@ -403,23 +370,19 @@ public partial class BookViewerPage : ContentPage
 #else
             await Launcher.Default.OpenAsync(new OpenFileRequest { File = new ReadOnlyFile(path) });
 #endif
-            Log($"[resource] opened local: {path}");
         }
         catch (Exception ex)
         {
-            Log($"[resource] open local failed: {ex.Message}");
             await DisplayAlert("Cannot open", ex.Message, "OK");
         }
     }
 
     private async void OnContentWebViewNavigated(object sender, WebNavigatedEventArgs e)
     {
-        // Only call the override JS if the page actually defines it.
         if (string.IsNullOrEmpty(_currentContentHtml)) return;
         if (!_currentContentHtml.Contains("__setNotes") &&
             !_currentContentHtml.Contains("__setRedAnswers"))
         {
-            Log("[override] skipped (bridge JS not present on page)");
             return;
         }
         await ApplyAnswerOverridesAsync();
@@ -434,8 +397,6 @@ public partial class BookViewerPage : ContentPage
 
             var answersJs = $"window.__setRedAnswers({(_showStudentAnswers ? "true" : "false")})";
             await ContentWebView.EvaluateJavaScriptAsync(answersJs);
-
-            Log($"[override] applied notes={_showTeacherNotes} answers={_showStudentAnswers}");
         }
         catch (Exception ex)
         {
@@ -455,8 +416,6 @@ public partial class BookViewerPage : ContentPage
                     RegexOptions.IgnoreCase);
                 if (m.Success) groupId = m.Groups[1].Value.Trim();
             }
-
-            Log($"assessment open el={elId} group={groupId} pool={poolType}");
 
             if (string.IsNullOrEmpty(groupId))
             {
@@ -480,7 +439,6 @@ public partial class BookViewerPage : ContentPage
         }
         catch (Exception ex)
         {
-            Log($"OpenAssessmentAsync err: {ex.Message}");
             await DisplayAlert("Error", ex.Message, "OK");
         }
     }
@@ -573,9 +531,10 @@ public partial class BookViewerPage : ContentPage
             var outputPath = Path.Combine(exportDir, $"{safe}_{DateTime.Now:yyyyMMdd_HHmmss}.pdf");
 
             ExportPdfButton.IsEnabled = false;
-            StatusLabel.Text = "Exporting PDF...";
+            StatusLabel.Text = "Exporting Interactive PDF...";
 
             var pdfService = new Services.PdfExportService(_bookService);
+            
             pdfService.RenderPageToImageAsync = async (html) =>
             {
 #if IOS
@@ -591,6 +550,21 @@ public partial class BookViewerPage : ContentPage
 #endif
             };
 
+            pdfService.EvaluateJsAsync = async (html) =>
+            {
+#if IOS
+                return await BookViewer.Platforms.iOS.HtmlJsEvaluator.EvaluateInteractiveElementsAsync(html);
+#elif MACCATALYST
+                return await BookViewer.Platforms.MacCatalyst.HtmlJsEvaluator.EvaluateInteractiveElementsAsync(html);
+#elif ANDROID
+                return await BookViewer.Platforms.Android.HtmlJsEvaluator.EvaluateInteractiveElementsAsync(html);
+#elif WINDOWS
+                return await BookViewer.Platforms.Windows.HtmlJsEvaluator.EvaluateInteractiveElementsAsync(html);
+#else
+                await Task.CompletedTask; return "[]";
+#endif
+            };
+
             var tcs = new TaskCompletionSource<string>();
             pdfService.OnComplete += (s, path) => tcs.TrySetResult(path);
             pdfService.OnError += (s, error) => tcs.TrySetException(new Exception(error));
@@ -599,7 +573,7 @@ public partial class BookViewerPage : ContentPage
             var resultPath = await tcs.Task;
 
             ExportPdfButton.IsEnabled = true;
-            StatusLabel.Text = "PDF export complete!";
+            StatusLabel.Text = "Interactive PDF export complete!";
 
             var openNow = await DisplayAlert("Export Complete", $"PDF saved to:\n{resultPath}\n\nOpen it now?", "Open", "Later");
             if (openNow) await Launcher.Default.OpenAsync(new OpenFileRequest { File = new ReadOnlyFile(resultPath) });
@@ -631,7 +605,6 @@ public partial class BookViewerPage : ContentPage
     {
         var lines = _bookService.GetRecentLogs();
         var path = _bookService.GetLogFilePathOrEmpty();
-
         var logPage = new LogPage(lines, path);
         await Navigation.PushModalAsync(new NavigationPage(logPage));
     }
