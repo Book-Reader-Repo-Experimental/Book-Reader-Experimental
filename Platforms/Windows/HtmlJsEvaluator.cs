@@ -13,7 +13,7 @@ namespace BookViewer.Platforms.Windows
         {
             try
             {
-                var hostControl = new Grid { Width = 1024, Height = 1344 };
+                var hostControl = new Microsoft.UI.Xaml.Controls.Grid { Width = 1024, Height = 1344 };
                 var webView = new Microsoft.UI.Xaml.Controls.WebView2 { Width = 1024, Height = 1344 };
                 hostControl.Children.Add(webView);
 
