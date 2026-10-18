@@ -10,13 +10,13 @@ namespace BookViewer.Services
 {
     public class PdfDomElement
     {
-        public string Type { get; set; } = ""; 
+        public string Type { get; set; } = ""; // "text" or "image"
         public double X { get; set; }
         public double Y { get; set; }
         public double W { get; set; }
         public double H { get; set; }
         public string Text { get; set; } = "";
-        public string Src { get; set; } = "";
+        public string Src { get; set; } = ""; // data:image/...
         public double FontSize { get; set; }
         public string Color { get; set; } = "#000000";
         public bool IsBold { get; set; }
@@ -64,26 +64,9 @@ namespace BookViewer.Services
 
                     var json = await EvaluateJsAsync(html);
                     var elements = new List<PdfDomElement>();
-                    
-                    // Parse JSON with quotes handling for Windows
                     if (!string.IsNullOrEmpty(json) && json != "[]" && json != "null")
                     {
-                        try
-                        {
-                            var parsed = JsonSerializer.Deserialize<List<PdfDomElement>>(json);
-                            if (parsed != null) elements = parsed;
-                        }
-                        catch
-                        {
-                            // If JsonSerializer fails due to quotes, try to fix
-                            try
-                            {
-                                var cleanJson = json.Trim('"').Replace("\\\"", "\"");
-                                var parsed = JsonSerializer.Deserialize<List<PdfDomElement>>(cleanJson);
-                                if (parsed != null) elements = parsed;
-                            }
-                            catch { }
-                        }
+                        try { elements = JsonSerializer.Deserialize<List<PdfDomElement>>(json) ?? new(); } catch { }
                     }
 
                     var pdfPage = document.AddPage();
@@ -121,7 +104,7 @@ namespace BookViewer.Services
                                     annots.Elements.Add(BuildLinkAnnot(document, x, pdfY, w, h, el.Url, el.Text));
                                 }
                             }
-                            else if (el.Type == "image")
+                            else if (el.Type == "image" && !string.IsNullOrWhiteSpace(el.Src))
                             {
                                 try
                                 {
@@ -133,7 +116,10 @@ namespace BookViewer.Services
                                         gfx.DrawImage(img, x, y, w, h);
                                     }
                                 }
-                                catch { }
+                                catch (Exception ex)
+                                {
+                                    System.Diagnostics.Debug.WriteLine($"Image draw error: {ex.Message}");
+                                }
                             }
                         }
 
