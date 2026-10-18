@@ -375,6 +375,7 @@ public partial class BookViewerPage : ContentPage
     }
 
     private async void OnBackClicked(object sender, EventArgs e) => await Navigation.PopAsync();
+
     private async void OnExportPdfClicked(object sender, EventArgs e)
     {
         if (string.IsNullOrEmpty(_bookService.CurrentBookPath)) { await DisplayAlert("Info", "Please load a book first.", "OK"); return; }
@@ -403,25 +404,6 @@ public partial class BookViewerPage : ContentPage
 
             pdfService.OnError += (s, err) => Dispatcher.Dispatch(() => 
                 StatusLabel.Text = $"Export Error: {err}");
-
-            pdfService.RenderPageToImageAsync = async (html) =>
-            {
-                Dispatcher.Dispatch(() => StatusLabel.Text = "Capturing page...");
-                
-#if IOS
-                var res = await BookViewer.Platforms.iOS.WebViewCapture.CaptureHtmlAsync(html, 1024, 1344);
-#elif MACCATALYST
-                var res = await BookViewer.Platforms.MacCatalyst.WebViewCapture.CaptureHtmlAsync(html, 1024, 1344);
-#elif ANDROID
-                var res = await BookViewer.Platforms.Android.WebViewCapture.CaptureHtmlAsync(html, 1024, 1344);
-#elif WINDOWS
-                var res = await BookViewer.Platforms.Windows.WebViewCapture.CaptureHtmlAsync(html, 1024, 1344);
-#else
-                byte[] res = null;
-#endif
-                Dispatcher.Dispatch(() => StatusLabel.Text = res != null ? $"Captured {res.Length} bytes" : "Capture failed (null)");
-                return res;
-            };
 
             var tcs = new TaskCompletionSource<string>();
             pdfService.OnComplete += (s, path) => tcs.TrySetResult(path);
