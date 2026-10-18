@@ -1,7 +1,6 @@
 #if ANDROID
 using Android.Views;
 using Android.Webkit;
-using Java.Lang;
 using Microsoft.Maui.ApplicationModel;
 using System;
 using System.Threading.Tasks;
@@ -41,7 +40,7 @@ namespace BookViewer.Platforms.Android
                     var js = "window.__getInteractiveElements ? window.__getInteractiveElements() : '[]'";
                     webView.EvaluateJavascript(js, new JsValueCallback(tcs));
                 }
-                catch (Exception ex)
+                catch (System.Exception ex)
                 {
                     System.Diagnostics.Debug.WriteLine($"JS eval error: {ex.Message}");
                     tcs.TrySetResult("[]");
