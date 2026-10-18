@@ -2,6 +2,7 @@ using iText.Html2pdf;
 using iText.Html2pdf.Resolver.Font;
 using iText.Kernel.Pdf;
 using iText.Kernel.Utils;
+using iText.Kernel.Geom;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -38,7 +39,9 @@ namespace BookViewer.Services
                 var converterProperties = new ConverterProperties();
                 converterProperties.SetFontProvider(new DefaultFontProvider(true, true, true));
 
-                // 1. Render each page individually
+                // 1024x1344 pixels at 96 DPI = 768x1008 points
+                var pageSize = new PageSize(768f, 1008f);
+
                 for (int i = 0; i < totalPages; i++)
                 {
                     OnProgress?.Invoke(this, (int)((i / (double)totalPages) * 100));
@@ -47,7 +50,10 @@ namespace BookViewer.Services
                     string html = await _bookService.BuildPageHtmlForRenderAsync(
                         filePath, includeAnswers, includeTeacherNotes, includeStudentAnswers);
 
-                    // iText7 needs base64 images extracted to disk
+                    // Inject CSS to fix margins, scaling, and force buttons visible
+                    html = InjectPdfCss(html);
+
+                    // Extract base64 images to disk
                     html = await ExtractBase64ImagesAsync(html, tempDir, i);
 
                     var tempPdfPath = Path.Combine(tempDir, $"page_{i}.pdf");
@@ -56,16 +62,16 @@ namespace BookViewer.Services
                     using (var writer = new PdfWriter(tempPdfPath))
                     using (var pdf = new PdfDocument(writer))
                     {
+                        pdf.SetDefaultPageSize(pageSize);
                         HtmlConverter.ConvertToPdf(html, pdf, converterProperties);
                     }
                 }
 
-                // 2. Merge the PDFs
                 OnProgress?.Invoke(this, 100);
                 using (var writer = new PdfWriter(outputPath))
                 using (var mergedPdf = new PdfDocument(writer))
                 {
-                    var merger = new PdfMerger(mergedPdf); // No using block!
+                    var merger = new PdfMerger(mergedPdf);
                     foreach (var tempPdf in tempFiles)
                     {
                         using (var reader = new PdfReader(tempPdf))
@@ -89,6 +95,45 @@ namespace BookViewer.Services
                     try { File.Delete(file); } catch { }
                 }
             }
+        }
+
+        private string InjectPdfCss(string html)
+        {
+            var css = @"
+<style>
+    @page { 
+        size: 768pt 1008pt; 
+        margin: 0 !important; 
+    }
+    html, body { 
+        margin: 0 !important; 
+        padding: 0 !important; 
+        width: 768pt !important; 
+        height: 1008pt !important; 
+        overflow: hidden !important;
+    }
+    .page-container { 
+        width: 768pt !important; 
+        height: 1008pt !important; 
+        transform: scale(1) !important; 
+        transform-origin: top left !important;
+        margin: 0 !important;
+    }
+    /* Force answer toggle buttons visible */
+    .hideBtn { display: block !important; visibility: visible !important; }
+    img.redbtn, img.hsgbtn, img.has2btn { 
+        display: inline-block !important; 
+        visibility: visible !important; 
+        opacity: 1 !important;
+    }
+    /* Force redAnswer overlay visible if includeAnswers is on */
+    pane.redAnswer { display: block !important; }
+</style>
+";
+            if (html.Contains("<head>"))
+                return html.Replace("<head>", "<head>" + css);
+            else
+                return css + html;
         }
 
         private async Task<string> ExtractBase64ImagesAsync(string html, string tempDir, int pageIndex)
