@@ -37,7 +37,7 @@ namespace BookViewer.Platforms.Android
                     if (completed == finished.Task) await finished.Task;
                     await Task.Delay(300);
 
-                    var js = "window.__getInteractiveElements ? window.__getInteractiveElements() : '[]'";
+                    var js = "window.__getPdfDom ? window.__getPdfDom() : '[]'";
                     webView.EvaluateJavascript(js, new JsValueCallback(tcs));
                 }
                 catch (System.Exception ex)
