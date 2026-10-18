@@ -61,7 +61,6 @@ namespace BookViewer.Platforms.MacCatalyst
                 CleanupWindow(hostWindow, webView);
                 return "[]";
             }
-
             return await tcs.Task;
         }
 
@@ -82,7 +81,7 @@ namespace BookViewer.Platforms.MacCatalyst
             private readonly Func<Task> _onFinished;
             private bool _hasRun;
             public JsEvalNavigationDelegate(Func<Task> onFinished) { _onFinished = onFinished; }
-            public override async void DidFinishNavigation(WKWebView webView, WKNavigation navigation)
+            public override async void DidFinishNavigation(WKWebView webView, WKNavigation? navigation)
             {
                 if (_hasRun) return;
                 _hasRun = true;
