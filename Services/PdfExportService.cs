@@ -6,7 +6,6 @@ using iText.Kernel.Geom;
 using iText.Forms;
 using iText.Forms.Fields;
 using iText.Kernel.Pdf.Action;
-using iText.Kernel.Pdf.Annot;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -53,7 +52,13 @@ namespace BookViewer.Services
                     string html = await _bookService.BuildPageHtmlForRenderAsync(
                         filePath, includeAnswers, includeTeacherNotes, includeStudentAnswers);
 
+                    // 1. Preprocess: Convert hidden answers into interactive form fields
+                    html = InjectInteractiveFormFields(html, i);
+
+                    // 2. Inject CSS for layout
                     html = InjectPdfCss(html);
+
+                    // 3. Extract base64 images to disk
                     html = await ExtractBase64ImagesAsync(html, tempDir, i);
 
                     var tempPdfPath = System.IO.Path.Combine(tempDir, $"page_{i}.pdf");
@@ -97,6 +102,24 @@ namespace BookViewer.Services
             }
         }
 
+        private string InjectInteractiveFormFields(string html, int pageIndex)
+        {
+            // Find all hidden answer/note divs
+            // Example: <div class="tbnote">Answer text</div>
+            var regex = new Regex(@"<div\b[^>]*class=""[^""]*\b(?:tbred|tbnote)\b[^""]*""[^>]*>([\s\S]*?)</div>", RegexOptions.IgnoreCase);
+            var matchCount = 0;
+
+            return regex.Replace(html, m =>
+            {
+                var content = m.Groups[1].Value;
+                var fieldId = $"AnswerField_{pageIndex}_{matchCount++}";
+                
+                // We wrap the content in a <button> so iText generates a form field
+                // The <button> will have a custom class, which we style to be invisible
+                return $"<button id=""{fieldId}"" class=""pdf-answer-field"" style=""display:block; border:none; background:none;"">{content}</button>";
+            });
+        }
+
         private string InjectPdfCss(string html)
         {
             var css = @"
@@ -130,6 +153,17 @@ namespace BookViewer.Services
     img { 
         max-width: 100% !important; 
         height: auto !important; 
+    }
+    /* Hide the text field appearance, we only want the content inside */
+    button.pdf-answer-field {
+        display: block !important;
+        width: 100% !important;
+        border: none !important;
+        background: none !important;
+        color: #000 !important;
+        text-align: left !important;
+        font-family: inherit !important;
+        font-size: inherit !important;
     }
 </style>
 ";
