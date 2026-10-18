@@ -405,25 +405,6 @@ public partial class BookViewerPage : ContentPage
             pdfService.OnError += (s, err) => Dispatcher.Dispatch(() => 
                 StatusLabel.Text = $"Export Error: {err}");
 
-            pdfService.RenderPageToImageAsync = async (html) =>
-            {
-                Dispatcher.Dispatch(() => StatusLabel.Text = "Capturing WebView...");
-                
-#if IOS
-                var res = await BookViewer.Platforms.iOS.WebViewCapture.CaptureHtmlAsync(html, 1024, 1344);
-#elif MACCATALYST
-                var res = await BookViewer.Platforms.MacCatalyst.WebViewCapture.CaptureHtmlAsync(html, 1024, 1344);
-#elif ANDROID
-                var res = await BookViewer.Platforms.Android.WebViewCapture.CaptureHtmlAsync(html, 1024, 1344);
-#elif WINDOWS
-                var res = await BookViewer.Platforms.Windows.WebViewCapture.CaptureHtmlAsync(html, 1024, 1344);
-#else
-                byte[] res = null;
-#endif
-                Dispatcher.Dispatch(() => StatusLabel.Text = res != null ? $"Captured {res.Length} bytes" : "Capture failed (null)");
-                return res;
-            };
-
             var tcs = new TaskCompletionSource<string>();
             pdfService.OnComplete += (s, path) => tcs.TrySetResult(path);
 
@@ -443,6 +424,7 @@ public partial class BookViewerPage : ContentPage
             await DisplayAlert("Error", $"Export failed: {ex.Message}", "OK");
         }
     }
+
     private async void OnGridClicked(object sender, EventArgs e)
     {
         if (_bookService.PageFiles.Count == 0) return;
