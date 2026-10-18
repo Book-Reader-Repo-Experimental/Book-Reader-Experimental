@@ -36,9 +36,9 @@ namespace BookViewer.Services
                 Directory.CreateDirectory(tempDir);
 
                 var converterProperties = new ConverterProperties();
-                // The font provider is essential for iText7 to render text
                 converterProperties.SetFontProvider(new DefaultFontProvider(true, true, true));
 
+                // 1. Render each page individually
                 for (int i = 0; i < totalPages; i++)
                 {
                     OnProgress?.Invoke(this, (int)((i / (double)totalPages) * 100));
@@ -47,7 +47,7 @@ namespace BookViewer.Services
                     string html = await _bookService.BuildPageHtmlForRenderAsync(
                         filePath, includeAnswers, includeTeacherNotes, includeStudentAnswers);
 
-                    // Fix base64 images so iText7 doesn't crash
+                    // iText7 needs base64 images extracted to disk
                     html = await ExtractBase64ImagesAsync(html, tempDir, i);
 
                     var tempPdfPath = Path.Combine(tempDir, $"page_{i}.pdf");
@@ -60,12 +60,12 @@ namespace BookViewer.Services
                     }
                 }
 
-                // Merge all pages
+                // 2. Merge the PDFs
                 OnProgress?.Invoke(this, 100);
                 using (var writer = new PdfWriter(outputPath))
                 using (var mergedPdf = new PdfDocument(writer))
-                using (var merger = new PdfMerger(mergedPdf))
                 {
+                    var merger = new PdfMerger(mergedPdf); // No using block!
                     foreach (var tempPdf in tempFiles)
                     {
                         using (var reader = new PdfReader(tempPdf))
