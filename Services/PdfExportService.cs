@@ -80,58 +80,70 @@ namespace BookViewer.Services
                     pdfPage.Width = XUnit.FromPoint(pageWidthPt);
                     pdfPage.Height = XUnit.FromPoint(pageHeightPt);
 
-                    using var gfx = XGraphics.FromPdfPage(pdfPage);
-                    gfx.DrawRectangle(XBrushes.White, 0, 0, pageWidthPt, pageHeightPt);
-
-                    var annots = new PdfArray(document);
-
-                    foreach (var el in elements)
+                    // FIX: Do NOT use 'using var gfx' here. 
+                    // It must be explicitly disposed AFTER all drawing is done.
+                    var gfx = XGraphics.FromPdfPage(pdfPage);
+                    try
                     {
-                        double x = el.X * 0.75;
-                        double y = pageHeightPt - ((el.Y + el.H) * 0.75);
-                        double w = el.W * 0.75;
-                        double h = el.H * 0.75;
+                        gfx.DrawRectangle(XBrushes.White, 0, 0, pageWidthPt, pageHeightPt);
 
-                        if (el.Type == "text" && !string.IsNullOrWhiteSpace(el.Text))
+                        var annots = new PdfArray(document);
+
+                        foreach (var el in elements)
                         {
-                            var brush = ParseColor(el.Color);
+                            double x = el.X * 0.75;
+                            // PDF Y-axis starts from the bottom, so we invert
+                            double y = pageHeightPt - ((el.Y + el.H) * 0.75);
+                            double w = el.W * 0.75;
+                            double h = el.H * 0.75;
 
-                            var style = XFontStyle.Regular;
-                            if (el.IsBold && el.IsItalic) style = XFontStyle.BoldItalic;
-                            else if (el.IsBold) style = XFontStyle.Bold;
-                            else if (el.IsItalic) style = XFontStyle.Italic;
-
-                            var font = new XFont(el.FontFamily, Math.Max(1, el.FontSize * 0.75), style);
-                            var rect = new XRect(x, y, w, h);
-                            gfx.DrawString(el.Text.Trim(), font, brush, rect, XStringFormats.TopLeft);
-
-                            if (!string.IsNullOrEmpty(el.Url))
+                            if (el.Type == "text" && !string.IsNullOrWhiteSpace(el.Text))
                             {
-                                annots.Elements.Add(BuildLinkAnnot(document, x, y, w, h, el.Url, el.Text));
-                            }
-                        }
-                        else if (el.Type == "image")
-                        {
-                            try
-                            {
-                                var imageBytes = await LoadImageBytesAsync(el.Src);
-                                if (imageBytes != null && imageBytes.Length > 0)
+                                var brush = ParseColor(el.Color);
+
+                                var style = XFontStyle.Regular;
+                                if (el.IsBold && el.IsItalic) style = XFontStyle.BoldItalic;
+                                else if (el.IsBold) style = XFontStyle.Bold;
+                                else if (el.IsItalic) style = XFontStyle.Italic;
+
+                                var font = new XFont(el.FontFamily, Math.Max(1, el.FontSize * 0.75), style);
+                                var rect = new XRect(x, y, w, h);
+                                
+                                gfx.DrawString(el.Text.Trim(), font, brush, rect, XStringFormats.TopLeft);
+
+                                if (!string.IsNullOrEmpty(el.Url))
                                 {
-                                    using var ms = new MemoryStream(imageBytes);
-                                    var img = XImage.FromStream(() => ms);
-                                    gfx.DrawImage(img, x, y, w, h);
+                                    annots.Elements.Add(BuildLinkAnnot(document, x, y, w, h, el.Url, el.Text));
                                 }
                             }
-                            catch { }
+                            else if (el.Type == "image")
+                            {
+                                try
+                                {
+                                    var imageBytes = await LoadImageBytesAsync(el.Src);
+                                    if (imageBytes != null && imageBytes.Length > 0)
+                                    {
+                                        using var ms = new MemoryStream(imageBytes);
+                                        var img = XImage.FromStream(() => ms);
+                                        gfx.DrawImage(img, x, y, w, h);
+                                    }
+                                }
+                                catch { }
+                            }
+                        }
+
+                        if (annots.Elements.Count > 0)
+                        {
+                            if (pdfPage.Elements.ContainsKey("/Annots"))
+                                pdfPage.Elements["/Annots"] = annots;
+                            else
+                                pdfPage.Elements.Add("/Annots", annots);
                         }
                     }
-
-                    if (annots.Elements.Count > 0)
+                    finally
                     {
-                        if (pdfPage.Elements.ContainsKey("/Annots"))
-                            pdfPage.Elements["/Annots"] = annots;
-                        else
-                            pdfPage.Elements.Add("/Annots", annots);
+                        // Force PdfSharpCore to flush the drawing commands into the page's content stream
+                        gfx.Dispose();
                     }
 
                     OnProgress?.Invoke(this, (int)(((i + 1) / (double)totalPages) * 100));
@@ -165,7 +177,6 @@ namespace BookViewer.Services
                     }
                 }
 
-                // Extract exact system fonts from iOS
 #if IOS
                 RegisterIosFont("PingFang HK", false, false);
                 RegisterIosFont("PingFang HK", true, false);
@@ -190,7 +201,6 @@ namespace BookViewer.Services
                 if (!string.IsNullOrEmpty(path) && File.Exists(path))
                 {
                     _fontResolver.RegisterFont(familyName, isBold, isItalic, path);
-                    System.Diagnostics.Debug.WriteLine($"1:1 Registered iOS Font: {familyName} -> {path}");
                 }
             }
             catch { }
