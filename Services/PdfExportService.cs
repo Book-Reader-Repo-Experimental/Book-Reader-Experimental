@@ -1,30 +1,13 @@
-using PdfSharpCore.Drawing;
 using PdfSharpCore.Pdf;
+using PdfSharpCore.Pdf.IO;
+using Papiro;
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace BookViewer.Services
 {
-    public class PdfDomElement
-    {
-        public string Type { get; set; } = "";
-        public double X { get; set; }
-        public double Y { get; set; }
-        public double W { get; set; }
-        public double H { get; set; }
-        public string Text { get; set; } = "";
-        public string Src { get; set; } = "";
-        public double FontSize { get; set; }
-        public string Color { get; set; } = "#000000";
-        public bool IsBold { get; set; }
-        public bool IsItalic { get; set; }
-        public string FontFamily { get; set; } = "Arial";
-        public string Url { get; set; } = "";
-    }
-
     public class PdfExportService
     {
         private readonly BookService _bookService;
@@ -46,15 +29,12 @@ namespace BookViewer.Services
             {
                 var totalPages = _bookService.PageFiles.Count;
                 if (totalPages == 0) { OnError?.Invoke(this, "No pages to export"); return; }
-                if (EvaluateJsAsync == null) { OnError?.Invoke(this, "JS evaluation callback not set"); return; }
 
-                // Standard book page size is 1024x1344 px.
-                // PDF points are 0.75 scale.
-                double pageWidthPt = 1024 * 0.75;
-                double pageHeightPt = 1344 * 0.75;
-
-                var document = new PdfDocument();
-                document.Info.Title = _bookService.BookTitle;
+                var exportDir = Path.GetDirectoryName(outputPath) ?? Path.GetTempPath();
+                var tempFiles = new List<string>();
+                
+                // Get the Papiro service from the DI container
+                var papiro = Handler!.MauiContext!.Services.GetRequiredService<IHtmlToPdfService>();
 
                 for (int i = 0; i < totalPages; i++)
                 {
@@ -64,127 +44,45 @@ namespace BookViewer.Services
                     string html = await _bookService.BuildPageHtmlForRenderAsync(
                         filePath, includeAnswers, includeTeacherNotes, includeStudentAnswers);
 
-                    var json = await EvaluateJsAsync(html);
-                    var elements = new List<PdfDomElement>();
+                    var tempPath = Path.Combine(exportDir, $"temp_{i}.pdf");
+
+                    // Use Papiro for native, 1:1 rendering
+                    var result = await papiro.ConvertAndSaveAsync(html, tempPath);
                     
-                    // LOG THE JSON LENGTH IN THE CONSOLE
-                    System.Diagnostics.Debug.WriteLine($"[PDF] Page {i + 1} JSON Length: {json?.Length ?? 0}");
-
-                    if (!string.IsNullOrEmpty(json) && json != "[]" && json != "null")
+                    if (result.IsSuccess)
                     {
-                        try { elements = JsonSerializer.Deserialize<List<PdfDomElement>>(json) ?? new(); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"JSON Error: {ex.Message}"); }
-                    }
-
-                    var pdfPage = document.AddPage();
-                    pdfPage.Width = XUnit.FromPoint(pageWidthPt);
-                    pdfPage.Height = XUnit.FromPoint(pageHeightPt);
-
-                    var gfx = XGraphics.FromPdfPage(pdfPage, XGraphicsPdfPageOptions.Append);
-                    try
-                    {
-                        gfx.DrawRectangle(XBrushes.White, 0, 0, pageWidthPt, pageHeightPt);
-
-                        var annots = new PdfArray(document);
-
-                        foreach (var el in elements)
-                        {
-                            // Coordinates from JS are already scaled to 1024x1344.
-                            // We scale by 0.75 to convert pixels to PDF points.
-                            double x = el.X * 0.75;
-                            double y = el.Y * 0.75; 
-                            double w = el.W * 0.75;
-                            double h = el.H * 0.75;
-
-                            if (el.Type == "text" && !string.IsNullOrWhiteSpace(el.Text))
-                            {
-                                var style = XFontStyle.Regular;
-                                if (el.IsBold && el.IsItalic) style = XFontStyle.BoldItalic;
-                                else if (el.IsBold) style = XFontStyle.Bold;
-                                else if (el.IsItalic) style = XFontStyle.Italic;
-
-                                var font = new XFont("Arial", Math.Max(1, el.FontSize * 0.75), style);
-                                var rect = new XRect(x, y, w, h);
-                                gfx.DrawString(el.Text.Trim(), font, XBrushes.Black, rect, XStringFormats.TopLeft);
-
-                                if (!string.IsNullOrEmpty(el.Url))
-                                {
-                                    double pdfY = pageHeightPt - (y + h);
-                                    annots.Elements.Add(BuildLinkAnnot(document, x, pdfY, w, h, el.Url, el.Text));
-                                }
-                            }
-                            else if (el.Type == "image" && !string.IsNullOrWhiteSpace(el.Src))
-                            {
-                                try
-                                {
-                                    var imageBytes = await LoadImageBytesAsync(el.Src);
-                                    if (imageBytes != null && imageBytes.Length > 0)
-                                    {
-                                        using var ms = new MemoryStream(imageBytes);
-                                        var img = XImage.FromStream(() => ms);
-                                        gfx.DrawImage(img, x, y, w, h);
-                                    }
-                                }
-                                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Image error: {ex.Message}"); }
-                            }
-                        }
-
-                        if (annots.Elements.Count > 0)
-                        {
-                            if (pdfPage.Elements.ContainsKey("/Annots"))
-                                pdfPage.Elements["/Annots"] = annots;
-                            else
-                                pdfPage.Elements.Add("/Annots", annots);
-                        }
-                    }
-                    finally
-                    {
-                        gfx.Dispose();
+                        tempFiles.Add(tempPath);
                     }
                 }
 
-                document.Save(outputPath);
+                // Use PdfSharpCore strictly to merge the PDFs
+                using (var outputDoc = new PdfDocument())
+                {
+                    foreach (var tempFile in tempFiles)
+                    {
+                        using (var inputDoc = PdfReader.Open(tempFile, PdfDocumentOpenMode.Import))
+                        {
+                            for (int i = 0; i < inputDoc.PageCount; i++)
+                            {
+                                outputDoc.AddPage(inputDoc.Pages[i]);
+                            }
+                        }
+                    }
+                    outputDoc.Save(outputPath);
+                }
+
+                // Cleanup
+                foreach (var tempFile in tempFiles)
+                {
+                    try { File.Delete(tempFile); } catch { }
+                }
+
                 OnComplete?.Invoke(this, outputPath);
             }
             catch (Exception ex)
             {
                 OnError?.Invoke(this, ex.Message);
             }
-        }
-
-        private async Task<byte[]?> LoadImageBytesAsync(string src)
-        {
-            try
-            {
-                if (src.StartsWith("data:image"))
-                {
-                    var base64 = src.Substring(src.IndexOf(",") + 1);
-                    return Convert.FromBase64String(base64);
-                }
-                else if (src.StartsWith("file://"))
-                {
-                    var path = Uri.UnescapeDataString(src.Substring(7));
-                    if (File.Exists(path)) return await File.ReadAllBytesAsync(path);
-                }
-            }
-            catch { }
-            return null;
-        }
-
-        private static PdfDictionary BuildLinkAnnot(PdfDocument doc, double x, double y, double w, double h, string url, string tooltip)
-        {
-            var annot = new PdfDictionary(doc);
-            annot.Elements["/Type"] = new PdfName("/Annot");
-            annot.Elements["/Subtype"] = new PdfName("/Link");
-            annot.Elements["/Rect"] = new PdfArray(doc, new PdfReal(x), new PdfReal(y), new PdfReal(x + w), new PdfReal(y + h));
-            annot.Elements["/Border"] = new PdfArray(doc, new PdfInteger(0), new PdfInteger(0), new PdfInteger(0));
-
-            var action = new PdfDictionary(doc);
-            action.Elements["/Type"] = new PdfName("/Action");
-            action.Elements["/S"] = new PdfName("/URI");
-            action.Elements["/URI"] = new PdfString(url);
-            annot.Elements["/A"] = action;
-
-            return annot;
         }
     }
 }
