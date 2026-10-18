@@ -6,6 +6,11 @@ namespace BookViewer.Maui
     {
         public static MauiApp CreateMauiApp()
         {
+            // Add this line BEFORE building the app
+            Environment.SetEnvironmentVariable(
+                "ITEXT_BOUNCY_CASTLE_FACTORY_NAME", 
+                "bouncy-castle");
+        
             var builder = MauiApp.CreateBuilder();
             builder
                 .UseMauiApp<App>()
