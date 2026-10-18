@@ -10,13 +10,13 @@ namespace BookViewer.Services
 {
     public class PdfDomElement
     {
-        public string Type { get; set; } = ""; // "text" or "image"
+        public string Type { get; set; } = "";
         public double X { get; set; }
         public double Y { get; set; }
         public double W { get; set; }
         public double H { get; set; }
         public string Text { get; set; } = "";
-        public string Src { get; set; } = ""; // data:image/...
+        public string Src { get; set; } = "";
         public double FontSize { get; set; }
         public string Color { get; set; } = "#000000";
         public bool IsBold { get; set; }
@@ -48,6 +48,8 @@ namespace BookViewer.Services
                 if (totalPages == 0) { OnError?.Invoke(this, "No pages to export"); return; }
                 if (EvaluateJsAsync == null) { OnError?.Invoke(this, "JS evaluation callback not set"); return; }
 
+                // Standard book page size is 1024x1344 px.
+                // PDF points are 0.75 scale.
                 double pageWidthPt = 1024 * 0.75;
                 double pageHeightPt = 1344 * 0.75;
 
@@ -64,9 +66,13 @@ namespace BookViewer.Services
 
                     var json = await EvaluateJsAsync(html);
                     var elements = new List<PdfDomElement>();
+                    
+                    // LOG THE JSON LENGTH IN THE CONSOLE
+                    System.Diagnostics.Debug.WriteLine($"[PDF] Page {i + 1} JSON Length: {json?.Length ?? 0}");
+
                     if (!string.IsNullOrEmpty(json) && json != "[]" && json != "null")
                     {
-                        try { elements = JsonSerializer.Deserialize<List<PdfDomElement>>(json) ?? new(); } catch { }
+                        try { elements = JsonSerializer.Deserialize<List<PdfDomElement>>(json) ?? new(); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"JSON Error: {ex.Message}"); }
                     }
 
                     var pdfPage = document.AddPage();
@@ -82,6 +88,8 @@ namespace BookViewer.Services
 
                         foreach (var el in elements)
                         {
+                            // Coordinates from JS are already scaled to 1024x1344.
+                            // We scale by 0.75 to convert pixels to PDF points.
                             double x = el.X * 0.75;
                             double y = el.Y * 0.75; 
                             double w = el.W * 0.75;
@@ -116,10 +124,7 @@ namespace BookViewer.Services
                                         gfx.DrawImage(img, x, y, w, h);
                                     }
                                 }
-                                catch (Exception ex)
-                                {
-                                    System.Diagnostics.Debug.WriteLine($"Image draw error: {ex.Message}");
-                                }
+                                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Image error: {ex.Message}"); }
                             }
                         }
 
