@@ -165,9 +165,8 @@ namespace BookViewer.Services
                         var rect = new Rectangle(x, y, 24, 24);
                         var fieldName = $"Toggle_{pageIndex}_{imgId}_{btnCounter++}";
         
-                        // Direct constructor call supporting PdfDocument and Rectangle
-                        var buttonField = new PdfButtonFormField(pdf, rect);
-                        buttonField.SetFieldName(fieldName);
+                        // Create the push button using the base PdfFormField static helper factory
+                        var buttonField = PdfFormField.CreatePushButton(pdf, rect, fieldName, "");
                         buttonField.SetAdditionalAction(PdfName.U, action);
                         
                         foreach (var w in buttonField.GetWidgets())
