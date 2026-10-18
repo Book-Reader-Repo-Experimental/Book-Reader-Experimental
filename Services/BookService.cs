@@ -292,11 +292,16 @@ img.resbtn:active { opacity: .6 !important; }
         // ---- External resource link (from steps_N_data.xml) ----
         window.__openResource = function(el){
           try {
-            var url = el && el.getAttribute && el.getAttribute('data-url');
-            var desc = el && el.getAttribute && (el.getAttribute('title') || el.getAttribute('data-desc') || '');
+            var url  = el && el.getAttribute && el.getAttribute('data-url');
+            var desc = el && el.getAttribute && (el.getAttribute('data-desc') || el.getAttribute('title') || '');
             if (!url) return;
-            window.location.href = 'bookviewer://open-resource?url=' + encodeURIComponent(url)
-                                 + '&desc=' + encodeURIComponent(desc || '');
+            var openInApp = el.getAttribute('data-openinapp') === '1';
+            var audio     = el.getAttribute('data-audio')     === '1';
+            window.location.href = 'bookviewer://open-resource'
+              + '?url='  + encodeURIComponent(url)
+              + '&desc=' + encodeURIComponent(desc)
+              + '&openInApp=' + (openInApp ? '1' : '0')
+              + '&audio='     + (audio     ? '1' : '0');
           } catch(e) {}
         };
         
@@ -609,10 +614,8 @@ img.resbtn:active { opacity: .6 !important; }
         {
             string logMessage = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} - {message}";
 
-            // Always to debug console — independent of file system.
             System.Diagnostics.Debug.WriteLine(logMessage);
 
-            // Always to in-memory buffer — survives file-write failures.
             try
             {
                 lock (_logBuffer)
@@ -623,7 +626,6 @@ img.resbtn:active { opacity: .6 !important; }
             }
             catch { }
 
-            // Best-effort to file.
             try
             {
                 var path = GetLogFilePath();
@@ -1185,12 +1187,12 @@ img.resbtn:active { opacity: .6 !important; }
             Log($"[FindPageIndex] NO MATCH: section='{sectionKey}' step={step}");
             return -1;
         }
-                
+
         public string FindPoolFile(string groupId)
         {
             if (string.IsNullOrEmpty(groupId) || string.IsNullOrEmpty(_currentBookPath))
                 return null;
-        
+
             var candidates = new List<string>
             {
                 Path.Combine(_currentBookPath, "ola", groupId + ".html"),
@@ -1200,7 +1202,7 @@ img.resbtn:active { opacity: .6 !important; }
                 Path.Combine(_currentBookPath, "ola", "q" + groupId + ".html"),
                 Path.Combine(_currentBookPath, "ola", "question_" + groupId + ".html"),
             };
-        
+
             if (Directory.Exists(_currentBookPath))
             {
                 foreach (var s in Directory.GetDirectories(_currentBookPath, "s_*"))
@@ -1210,31 +1212,31 @@ img.resbtn:active { opacity: .6 !important; }
                     candidates.Add(Path.Combine(s, "ola", groupId, "index.html"));
                 }
             }
-        
+
             foreach (var c in candidates)
                 if (File.Exists(c)) { Log($"[pool] found {groupId} at {c}"); return c; }
-        
+
             try
             {
                 var hits = Directory.GetFiles(_currentBookPath, groupId + ".html", SearchOption.AllDirectories);
                 if (hits.Length > 0) { Log($"[pool] found via search: {hits[0]}"); return hits[0]; }
-        
+
                 hits = Directory.GetFiles(_currentBookPath, "*" + groupId + "*.html", SearchOption.AllDirectories);
                 if (hits.Length > 0) { Log($"[pool] fuzzy match: {hits[0]}"); return hits[0]; }
             }
             catch { }
-        
+
             Log($"[pool] not found: {groupId}");
             return null;
         }
-        
+
         public async Task<string> BuildPoolHtmlAsync(string poolFilePath, string groupId)
         {
             try
             {
                 var raw = await File.ReadAllTextAsync(poolFilePath);
                 var poolDir = Path.GetDirectoryName(poolFilePath) ?? _currentBookPath;
-        
+
                 if (!Regex.IsMatch(raw, @"<html", RegexOptions.IgnoreCase))
                 {
                     raw = "<!DOCTYPE html><html><head>" +
@@ -1243,14 +1245,14 @@ img.resbtn:active { opacity: .6 !important; }
                           "<style>body{margin:0;padding:16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}</style>" +
                           "</head><body>" + raw + "</body></html>";
                 }
-        
+
                 raw = InlineAllAssets(raw, poolDir);
-        
+
                 raw = raw.Replace("</body>",
                     "<script>" +
                     "window.__assessment_complete = function(){ window.location.href='bookviewer://assessment-complete'; };" +
                     "</script></body>");
-        
+
                 return raw;
             }
             catch (Exception ex)
@@ -1353,6 +1355,10 @@ img.resbtn:active { opacity: .6 !important; }
             }
         }
 
+        // ============================================================
+        // RESOURCE BUTTONS
+        // ============================================================
+
         /// <summary>
         /// Read steps_N_data.xml, parse &lt;links&gt; items, and generate an &lt;img class="resbtn"&gt;
         /// for each, positioned at (x,y), with the resolved icon inlined and the
@@ -1381,12 +1387,10 @@ img.resbtn:active { opacity: .6 !important; }
                     return "";
                 }
 
-                // The book editor wraps items in <links><array><item>. Try the exact
-                // path first, then a descendant fallback in case <array> is absent.
                 var items = doc.SelectNodes("//links/array/item");
                 if (items == null || items.Count == 0)
                     items = doc.SelectNodes("//links//item");
-                                
+
                 Log($"[res] found {items?.Count ?? 0} <links><item> nodes");
                 if (items == null || items.Count == 0) return "";
 
@@ -1400,23 +1404,26 @@ img.resbtn:active { opacity: .6 !important; }
                     var iconPath = item.SelectSingleNode("icon")?.InnerText ?? "";
                     var desc = item.SelectSingleNode("desc")?.InnerText ?? "";
 
-                    var url = item.SelectSingleNode("teacheriospath")?.InnerText
-                           ?? item.SelectSingleNode("studentiospath")?.InnerText
-                           ?? item.SelectSingleNode("teacherwebpath")?.InnerText
-                           ?? item.SelectSingleNode("studentwebpath")?.InnerText
-                           ?? item.SelectSingleNode("path")?.InnerText
-                           ?? "";
+                    // Prefer device-specific URLs, then generic <path>
+                    var url = FirstNonEmpty(item,
+                        "teacheriospath", "studentiospath",
+                        "teacherandroidpath", "studentandroidpath",
+                        "teacherwebpath", "studentwebpath",
+                        "teacherpcpath", "studentpcpath",
+                        "teachermacpath", "studentmacpath",
+                        "path");
 
-                    Log($"[res] item[{i}] raw x='{xStr}' y='{yStr}' icon='{iconPath}' url='{(url?.Length > 60 ? url.Substring(0, 60) + "..." : url)}'");
+                    var openInApp = !string.IsNullOrEmpty(item.SelectSingleNode("openinapp")?.InnerText?.Trim());
+                    var audioCont = !string.IsNullOrEmpty(item.SelectSingleNode("audiocontplay")?.InnerText?.Trim());
+
+                    Log($"[res] item[{i}] raw x='{xStr}' y='{yStr}' icon='{iconPath}' url='{(url?.Length > 60 ? url.Substring(0, 60) + "..." : url)}' openInApp={openInApp} audio={audioCont}");
 
                     if (string.IsNullOrEmpty(url)) { Log($"[res] item[{i}] SKIP empty url"); continue; }
                     if (!double.TryParse(xStr, out double x)) { Log($"[res] item[{i}] SKIP bad x"); continue; }
                     if (!double.TryParse(yStr, out double y)) { Log($"[res] item[{i}] SKIP bad y"); continue; }
 
-                    url = Uri.UnescapeDataString(url);
-                    desc = Uri.UnescapeDataString(desc);
-                    desc = Regex.Replace(desc, @"%u([0-9A-Fa-f]{4})",
-                        m => ((char)Convert.ToInt32(m.Groups[1].Value, 16)).ToString());
+                    url = DecodeResourceUrl(url);
+                    desc = DecodeDesc(desc);
 
                     string iconDataUri = "";
                     if (!string.IsNullOrEmpty(iconPath))
@@ -1436,6 +1443,7 @@ img.resbtn:active { opacity: .6 !important; }
 
                     var safeUrl = System.Web.HttpUtility.HtmlAttributeEncode(url);
                     var safeDesc = System.Web.HttpUtility.HtmlAttributeEncode(desc);
+                    safeDesc = safeDesc.Replace("\r", " ").Replace("\n", " ");
 
                     sb.Append("<img class='resbtn' ");
                     sb.Append("src='").Append(iconDataUri).Append("' ");
@@ -1443,6 +1451,8 @@ img.resbtn:active { opacity: .6 !important; }
                     sb.Append("top:").Append(y.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)).Append("px;' ");
                     sb.Append("data-url='").Append(safeUrl).Append("' ");
                     sb.Append("data-desc='").Append(safeDesc).Append("' ");
+                    sb.Append("data-openinapp='").Append(openInApp ? "1" : "0").Append("' ");
+                    sb.Append("data-audio='").Append(audioCont ? "1" : "0").Append("' ");
                     sb.Append("title='").Append(safeDesc).Append("' ");
                     sb.Append("onclick='__openResource(this)' />");
                 }
@@ -1455,6 +1465,75 @@ img.resbtn:active { opacity: .6 !important; }
                 Log($"[res] BuildResourceButtonsAsync EXCEPTION: {ex.Message}\n{ex.StackTrace}");
                 return "";
             }
+        }
+
+        private static string FirstNonEmpty(XmlNode item, params string[] names)
+        {
+            foreach (var n in names)
+            {
+                var v = item.SelectSingleNode(n)?.InnerText;
+                if (!string.IsNullOrWhiteSpace(v)) return v.Trim();
+            }
+            return "";
+        }
+
+        /// <summary>
+        /// Decode %25 → %, then %RESOURCES% → &lt;bookRoot&gt;/resources.
+        /// Returns an absolute path if the local file exists, otherwise returns
+        /// the decoded URL/relative path.
+        /// </summary>
+        private string DecodeResourceUrl(string raw)
+        {
+            if (string.IsNullOrEmpty(raw)) return raw;
+
+            // Two layers of percent-encoding: %2525 → %25 → %, then %XX → char
+            var s = Uri.UnescapeDataString(raw);   // %25RESOURCES%25 → %RESOURCES%
+            s = Uri.UnescapeDataString(s);         // %E4%B8%AD → 中
+
+            // %RESOURCES% maps to <bookRoot>/resources/
+            s = s.Replace("%RESOURCES%/", "resources/")
+                 .Replace("%RESOURCES%",  "resources");
+
+            if (s.StartsWith("http", StringComparison.OrdinalIgnoreCase) ||
+                s.StartsWith("data:", StringComparison.OrdinalIgnoreCase) ||
+                s.StartsWith("//", StringComparison.Ordinal))
+            {
+                return s;
+            }
+
+            // Probe both "resources/" and "resource/" spellings — older zips
+            // sometimes root at singular resource/.
+            var candidates = new List<string> { s };
+            if (s.StartsWith("resources/", StringComparison.OrdinalIgnoreCase))
+                candidates.Add("resource/" + s.Substring("resources/".Length));
+            if (s.StartsWith("resource/", StringComparison.OrdinalIgnoreCase))
+                candidates.Add("resources/" + s.Substring("resource/".Length));
+
+            foreach (var c in candidates)
+            {
+                try
+                {
+                    var local = Path.GetFullPath(Path.Combine(_currentBookPath, c.Replace('/', Path.DirectorySeparatorChar)));
+                    if (File.Exists(local))
+                    {
+                        Log($"[res] url resolved to local file: {local}");
+                        return local;
+                    }
+                }
+                catch { }
+            }
+
+            return s;
+        }
+
+        private static string DecodeDesc(string raw)
+        {
+            if (string.IsNullOrEmpty(raw)) return raw;
+            // Handle non-standard %uXXXX first (used for CJK in the source books)
+            var s = Regex.Replace(raw, @"%u([0-9A-Fa-f]{4})",
+                m => ((char)Convert.ToInt32(m.Groups[1].Value, 16)).ToString());
+            // Then standard %XX
+            return Uri.UnescapeDataString(s);
         }
 
         private string ResolveIconPath(string iconPath, string pageDir)
@@ -1483,6 +1562,15 @@ img.resbtn:active { opacity: .6 !important; }
                 combined = Path.GetFullPath(Path.Combine(_currentBookPath, "images", "svgIcon", fname));
                 tried.Add(combined);
                 if (File.Exists(combined)) { Log($"[res] icon found (D): {combined}"); return combined; }
+
+                // Plain svgIcon/ at root and at page dir (no leading ../images/)
+                combined = Path.GetFullPath(Path.Combine(_currentBookPath, "svgIcon", fname));
+                tried.Add(combined);
+                if (File.Exists(combined)) { Log($"[res] icon found (D2): {combined}"); return combined; }
+
+                combined = Path.GetFullPath(Path.Combine(pageDir, "..", "images", "svgIcon", fname));
+                tried.Add(combined);
+                if (File.Exists(combined)) { Log($"[res] icon found (D3): {combined}"); return combined; }
 
                 var up = pageDir;
                 for (int i = 0; i < 3; i++)
@@ -1723,7 +1811,6 @@ img.resbtn:active { opacity: .6 !important; }
                             if (raw.StartsWith("data:") || raw.StartsWith("http")) return m.Value;
 
                             var name = Path.GetFileName(raw.Replace('\\', '/'));
-                            // Strip ?query and #fragment so the file resolves on disk
                             var q = name.IndexOfAny(new[] { '?', '#' });
                             if (q >= 0) name = name.Substring(0, q);
 
