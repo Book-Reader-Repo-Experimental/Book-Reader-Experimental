@@ -76,7 +76,7 @@ img.resbtn { position: absolute !important; cursor: pointer !important; z-index:
 img.resbtn:active { opacity: .6 !important; }
 ";
 
-                private const string ReaderJsTemplate = @"
+        private const string ReaderJsTemplate = @"
         window.__readerRedAnswersVisible = false;
         window.__readerNotesVisible = false;
         window.__redAnswerOriginalDisplay = new WeakMap();
@@ -272,7 +272,6 @@ img.resbtn:active { opacity: .6 !important; }
           window.__toggleByName(id, turnOn);
         };
         
-        // ---- External resource link (from steps_N_data.xml) ----
         window.__openResource = function(el){
           try {
             var url  = el && el.getAttribute && el.getAttribute('data-url');
@@ -288,56 +287,55 @@ img.resbtn:active { opacity: .6 !important; }
           } catch(e) {}
         };
         
-        // ---- 1:1 DOM & Font Extractor for PDF Export ----
         window.__getPdfDom = function() {
             var nodes = [];
-            var pageContainer = document.querySelector('.page-container');
+            var pageContainer = document.querySelector('.page-container') || document.body;
             if (!pageContainer) return JSON.stringify(nodes);
             
             var baseRect = pageContainer.getBoundingClientRect();
-            var scaleX = 1024 / baseRect.width;
-            var scaleY = 1344 / baseRect.height;
+            var scaleX = 1024 / (baseRect.width || 1024);
+            var scaleY = 1344 / (baseRect.height || 1344);
 
-            var walker = document.createTreeWalker(pageContainer, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
-                acceptNode: function(node) {
-                    if (node.nodeType === Node.TEXT_NODE) {
-                        if (!node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
-                        var parent = node.parentElement;
-                        if (!parent) return NodeFilter.FILTER_REJECT;
-                        var tag = parent.tagName.toLowerCase();
-                        if (tag === 'script' || tag === 'style' || tag === 'noscript') return NodeFilter.FILTER_REJECT;
-                        return NodeFilter.FILTER_ACCEPT;
+            var allElements = pageContainer.querySelectorAll('*');
+            for (var i = 0; i < allElements.length; i++) {
+                var el = allElements[i];
+                var tag = el.tagName.toLowerCase();
+                if (tag === 'script' || tag === 'style' || tag === 'noscript') continue;
+
+                if (tag === 'img') {
+                    var r = el.getBoundingClientRect();
+                    if (r.width > 0 && r.height > 0) {
+                        nodes.push({
+                            type: 'image',
+                            src: el.src,
+                            x: (r.left - baseRect.left) * scaleX,
+                            y: (r.top - baseRect.top) * scaleY,
+                            w: r.width * scaleX,
+                            h: r.height * scaleY
+                        });
                     }
-                    if (node.nodeType === Node.ELEMENT_NODE) {
-                        var tag = node.tagName.toLowerCase();
-                        if (tag === 'img') return NodeFilter.FILTER_ACCEPT;
-                        if (tag === 'script' || tag === 'style' || tag === 'noscript') return NodeFilter.FILTER_REJECT;
-                        return NodeFilter.FILTER_SKIP;
-                    }
-                    return NodeFilter.FILTER_SKIP;
+                    continue;
                 }
-            });
 
-            var n;
-            while (n = walker.nextNode()) {
-                if (n.nodeType === Node.TEXT_NODE) {
+                for (var j = 0; j < el.childNodes.length; j++) {
+                    var child = el.childNodes[j];
+                    if (child.nodeType !== Node.TEXT_NODE) continue;
+                    if (!child.nodeValue || !child.nodeValue.trim()) continue;
+
                     var range = document.createRange();
-                    range.selectNodeContents(n);
+                    range.selectNodeContents(child);
                     var rects = range.getClientRects();
                     
-                    for (var i = 0; i < rects.length; i++) {
-                        var r = rects[i];
+                    for (var k = 0; k < rects.length; k++) {
+                        var r = rects[k];
                         if (r.width === 0 || r.height === 0) continue;
                         
-                        var parent = n.parentElement;
-                        var style = window.getComputedStyle(parent);
-                        
-                        // Extract the exact font-family used by the browser
+                        var style = window.getComputedStyle(el);
                         var fontFamily = style.fontFamily.split(',')[0].replace(/['""]/g, '').trim();
-
+                        
                         nodes.push({
                             type: 'text',
-                            text: n.nodeValue,
+                            text: child.nodeValue,
                             x: (r.left - baseRect.left) * scaleX,
                             y: (r.top - baseRect.top) * scaleY,
                             w: r.width * scaleX,
@@ -347,29 +345,14 @@ img.resbtn:active { opacity: .6 !important; }
                             isBold: style.fontWeight === 'bold' || parseInt(style.fontWeight) >= 700,
                             isItalic: style.fontStyle === 'italic',
                             fontFamily: fontFamily,
-                            url: parent.closest('a') ? parent.closest('a').href : ''
+                            url: el.closest('a') ? el.closest('a').href : ''
                         });
                     }
                 }
-                else if (n.nodeType === Node.ELEMENT_NODE && n.tagName.toLowerCase() === 'img') {
-                    var r = n.getBoundingClientRect();
-                    if (r.width === 0 || r.height === 0) continue;
-                    
-                    nodes.push({
-                        type: 'image',
-                        src: n.src,
-                        x: (r.left - baseRect.left) * scaleX,
-                        y: (r.top - baseRect.top) * scaleY,
-                        w: r.width * scaleX,
-                        h: r.height * scaleY
-                    });
-                }
             }
-            
             return JSON.stringify(nodes);
         };
 
-        // ---- Split-pane controller: move button opens the target book ----
         window.getSplitPaneInfo = function(pane){
           if (!pane) return { id:'', bookUID:'', section:'', unit:'', step:'', page:'', split:'50%', tooltip:'' };
           var id = pane.id || '';
@@ -601,7 +584,6 @@ img.resbtn:active { opacity: .6 !important; }
           }
         };
         
-        // ---- Force every toggle icon visible and clickable ----
         (function(){
           function makeClickable(){
             document.querySelectorAll('img.redbtn, img.has2btn, img.hsgbtn').forEach(function(b){
@@ -1318,10 +1300,6 @@ img.resbtn:active { opacity: .6 !important; }
             }
         }
 
-        // ============================================================
-        // RESOURCE BUTTONS
-        // ============================================================
-
         private async Task<string> BuildResourceButtonsAsync(string pageDir, string nameWithoutExt)
         {
             try
@@ -1361,11 +1339,9 @@ img.resbtn:active { opacity: .6 !important; }
                     if (!double.TryParse(xStr, out double x)) continue;
                     if (!double.TryParse(yStr, out double y)) continue;
 
-                    // Two-pass decode
                     url = Uri.UnescapeDataString(Uri.UnescapeDataString(url));
                     desc = DecodeDesc(desc);
 
-                    // Resolve relative paths against page dir or shared folder
                     url = ResolveResourceUrl(url, pageDir);
 
                     string iconDataUri = "";
@@ -1426,7 +1402,6 @@ img.resbtn:active { opacity: .6 !important; }
             var booksRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "BookViewer", "Books");
             var sharedResources = Path.Combine(booksRoot, "resources");
 
-            // 1. %RESOURCES% → shared folder first, then per-book fallback
             if (url.Contains("%RESOURCES%"))
             {
                 var rel = url.Replace("%RESOURCES%/", "").Replace("%RESOURCES%", "").TrimStart('/');
@@ -1448,7 +1423,6 @@ img.resbtn:active { opacity: .6 !important; }
                 Log($"[res] %RESOURCES% NOT FOUND for '{rel}'");
             }
 
-            // 2. ../X → walk up from pageDir
             if (url.StartsWith("../") || url.StartsWith("..\\"))
             {
                 var disk = Path.GetFullPath(Path.Combine(pageDir, url.Replace('/', Path.DirectorySeparatorChar)));
@@ -1457,7 +1431,6 @@ img.resbtn:active { opacity: .6 !important; }
                     Log($"[res] ../ → {disk}");
                     return disk;
                 }
-                // Cross-book fallback (e.g., ../book_9999/resources/...)
                 if (url.StartsWith("../book_", StringComparison.OrdinalIgnoreCase))
                 {
                     var booksDir = Path.GetDirectoryName(_currentBookPath.TrimEnd(Path.DirectorySeparatorChar));
@@ -1469,7 +1442,6 @@ img.resbtn:active { opacity: .6 !important; }
                 }
             }
 
-            // 3. Relative X → pageDir, then book root
             var pageLocal = Path.GetFullPath(Path.Combine(pageDir, url.Replace('/', Path.DirectorySeparatorChar)));
             if (File.Exists(pageLocal)) return pageLocal;
 
@@ -1514,7 +1486,6 @@ img.resbtn:active { opacity: .6 !important; }
                 tried.Add(combined);
                 if (File.Exists(combined)) return combined;
 
-                // Plain svgIcon/ at root and at page dir
                 combined = Path.GetFullPath(Path.Combine(_currentBookPath, "svgIcon", fname));
                 tried.Add(combined);
                 if (File.Exists(combined)) return combined;
@@ -1678,11 +1649,15 @@ img.resbtn:active { opacity: .6 !important; }
             sb.Append(OverlayCssTemplate);
             sb.Append("body { background: ").Append(surround).Append("; }\n");
             sb.Append(".page-container { width: ").Append(pageWidth).Append("px; height: ").Append(pageHeight).Append("px; transform: scale(").Append(zoom).Append("); }\n");
-            sb.Append("</style>\n</head>\n<body>\n");
+            sb.Append("</style>\n");
+            
+            // INJECT JS IN THE HEAD
+            sb.Append("<script>\n").Append(ReaderJsTemplate).Append("\n</script>\n");
+            
+            sb.Append("</head>\n<body>\n");
             sb.Append("<div class='page-wrapper'><div class='page-container'>\n");
             sb.Append(skeleton);
             sb.Append("\n</div></div>\n");
-            sb.Append("<script>\n").Append(ReaderJsTemplate).Append("\n</script>\n");
             sb.Append("</body>\n</html>");
             return sb.ToString();
         }
