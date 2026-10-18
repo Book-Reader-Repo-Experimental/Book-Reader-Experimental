@@ -1,7 +1,8 @@
 using Microsoft.Extensions.Logging;
-using Microsoft.Maui.Storage;
+using PdfSharpCore.Fonts;
 using System;
 using System.IO;
+using BookViewer.Services;
 
 namespace BookViewer.Maui
 {
@@ -22,64 +23,44 @@ namespace BookViewer.Maui
             builder.Logging.AddDebug();
 #endif
 
-            // Migrate any per-book resources to the shared folder on startup.
-            MigrateSharedResources();
-
-            return builder.Build();
-        }
-
-        /// <summary>
-        /// One-shot migration: move any existing per-book resources/ and
-        /// resource/ folders to the shared Books/resources/ folder so
-        /// %RESOURCES% links keep working without re-download.
-        /// Safe to run on every launch (idempotent — won't overwrite).
-        /// </summary>
-        private static void MigrateSharedResources()
-        {
-            try
+            // 1. Set the custom font resolver globally BEFORE any PDF operations.
+            // This prevents PdfSharpCore from trying to scan system fonts (which crashes on iOS).
+            if (GlobalFontSettings.FontResolver == null)
             {
-                var booksRoot = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-                    "BookViewer", "Books");
-                if (!Directory.Exists(booksRoot)) return;
+                var resolver = new PdfFontResolver();
+                GlobalFontSettings.FontResolver = resolver;
 
-                var shared = Path.Combine(booksRoot, "resources");
-                Directory.CreateDirectory(shared);
-
-                foreach (var bookDir in Directory.GetDirectories(booksRoot, "book_*"))
+                // 2. Optionally register a CJK font from Resources/Raw/Fonts/
+                // So Chinese text can be drawn natively.
+                try
                 {
-                    foreach (var candidate in new[]
+                    var cjkPath = Path.Combine(FileSystem.AppDataDirectory, "Fonts", "NotoSansCJK.ttf");
+                    
+                    // On some platforms, we can read directly from the app package:
+                    using (var stream = FileSystem.OpenAppPackageFileAsync("Fonts/NotoSansCJK.ttf").Result)
                     {
-                        Path.Combine(bookDir, "resources"),
-                        Path.Combine(bookDir, "resource"),
-                    })
-                    {
-                        if (!Directory.Exists(candidate)) continue;
-
-                        try
+                        if (stream != null)
                         {
-                            foreach (var file in Directory.GetFiles(candidate, "*", SearchOption.AllDirectories))
-                            {
-                                var rel = Path.GetRelativePath(candidate, file);
-                                var dest = Path.Combine(shared, rel);
-                                if (File.Exists(dest)) continue;
-
-                                var dir = Path.GetDirectoryName(dest);
-                                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-                                File.Copy(file, dest);
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            System.Diagnostics.Debug.WriteLine($"MigrateSharedResources ({candidate}): {ex.Message}");
+                            Directory.CreateDirectory(Path.GetDirectoryName(cjkPath));
+                            using var fs = File.Create(cjkPath);
+                            stream.CopyTo(fs);
                         }
                     }
+
+                    if (File.Exists(cjkPath))
+                    {
+                        resolver.RegisterFont("Noto Sans CJK", false, false, cjkPath);
+                        resolver.RegisterFont("Noto Sans CJK", true, false, cjkPath);
+                        System.Diagnostics.Debug.WriteLine("Registered CJK font.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"CJK font registration failed: {ex.Message}");
                 }
             }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"MigrateSharedResources: {ex.Message}");
-            }
+
+            return builder.Build();
         }
     }
 }
