@@ -164,9 +164,15 @@ namespace BookViewer.Services
         
                         var rect = new Rectangle(x, y, 24, 24);
         
-                        var buttonField = PdfButtonFormField.CreatePushButton(pdf, rect, $"Toggle_{pageIndex}_{imgId}_{btnCounter++}", "");
+                        // Create a standard push button form field
+                        var buttonField = PdfButtonFormField.AddPushButton(pdf, rect, $"Toggle_{pageIndex}_{imgId}_{btnCounter++}", "");
                         buttonField.SetAdditionalAction(PdfName.U, action);
-                        buttonField.SetVisibility(PdfFormField.INVISIBLE);
+                        
+                        // Set the widget to print-only/invisible overlay if needed, or let it sit transparently over the image
+                        foreach (var w in buttonField.GetWidgets())
+                        {
+                            w.SetFlags(PdfAnnotation.PRINT);
+                        }
         
                         form.AddField(buttonField, pdfPage);
                     }
