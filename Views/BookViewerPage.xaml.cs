@@ -304,19 +304,35 @@ public partial class BookViewerPage : ContentPage
             {
                 var resourceUrl = HttpUtility.UrlDecode(q["url"] ?? "");
                 var resourceDesc = HttpUtility.UrlDecode(q["desc"] ?? "");
-                Log($"[resource] open url='{resourceUrl}' desc='{resourceDesc}'");
+                var openInApp = q["openInApp"] == "1";
+                var audio = q["audio"] == "1";
 
-                if (!string.IsNullOrEmpty(resourceUrl))
+                Log($"[resource] open url='{resourceUrl}' desc='{resourceDesc}' openInApp={openInApp} audio={audio}");
+
+                if (string.IsNullOrEmpty(resourceUrl)) return;
+
+                // Local file — BookService.DecodeResourceUrl already returned an absolute path
+                // when the file exists on disk.
+                bool isLocal = !resourceUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase) &&
+                               !resourceUrl.StartsWith("data:", StringComparison.OrdinalIgnoreCase) &&
+                               !resourceUrl.StartsWith("//", StringComparison.Ordinal) &&
+                               File.Exists(resourceUrl);
+
+                if (isLocal)
                 {
-                    try
-                    {
-                        await Launcher.Default.OpenAsync(resourceUrl);
-                    }
-                    catch (Exception ex)
-                    {
-                        Log($"[resource] open err: {ex.Message}");
-                        await DisplayAlert("Cannot open link", ex.Message, "OK");
-                    }
+                    await OpenLocalResourceAsync(resourceUrl, openInApp);
+                    return;
+                }
+
+                // Remote URL (HTML activity, audio page, external video, etc.)
+                try
+                {
+                    await Launcher.Default.OpenAsync(resourceUrl);
+                }
+                catch (Exception ex)
+                {
+                    Log($"[resource] open remote err: {ex.Message}");
+                    await DisplayAlert("Cannot open link", ex.Message, "OK");
                 }
             }
         }
@@ -326,8 +342,65 @@ public partial class BookViewerPage : ContentPage
         }
     }
 
+    private async Task OpenLocalResourceAsync(string path, bool forceApp)
+    {
+        var fileName = Path.GetFileName(path);
+        try
+        {
+#if ANDROID
+            var ok = Platforms.Android.FileOpener.OpenFile(path);
+            if (!ok)
+            {
+                Log($"[resource] Android FileOpener returned false, falling back to share");
+                await Share.Default.RequestAsync(new ShareFileRequest
+                {
+                    Title = fileName,
+                    File = new ShareFile(path)
+                });
+            }
+#elif IOS
+            await Share.Default.RequestAsync(new ShareFileRequest
+            {
+                Title = fileName,
+                File = new ShareFile(path)
+            });
+#elif MACCATALYST
+            var ok = Platforms.MacCatalyst.FileOpener.OpenFile(path);
+            if (!ok)
+            {
+                await Launcher.Default.OpenAsync(new OpenFileRequest { File = new ReadOnlyFile(path) });
+            }
+#elif WINDOWS
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = Path.GetFullPath(path),
+                UseShellExecute = true
+            });
+#else
+            await Launcher.Default.OpenAsync(new OpenFileRequest { File = new ReadOnlyFile(path) });
+#endif
+            Log($"[resource] opened local: {path}");
+        }
+        catch (Exception ex)
+        {
+            Log($"[resource] open local failed: {ex.Message}");
+            await DisplayAlert("Cannot open", ex.Message, "OK");
+        }
+    }
+
     private async void OnContentWebViewNavigated(object sender, WebNavigatedEventArgs e)
     {
+        // Only apply the answer overrides if the rendered page actually defines
+        // window.__setNotes / window.__setRedAnswers. Non-step pages (assessment
+        // pools, raw HTML) don't, and calling into a missing global is a silent
+        // JS error on Android WebView.
+        if (string.IsNullOrEmpty(_currentContentHtml)) return;
+        if (!_currentContentHtml.Contains("__setNotes") &&
+            !_currentContentHtml.Contains("__setRedAnswers"))
+        {
+            Log("[override] skipped (bridge JS not present on page)");
+            return;
+        }
         await ApplyAnswerOverridesAsync();
     }
 
@@ -559,7 +632,13 @@ public partial class BookViewerPage : ContentPage
         {
             var newIndex = _bookService.CurrentPageIndex + 2;
             if (newIndex < _bookService.PageFiles.Count) _ = _bookService.LoadPageAsync(newIndex);
-            else if (_bookService.CurrentPageIndex < _bookService.PageFiles.Count - 1) _ = _bookService.LoadPageAsync(_bookService.PageFiles.Count - 1);
+            else if (_bookService.CurrentPageIndex < _bookService.PageFiles.Count - 1)
+            {
+                // Clamp to the last page that still has a partner, or the final page.
+                int last = _bookService.PageFiles.Count - 1;
+                int target = (last % 2 == 0) ? Math.Max(0, last - 1) : last;
+                _ = _bookService.LoadPageAsync(target);
+            }
         }
         else _bookService.NavigateNext();
     }
