@@ -148,20 +148,30 @@ namespace BookViewer.Services
 
                         var rect = new Rectangle(x, y, 24, 24);
                         
-                        // Create a button field that acts as an invisible clickable area
-                        var field = new PdfTextFormField(pdf, new PdfString($"Toggle_{pageIndex}_{imgId}_{btnCounter++}"));
-                        field.SetAdditionalAction(PdfName.E, action);
+                        // Create a raw dictionary for the button widget
+                        var widgetDict = new PdfDictionary();
+                        widgetDict.Put(PdfName.Type, PdfName.Annot);
+                        widgetDict.Put(PdfName.Subtype, PdfName.Widget);
+                        widgetDict.Put(PdfName.FT, PdfName.Btn);
+                        widgetDict.Put(PdfName.Rect, new PdfArray(new PdfObject[] {
+                            new PdfNumber(rect.GetLeft()),
+                            new PdfNumber(rect.GetBottom()),
+                            new PdfNumber(rect.GetRight()),
+                            new PdfNumber(rect.GetTop())
+                        }));
+                        widgetDict.Put(PdfName.T, new PdfString($"Toggle_{pageIndex}_{imgId}_{btnCounter++}"));
+                        widgetDict.Put(PdfName.F, new PdfNumber(4)); // Print flag
+                        widgetDict.Put(PdfName.Ff, new PdfNumber(65536)); // Pushbutton flag
+                        
+                        var apDict = new PdfDictionary();
+                        apDict.Put(PdfName.N, new PdfDictionary());
+                        widgetDict.Put(PdfName.AP, apDict);
+                        
+                        widgetDict.Put(PdfName.A, action.GetPdfObject());
 
-                        // Create the widget and set its behavior
-                        var widget = new PdfWidgetAnnotation(rect);
-                        widget.SetPage(pdfPage);
-                        widget.SetParent(field.GetPdfObject());
-                        widget.SetHighlightMode(PdfAnnotation.HIGHLIGHT_PUSH); // Gives a hand cursor
-                        widget.SetBorder(new PdfArray(new PdfObject[] { new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
-                        widget.SetBackgroundColor(new iText.Kernel.Colors.DeviceRgb(1f, 1f, 1f)); // Invisible white background
-
-                        pdfPage.AddAnnotation(widget);
-                        form.AddField(field);
+                        // Convert to a PdfAnnotation and add it to the page
+                        var widgetAnnot = PdfAnnotation.MakeAnnotation(widgetDict);
+                        pdfPage.AddAnnotation(widgetAnnot);
                     }
                 }
             }
