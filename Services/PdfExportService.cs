@@ -41,8 +41,6 @@ namespace BookViewer.Services
         public PdfExportService(BookService bookService)
         {
             _bookService = bookService;
-            
-            // Cast the global resolver to our custom type so we can register book fonts
             _fontResolver = GlobalFontSettings.FontResolver as PdfFontResolver ?? new PdfFontResolver();
         }
 
@@ -168,42 +166,8 @@ namespace BookViewer.Services
                             .Replace("bold", "").Replace("italic", "").Trim();
 
                         _fontResolver.RegisterFont(familyName, isBold, isItalic, file);
-                        System.Diagnostics.Debug.WriteLine($"Registered font: {familyName} ({isBold}/{isItalic}) -> {file}");
                     }
                 }
-
-#if ANDROID
-                var systemFonts = new Dictionary<string, string>
-                {
-                    { "sans-serif", "/system/fonts/Roboto-Regular.ttf" },
-                    { "sans-serif", "/system/fonts/Roboto-Bold.ttf" },
-                    { "serif", "/system/fonts/NotoSerif-Regular.ttf" },
-                };
-                foreach (var kvp in systemFonts)
-                {
-                    if (File.Exists(kvp.Value))
-                    {
-                        bool isBold = kvp.Value.Contains("Bold");
-                        _fontResolver.RegisterFont(kvp.Key, isBold, false, kvp.Value);
-                    }
-                }
-#endif
-#if IOS || MACCATALYST
-                var iosFonts = new Dictionary<string, string>
-                {
-                    { "Helvetica", "/System/Library/Fonts/Helvetica.ttc" },
-                    { "Helvetica-Bold", "/System/Library/Fonts/Helvetica.ttc" },
-                    { "PingFang SC", "/System/Library/Fonts/PingFang.ttc" },
-                };
-                foreach (var kvp in iosFonts)
-                {
-                    if (File.Exists(kvp.Value))
-                    {
-                        bool isBold = kvp.Key.Contains("Bold");
-                        _fontResolver.RegisterFont(kvp.Key.Replace("-Bold", ""), isBold, false, kvp.Value);
-                    }
-                }
-#endif
             }
             catch (Exception ex)
             {
