@@ -5,9 +5,9 @@ using iText.Kernel.Utils;
 using iText.Kernel.Geom;
 using iText.Forms;
 using iText.Forms.Fields;
+using iText.Forms.Form.Element;
 using iText.Kernel.Pdf.Action;
 using iText.Kernel.Pdf.Annot;
-using iText.Kernel.Pdf.Canvas;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -117,38 +117,45 @@ namespace BookViewer.Services
             {
                 var content = m.Groups[1].Value;
                 var fieldId = $"AnswerField_{pageIndex}_{matchCount++}";
-                return $"<button id=\"{fieldId}\" class=\"pdf-answer-field\" style=\"display:block; border:none; background:none;\">{content}</button>";            });
+                return $"<button id=\"{fieldId}\" class=\"pdf-answer-field\" style=\"display:block; border:none; background:none;\">{content}</button>";
+            });
         }
-        
+
         private void InjectToggleActions(PdfDocument pdf, string html, int pageIndex)
         {
             var form = PdfAcroForm.GetAcroForm(pdf, true);
-        
+
+            // Find all buttons and map them to answer fields
             var buttonRegex = new Regex(@"<img[^>]+class=""[^""]*(?:redbtn|hsgbtn|has2btn)[^""]*""[^>]*id=""([^""]+)""[^>]*linkname=""([^""]+)""", RegexOptions.IgnoreCase);
             var buttonMatches = buttonRegex.Matches(html);
-        
+
             foreach (Match buttonMatch in buttonMatches)
             {
                 var imgId = buttonMatch.Groups[1].Value;
                 var linkName = buttonMatch.Groups[2].Value;
                 
+                // The field ID must match the button's linkname. We append the page index to make it unique.
                 var fieldId = $"AnswerField_{pageIndex}_{linkName}"; 
-        
+
+                // If the field exists, create a JS action to toggle it
                 if (form.GetField(fieldId) != null)
                 {
                     // FIXED: Escaped double quotes so C# compiles
                     var toggleScript = $"var f = this.getField(\"{fieldId}\"); if (f) f.display = (f.display == display.hidden) ? display.visible : display.hidden;";
                     var action = PdfAction.CreateJavaScript(toggleScript);
-        
+
+                    // Create a transparent checkbox over the image using the image's inline style
                     var styleMatch = Regex.Match(buttonMatch.Value, @"style=""[^""]*left:\s*([\d\.]+)px[^""]*top:\s*([\d\.]+)px");
                     if (styleMatch.Success)
                     {
                         float x = float.Parse(styleMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) * 0.75f;
+                        // Y-axis inversion: pageHeight - (top * scale) - buttonHeight
                         float y = 1008 - (float.Parse(styleMatch.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture) * 0.75f) - 24;
-        
+
                         var rect = new Rectangle(x, y, 24, 24);
                         
-                        var checkbox = new PdfCheckBoxFormField(pdf.GetDocument(), new PdfString($"Toggle_{pageIndex}_{imgId}"), pdf.GetDefaultPageSize());
+                        // Create a generic button form field (acts as checkbox with custom action)
+                        var checkbox = new PdfButtonFormField(pdf.GetDocument(), new PdfString($"Toggle_{pageIndex}_{imgId}"));
                         checkbox.SetWidgets(new List<PdfFormAnnotation> { new PdfFormAnnotation(pdf.GetDocument(), rect) });
                         checkbox.SetAdditionalAction(PdfName.E, action);
                         form.AddField(checkbox);
@@ -156,6 +163,7 @@ namespace BookViewer.Services
                 }
             }
         }
+
         private string InjectPdfCss(string html)
         {
             var css = @"
