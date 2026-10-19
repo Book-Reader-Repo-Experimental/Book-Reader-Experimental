@@ -149,8 +149,27 @@ namespace BookViewer.Services
             var pdfPage = pdf.GetPage(1);
             float pageHeight = pdfPage.GetPageSize().GetHeight();
 
-            PdfFont answerFont = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
-            float fontSize = 11f;
+            // 1. Extract Font
+            PdfFont answerFont = null;
+            try
+            {
+                var fontFaceMatch = Regex.Match(html, @"@font-face\s*\{[^}]*\}", RegexOptions.IgnoreCase);
+                if (fontFaceMatch.Success)
+                {
+                    var fontFace = fontFaceMatch.Value;
+                    var base64Match = Regex.Match(fontFace, @"base64,([^""']+)\)", RegexOptions.IgnoreCase);
+                    if (base64Match.Success)
+                    {
+                        var fontBytes = Convert.FromBase64String(base64Match.Groups[1].Value);
+                        var fontFile = Path.Combine(tempDir, $"page_{pageIndex}_font.ttf");
+                        await File.WriteAllBytesAsync(fontFile, fontBytes);
+                        answerFont = PdfFontFactory.CreateFont(fontFile, PdfEncodings.IDENTITY_H);
+                    }
+                }
+            }
+            catch { }
+            if (answerFont == null)
+                answerFont = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
 
             // 2. Parse Text Answers
             var fragmentRegex = new Regex(
@@ -158,10 +177,7 @@ namespace BookViewer.Services
                 RegexOptions.IgnoreCase);
 
             var answerData = new Dictionary<string, List<(string text, float x, float y, float w)>>(StringComparer.OrdinalIgnoreCase);
-            
-            var allFieldIds = new List<string>();
-            var allNoteFieldIds = new List<string>();
-            var allAnswerFieldIds = new List<string>();
+            var noteKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (Match am in fragmentRegex.Matches(html))
             {
@@ -171,6 +187,9 @@ namespace BookViewer.Services
                 var keyMatch = Regex.Match(body, @"<has2\b[^>]*\bname=[""']([^""']+)[""']", RegexOptions.IgnoreCase);
                 if (!keyMatch.Success) continue;
                 string key = SanitizeFieldName(keyMatch.Groups[1].Value);
+
+                if (divTag.Contains("tbnote", StringComparison.OrdinalIgnoreCase)) 
+                    noteKeys.Add(key);
 
                 string clean = Regex.Replace(body, "<[^>]+>", " ");
                 clean = System.Net.WebUtility.HtmlDecode(clean);
@@ -190,7 +209,7 @@ namespace BookViewer.Services
 
                 float pxToPt = 0.75f;
                 float x = leftPx * pxToPt;
-                float y = pageHeight - (topPx * pxToPt) - 14f; 
+                float y = pageHeight - (topPx * pxToPt) - 18f; 
                 float w = Math.Max(widthPx * pxToPt, 40f);
 
                 if (!answerData.TryGetValue(key, out var list))
@@ -245,23 +264,25 @@ namespace BookViewer.Services
 
             // 4. Parse Buttons
             var buttonRegex = new Regex(
-                @"<img\b(?<tag>[^>]*\bclass=[""']?[^""']*(?:hsgbtn|has2btn|redbtn)[^""']*[""']?)(?=[^>]*\bid=[""']([^""']+)[""'])(?=[^>]*\b(?:linkname|name)=[""']([^""']+)[""'])(?<rest>[^>]*)>",
+                @"<img\b(?=[^>]*\bclass=[""']?[^""']*(?:hsgbtn|has2btn|redbtn)[^""']*[""']?)(?=[^>]*\bid=[""']([^""']+)[""'])(?=[^>]*\b(?:linkname|name)=[""']([^""']+)[""'])[^>]*>",
                 RegexOptions.IgnoreCase);
             var buttonMatches = buttonRegex.Matches(html);
 
+            var allFieldIds = new List<string>();
+            var allNoteFieldIds = new List<string>();
             int btnCounter = 0;
-            iText.Kernel.Colors.Color bookRed = new DeviceRgb(228, 4, 119); // #E40477
+
+            // EXACT BOOK RED (#E40477)
+            iText.Kernel.Colors.Color bookRed = new DeviceRgb(228, 4, 119);
 
             foreach (Match buttonMatch in buttonMatches)
             {
-                var imgId = SanitizeFieldName(buttonMatch.Groups[2].Value);
-                var linkName = SanitizeFieldName(buttonMatch.Groups[3].Value);
-                var fullTag = buttonMatch.Groups[1].Value + buttonMatch.Groups[4].Value;
-
-                bool isNoteButton = fullTag.Contains("teacherNotes", StringComparison.OrdinalIgnoreCase) || linkName.Contains("note", StringComparison.OrdinalIgnoreCase);
+                var imgId = SanitizeFieldName(buttonMatch.Groups[1].Value);
+                var linkName = SanitizeFieldName(buttonMatch.Groups[2].Value);
+                bool isNoteButton = noteKeys.Contains(linkName) || buttonMatch.Value.Contains("teacherNotes", StringComparison.OrdinalIgnoreCase);
 
                 float leftPx = 0f, topPx = 0f;
-                var styleMatch = Regex.Match(fullTag,
+                var styleMatch = Regex.Match(buttonMatch.Value,
                     @"style=[""'][^""']*left:\s*([\d\.]+)px[^""']*top:\s*([\d\.]+)px",
                     RegexOptions.IgnoreCase);
                 if (styleMatch.Success)
@@ -283,9 +304,7 @@ namespace BookViewer.Services
                         var fieldId = $"A_{pageIndex}_{linkName}_{f}";
                         currentButtonFields.Add(fieldId);
                         allFieldIds.Add(fieldId);
-                        
                         if (isNoteButton) allNoteFieldIds.Add(fieldId);
-                        else allAnswerFieldIds.Add(fieldId);
 
                         var textRect = new Rectangle(ans.x, ans.y, ans.w, 18f);
                         var textField = new TextFormFieldBuilder(pdf, fieldId)
@@ -303,7 +322,7 @@ namespace BookViewer.Services
                             var apStream = new PdfFormXObject(textRect);
                             var canvas = new PdfCanvas(apStream, pdf);
                             canvas.BeginText();
-                            canvas.SetFontAndSize(answerFont, fontSize);
+                            canvas.SetFontAndSize(answerFont, 11);
                             canvas.SetTextMatrix(2, 4);
                             canvas.SetFillColor(bookRed);
                             canvas.ShowText(ans.text);
@@ -324,9 +343,7 @@ namespace BookViewer.Services
                         var fieldId = $"S_{pageIndex}_{linkName}_{f}";
                         currentButtonFields.Add(fieldId);
                         allFieldIds.Add(fieldId);
-                        
                         if (isNoteButton) allNoteFieldIds.Add(fieldId);
-                        else allAnswerFieldIds.Add(fieldId);
 
                         var shapeRect = new Rectangle(shape.x, shape.y, shape.w, shape.h);
                         
@@ -355,47 +372,26 @@ namespace BookViewer.Services
                     }
                 }
 
-                // Hitbox (Always 24x24pt centered on the icon)
-                var buttonRect = new Rectangle(bx - 4, by, 24, 24);
+                // Hitbox
+                var buttonRect = new Rectangle(bx, by, 24, 24);
                 var toggleFieldName = $"T_{pageIndex}_{imgId}_{btnCounter++}";
                 
-                // RESTORED: CheckBoxFormFieldBuilder is the ONLY form field type 
-                // that Chrome's PDFium viewer consistently registers as clickable.
-                var chk = new CheckBoxFormFieldBuilder(pdf, toggleFieldName)
+                var triggerField = new TextFormFieldBuilder(pdf, toggleFieldName)
                     .SetWidgetRectangle(buttonRect)
-                    .CreateCheckBox();
-                chk.SetValue("Off");
+                    .CreateText();
+                triggerField.SetReadOnly(false);
 
                 string toggleScript;
-                bool isAll = linkName.Contains("all");
-                bool isAllNotes = isAll && (isNoteButton || fullTag.Contains("allnotes", StringComparison.OrdinalIgnoreCase));
-                bool isAllAnswers = isAll && !isAllNotes;
+                if (linkName.Contains("all"))
+                {
+                    var targets = (isNoteButton || linkName.Contains("note")) ? allNoteFieldIds : allFieldIds;
+                    if (linkName.Equals("all", StringComparison.OrdinalIgnoreCase)) targets = allFieldIds;
 
-                if (isAllNotes)
-                {
                     toggleScript = "var anyVisible = false;\n";
-                    foreach (var id in allNoteFieldIds)
+                    foreach (var id in targets)
                         toggleScript += $"var f = this.getField('{id}'); if (f && f.display === 0) anyVisible = true;\n";
                     toggleScript += "var newDisplay = anyVisible ? 1 : 0;\n";
-                    foreach (var id in allNoteFieldIds)
-                        toggleScript += $"var f = this.getField('{id}'); if (f) {{ f.display = newDisplay; var v = f.value; f.value = ''; f.value = v; }}\n";
-                }
-                else if (isAllAnswers)
-                {
-                    toggleScript = "var anyVisible = false;\n";
-                    foreach (var id in allAnswerFieldIds)
-                        toggleScript += $"var f = this.getField('{id}'); if (f && f.display === 0) anyVisible = true;\n";
-                    toggleScript += "var newDisplay = anyVisible ? 1 : 0;\n";
-                    foreach (var id in allAnswerFieldIds)
-                        toggleScript += $"var f = this.getField('{id}'); if (f) {{ f.display = newDisplay; var v = f.value; f.value = ''; f.value = v; }}\n";
-                }
-                else if (isAll)
-                {
-                    toggleScript = "var anyVisible = false;\n";
-                    foreach (var id in allFieldIds)
-                        toggleScript += $"var f = this.getField('{id}'); if (f && f.display === 0) anyVisible = true;\n";
-                    toggleScript += "var newDisplay = anyVisible ? 1 : 0;\n";
-                    foreach (var id in allFieldIds)
+                    foreach (var id in targets)
                         toggleScript += $"var f = this.getField('{id}'); if (f) {{ f.display = newDisplay; var v = f.value; f.value = ''; f.value = v; }}\n";
                 }
                 else
@@ -409,7 +405,7 @@ namespace BookViewer.Services
                 }
 
                 var jsAction = PdfAction.CreateJavaScript(toggleScript);
-                foreach (var w in chk.GetWidgets())
+                foreach (var w in triggerField.GetWidgets())
                 {
                     w.SetBorder(new PdfArray(new PdfNumber[] { new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
                     w.SetFlags(PdfAnnotation.PRINT);
@@ -418,14 +414,14 @@ namespace BookViewer.Services
                     aaDict.Put(PdfName.U, jsAction.GetPdfObject());
                     w.GetPdfObject().Put(PdfName.AA, aaDict);
 
-                    // Empty transparent appearance stream
                     var ap = new PdfFormXObject(new Rectangle(0, 0, 24, 24));
                     w.SetAppearance(PdfName.N, ap.GetPdfObject());
                 }
-                form.AddField(chk, pdfPage);
+                form.AddField(triggerField, pdfPage);
             }
         }
 
+        // Accurate SVG Path Parser (Handles relative/absolute M, L, C, Z)
         private void DrawSvgPath(PdfCanvas canvas, string pathD, float baseX, float baseY, float height)
         {
             try
