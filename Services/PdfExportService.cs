@@ -158,36 +158,36 @@ namespace BookViewer.Services
                     $"font-family:inherit; font-size:inherit; padding:0; margin:0;\" />";
             });
         }
-
+        
         private void InjectToggleActions(PdfDocument pdf, string html, int pageIndex)
         {
             var form = PdfAcroForm.GetAcroForm(pdf, true);
             if (form == null) return;
-
+        
             var buttonRegex = new Regex(
                 @"<img\b(?=[^>]*\bclass=""[^""]*(?:redbtn|hsgbtn|has2btn)[^""]*"")(?=[^>]*\bid=""([^""]+)"")(?=[^>]*\blinkname=""([^""]+)"")[^>]*>",
                 RegexOptions.IgnoreCase);
-
+        
             int btnCounter = 0;
             var pdfPage = pdf.GetPage(1);
             float pageHeight = pdfPage.GetPageSize().GetHeight();
-
+        
             foreach (Match buttonMatch in buttonRegex.Matches(html))
             {
                 var imgId = SanitizeFieldName(buttonMatch.Groups[1].Value);
                 var linkName = SanitizeFieldName(buttonMatch.Groups[2].Value);
-
+        
                 var fieldId = $"AnswerField_{pageIndex}_{linkName}";
                 var targetField = form.GetField(fieldId);
                 if (targetField == null) continue;
-
+        
                 var actualFieldId = targetField.GetFieldName().ToString();
-
+        
                 var toggleScript =
                     $"var f = this.getField(\"{actualFieldId}\"); " +
                     $"if (f) {{ f.display = (f.display === 1) ? 0 : 1; }}";
                 var action = PdfAction.CreateJavaScript(toggleScript);
-
+        
                 float leftPx = 0f, topPx = 0f;
                 var styleMatch = Regex.Match(
                     buttonMatch.Value,
@@ -200,40 +200,36 @@ namespace BookViewer.Services
                     topPx = float.Parse(styleMatch.Groups[2].Value,
                         System.Globalization.CultureInfo.InvariantCulture);
                 }
-
+        
                 float x = leftPx * 0.75f;
                 float y = pageHeight - (topPx * 0.75f) - 24f;
-
+        
                 var rect = new Rectangle(x, y, 24, 24);
                 var fieldName = $"Toggle_{pageIndex}_{imgId}_{btnCounter++}";
-
+        
                 var buttonField = new PushButtonFormFieldBuilder(pdf, fieldName)
                     .SetWidgetRectangle(rect)
                     .SetCaption("")
                     .CreatePushButton();
-
+        
                 foreach (var w in buttonField.GetWidgets())
                 {
-                    // Attach the JS to the widget's primary action (/A) — this is what Acrobat fires on click.
-                    w.Put(PdfName.A, action);
-
+                    // ✅ FIX: Put requires a PdfObject — use GetPdfObject() on the action
+                    w.Put(PdfName.A, action.GetPdfObject());
+        
                     w.SetFlags(PdfAnnotation.PRINT);
-
-                    // No border, so the red/HSG image underneath stays visible.
+        
                     w.SetBorder(new PdfArray(new PdfNumber[] {
                         new PdfNumber(0), new PdfNumber(0), new PdfNumber(0)
                     }));
-
-                    // CRITICAL: give the widget a transparent appearance stream so it has a real
-                    // 24×24 clickable hitbox. Without /AP, the push button has no hitbox at all
-                    // and the click never reaches the action.
+        
+                    // ✅ FIX: SetAppearance needs a PdfDictionary — use GetPdfObject() on the XObject
                     var ap = new PdfFormXObject(new Rectangle(0, 0, 24, 24));
-                    w.SetAppearance(PdfName.N, ap);
+                    w.SetAppearance(PdfName.N, ap.GetPdfObject());
                 }
-
-                // Belt-and-suspenders for viewers that look at /AA/U instead of /A.
+        
                 buttonField.SetAdditionalAction(PdfName.U, action);
-
+        
                 form.AddField(buttonField, pdfPage);
             }
         }
