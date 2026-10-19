@@ -182,7 +182,7 @@ namespace BookViewer.Services
         
                 var actualFieldId = targetField.GetFieldName().ToString();
         
-                // Acrobat JS: display 0 = visible, 1 = hidden (works in Acrobat + most JS viewers)
+                // Acrobat JS: display 0 = visible, 1 = hidden
                 var toggleScript =
                     $"var f = this.getField(\"{actualFieldId}\"); " +
                     $"if (f) {{ f.display = (f.display === 1) ? 0 : 1; }}";
@@ -207,15 +207,16 @@ namespace BookViewer.Services
                     .SetCaption("")
                     .CreatePushButton();
         
-                // ⭐ Attach the JS action to the WIDGET, not the field, in iText 8.
+                // Attach the JS action to the WIDGET (required in iText 8 — field has no SetAction)
                 foreach (var w in buttonField.GetWidgets())
                 {
-                    w.SetAction(action);                                    // primary /A — required for click
-                    w.SetFlags(PdfAnnotation.PRINT);
-                    w.SetBorder(new PdfArray(new PdfNumber[] {
+                    w.SetAction(action);                         // primary /A — makes the click fire JS
+                    w.SetFlags(PdfAnnotation.PRINT);             // print with the page
+                    w.SetBorder(new PdfArray(new PdfNumber[] {   // invisible border over the image
                         new PdfNumber(0), new PdfNumber(0), new PdfNumber(0)
-                    }));                                                     // invisible border over image
-                    w.SetColor(PdfName.BG, iText.Kernel.Colors.ColorConstants.WHITE);
+                    }));
+                    // NOTE: no SetColor call — the widget stays transparent so the
+                    // red/HSG button image underneath remains visible.
                 }
         
                 // Belt-and-suspenders: some viewers read AA/U instead of A.
