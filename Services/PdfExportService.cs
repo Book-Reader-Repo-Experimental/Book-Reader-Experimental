@@ -163,14 +163,10 @@ namespace BookViewer.Services
                         var fontFile = Path.Combine(tempDir, $"page_{pageIndex}_font.ttf");
                         await File.WriteAllBytesAsync(fontFile, fontBytes);
                         answerFont = PdfFontFactory.CreateFont(fontFile, PdfEncodings.IDENTITY_H);
-                        DebugLog($"[INJ] Page {pageIndex}: Extracted custom font.");
                     }
                 }
             }
-            catch (Exception ex)
-            {
-                DebugLog($"[INJ] Page {pageIndex}: Font extraction failed. {ex.Message}");
-            }
+            catch { }
             if (answerFont == null)
                 answerFont = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
 
@@ -185,7 +181,7 @@ namespace BookViewer.Services
             {
                 string divTag = am.Groups["divtag"].Value;
                 string body = am.Groups["body"].Value;
-
+                
                 var keyMatch = Regex.Match(body, @"<has2\b[^>]*\bname=[""']([^""']+)[""']", RegexOptions.IgnoreCase);
                 if (!keyMatch.Success) continue;
                 string key = SanitizeFieldName(keyMatch.Groups[1].Value);
@@ -208,7 +204,7 @@ namespace BookViewer.Services
 
                 float pxToPt = 0.75f;
                 float x = leftPx * pxToPt;
-                float y = pageHeight - (topPx * pxToPt) - 18f;
+                float y = pageHeight - (topPx * pxToPt) - 18f; 
                 float w = Math.Max(widthPx * pxToPt, 40f);
 
                 if (!answerData.TryGetValue(key, out var list))
@@ -351,12 +347,8 @@ namespace BookViewer.Services
                             canvas.SetStrokeColor(ColorConstants.RED);
                             canvas.SetLineWidth(1.0f);
                             
-                            var path = ParseSvgPath(shape.pathD, shape.x, shape.y, shape.h);
-                            if (path != null)
-                            {
-                                canvas.DrawPath(path);
-                                canvas.Stroke();
-                            }
+                            DrawSvgPath(canvas, shape.pathD, shape.x, shape.y, shape.h);
+                            canvas.Stroke();
                             canvas.Release();
                             w.SetAppearance(PdfName.N, apStream.GetPdfObject());
                         }
@@ -422,15 +414,16 @@ namespace BookViewer.Services
             }
         }
 
-        // Super simple SVG path parser for "m x y c ... z" commands (translates and scales)
-        private iText.Kernel.Geom.Path ParseSvgPath(string pathD, float baseX, float baseY, float height)
+        // Draws the SVG path directly onto the PdfCanvas
+        private void DrawSvgPath(PdfCanvas canvas, string pathD, float baseX, float baseY, float height)
         {
             try
             {
-                var path = new iText.Kernel.Geom.Path();
                 var matches = Regex.Matches(pathD, @"([a-zA-Z])|(-?\d*\.?\d+)");
                 float startX = 0, startY = 0;
                 bool first = true;
+                bool currentPointSet = false;
+                float curX = 0, curY = 0;
 
                 for (int i = 0; i < matches.Count; i++)
                 {
@@ -438,13 +431,15 @@ namespace BookViewer.Services
                     if (char.IsLetter(token[0]))
                     {
                         char cmd = token[0];
-                        if (cmd == 'z' || cmd == 'Z') { path.CloseSubpath(); }
+                        if (cmd == 'z' || cmd == 'Z') { canvas.ClosePath(); }
                         else if (cmd == 'm' || cmd == 'M')
                         {
                             float x = ParseFloat(matches[++i].Value);
                             float y = ParseFloat(matches[++i].Value);
                             if (first) { startX = x; startY = y; first = false; }
-                            path.MoveTo(baseX + x * 0.75f, baseY + (height - y * 0.75f));
+                            curX = baseX + x * 0.75f; curY = baseY + (height - y * 0.75f);
+                            canvas.MoveTo(curX, curY);
+                            currentPointSet = true;
                         }
                         else if (cmd == 'c' || cmd == 'C')
                         {
@@ -454,17 +449,26 @@ namespace BookViewer.Services
                             float y2 = ParseFloat(matches[++i].Value);
                             float x3 = ParseFloat(matches[++i].Value);
                             float y3 = ParseFloat(matches[++i].Value);
-                            path.CurveTo(
+                            
+                            canvas.CurveTo(
                                 baseX + x1 * 0.75f, baseY + (height - y1 * 0.75f),
                                 baseX + x2 * 0.75f, baseY + (height - y2 * 0.75f),
                                 baseX + x3 * 0.75f, baseY + (height - y3 * 0.75f)
                             );
+                            curX = baseX + x3 * 0.75f; curY = baseY + (height - y3 * 0.75f);
+                        }
+                        else if (cmd == 'l' || cmd == 'L')
+                        {
+                            float x = ParseFloat(matches[++i].Value);
+                            float y = ParseFloat(matches[++i].Value);
+                            curX = baseX + x * 0.75f; curY = baseY + (height - y * 0.75f);
+                            if (currentPointSet) canvas.LineTo(curX, curY);
+                            else { canvas.MoveTo(curX, curY); currentPointSet = true; }
                         }
                     }
                 }
-                return path;
             }
-            catch { return null; }
+            catch { }
         }
 
         private float ParseFloat(string s)
