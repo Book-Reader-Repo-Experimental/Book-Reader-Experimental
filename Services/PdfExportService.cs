@@ -8,7 +8,7 @@ using iText.Kernel.Pdf.Annot;
 using iText.Kernel.Geom;
 using iText.Kernel.Font;
 using iText.Kernel.Utils;
-using iText.IO.Font;              // PdfEncodings lives here in iText 8
+using iText.IO.Font;
 using iText.IO.Font.Constants;
 using iText.Forms;
 using iText.Forms.Fields;
@@ -157,37 +157,59 @@ namespace BookViewer.Services
             DebugLog($"[INJ] Page {pageIndex}: buttons matched = {buttonMatches.Count}");
             if (buttonMatches.Count == 0) return;
 
-            // ---- Answers keyed by linkname/name (NOT by DOM index) ----
-            var answers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-            var paneRegex = new Regex(
-                @"<pane\b[^>]*class=[""'][^""']*\bredAnswer\b[^""']*[""'][^>]*>(?<body>[\s\S]*?)</pane>",
-                RegexOptions.IgnoreCase);
-            var paneMatch = paneRegex.Match(html);
-            string answerPaneHtml = paneMatch.Success ? paneMatch.Groups["body"].Value : html;
+            // ---- Group answers by <has2 name="..."> inside each <div class="tbred/tbnote"> ----
+            var answerGroups = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
 
             var answerDivRegex = new Regex(
-                @"<div\b(?<tag>[^>]*\bclass=[""'][^""']*\b(?:tbred|tbnote)\b[^""']*[""'][^>]*)>(?<body>[\s\S]*?)</div>",
+                @"<div\b(?<divtag>[^>]*\bclass=[""'][^""']*\b(?:tbred|tbnote)\b[^""']*[""'][^>]*)>(?<body>[\s\S]*?)</div>",
                 RegexOptions.IgnoreCase);
 
-            foreach (Match am in answerDivRegex.Matches(answerPaneHtml))
+            foreach (Match am in answerDivRegex.Matches(html))
             {
-                string tag = am.Groups["tag"].Value;
-                var linkMatch = Regex.Match(tag, @"\b(?:linkname|name)=[""']([^""']+)[""']", RegexOptions.IgnoreCase);
-                if (!linkMatch.Success) continue;
+                string divTag = am.Groups["divtag"].Value;
+                string body = am.Groups["body"].Value;
 
-                var key = SanitizeFieldName(linkMatch.Groups[1].Value);
+                // The answer id lives on the inner <has2 name="...">
+                var keyMatch = Regex.Match(body,
+                    @"<has2\b[^>]*\bname=[""']([^""']+)[""']",
+                    RegexOptions.IgnoreCase);
+                if (!keyMatch.Success)
+                {
+                    // Fallback: div's own linkname/name
+                    keyMatch = Regex.Match(divTag,
+                        @"\b(?:linkname|name)=[""']([^""']+)[""']",
+                        RegexOptions.IgnoreCase);
+                    if (!keyMatch.Success) continue;
+                }
 
-                string raw = am.Groups["body"].Value;
-                string clean = Regex.Replace(raw, "<[^>]+>", " ");
+                string key = SanitizeFieldName(keyMatch.Groups[1].Value);
+
+                string clean = Regex.Replace(body, "<[^>]+>", " ");
                 clean = System.Net.WebUtility.HtmlDecode(clean);
                 clean = Regex.Replace(clean, @"\s+", " ").Trim();
+                if (string.IsNullOrEmpty(clean)) continue;
 
-                if (!answers.ContainsKey(key))
-                    answers[key] = clean;
+                if (!answerGroups.TryGetValue(key, out var list))
+                {
+                    list = new List<string>();
+                    answerGroups[key] = list;
+                }
+                list.Add(clean);
             }
 
-            DebugLog($"[INJ] Page {pageIndex}: answers keyed = {answers.Count}");
+            // Join each group into one visible string.
+            // CJK single-character chunks are concatenated without spaces.
+            var answers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kv in answerGroups)
+            {
+                bool allShort = kv.Value.All(v => v.Length <= 2);
+                string joined = allShort ? string.Concat(kv.Value) : string.Join(" ", kv.Value);
+                answers[kv.Key] = joined;
+            }
+
+            DebugLog($"[INJ] Page {pageIndex}: answer groups = {answers.Count}");
+            foreach (var kv in answers.Take(3))
+                DebugLog($"[INJ]   sample key='{kv.Key}' -> '{(kv.Value.Length > 60 ? kv.Value.Substring(0, 60) + "..." : kv.Value)}'");
 
             var helveticaFont = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
 
@@ -197,7 +219,7 @@ namespace BookViewer.Services
                 var linkName = SanitizeFieldName(buttonMatch.Groups[2].Value);
                 var fieldId = $"A_{pageIndex}_{linkName}";
 
-                string answerText = answers.ContainsKey(linkName) ? answers[linkName] : "";
+                string answerText = answers.TryGetValue(linkName, out var at) ? at : "";
 
                 float leftPx = 0f, topPx = 0f;
                 var styleMatch = Regex.Match(buttonMatch.Value,
@@ -213,7 +235,7 @@ namespace BookViewer.Services
 
                 DebugLog($"[INJ] Page {pageIndex} {fieldId}: '{(answerText.Length > 40 ? answerText.Substring(0, 40) + "..." : answerText)}' len={answerText.Length}");
 
-                // ---- Answer field (appearance stream + value) ----
+                // ---- Answer field (with forced appearance stream) ----
                 var textRect = new Rectangle(x + 25, y, 250, 24);
                 var textField = new TextFormFieldBuilder(pdf, fieldId)
                     .SetWidgetRectangle(textRect)
@@ -240,7 +262,7 @@ namespace BookViewer.Services
                 }
                 form.AddField(textField, pdfPage);
 
-                // ---- Toggle button (JS attached to /A, /AA/U and the field's AA) ----
+                // ---- Toggle button ----
                 var buttonRect = new Rectangle(x, y, 24, 24);
                 var toggleFieldName = $"T_{pageIndex}_{imgId}_{btnCounter++}";
                 var buttonField = new PushButtonFormFieldBuilder(pdf, toggleFieldName)
@@ -279,8 +301,6 @@ namespace BookViewer.Services
                     w.SetAppearance(PdfName.N, ap.GetPdfObject());
                 }
 
-                // Also attach at the field level, so Acrobat picks it up even if it
-                // prefers field AA over widget AA
                 var fieldAA = new PdfDictionary();
                 fieldAA.Put(PdfName.U, actionDict);
                 buttonField.GetPdfObject().Put(PdfName.AA, fieldAA);
