@@ -7,6 +7,7 @@ using iText.Forms;
 using iText.Forms.Fields;
 using iText.Kernel.Pdf.Action;
 using iText.Kernel.Pdf.Annot;
+using iText.Kernel.Pdf.Xobject;   // <-- ADDED: for PdfFormXObject
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -162,66 +163,77 @@ namespace BookViewer.Services
         {
             var form = PdfAcroForm.GetAcroForm(pdf, true);
             if (form == null) return;
-        
-            // Order-independent match: <img> with class=redbtn/hsgbtn/has2btn AND id AND linkname
+
             var buttonRegex = new Regex(
                 @"<img\b(?=[^>]*\bclass=""[^""]*(?:redbtn|hsgbtn|has2btn)[^""]*"")(?=[^>]*\bid=""([^""]+)"")(?=[^>]*\blinkname=""([^""]+)"")[^>]*>",
                 RegexOptions.IgnoreCase);
-        
+
             int btnCounter = 0;
             var pdfPage = pdf.GetPage(1);
-        
+            float pageHeight = pdfPage.GetPageSize().GetHeight();
+
             foreach (Match buttonMatch in buttonRegex.Matches(html))
             {
                 var imgId = SanitizeFieldName(buttonMatch.Groups[1].Value);
                 var linkName = SanitizeFieldName(buttonMatch.Groups[2].Value);
-        
+
                 var fieldId = $"AnswerField_{pageIndex}_{linkName}";
                 var targetField = form.GetField(fieldId);
                 if (targetField == null) continue;
-        
+
                 var actualFieldId = targetField.GetFieldName().ToString();
-        
-                // Acrobat JS: display 0 = visible, 1 = hidden
+
                 var toggleScript =
                     $"var f = this.getField(\"{actualFieldId}\"); " +
                     $"if (f) {{ f.display = (f.display === 1) ? 0 : 1; }}";
                 var action = PdfAction.CreateJavaScript(toggleScript);
-        
+
+                float leftPx = 0f, topPx = 0f;
                 var styleMatch = Regex.Match(
                     buttonMatch.Value,
                     @"style=""[^""]*left:\s*([\d\.]+)px[^""]*top:\s*([\d\.]+)px",
                     RegexOptions.IgnoreCase);
-                if (!styleMatch.Success) continue;
-        
-                float x = float.Parse(styleMatch.Groups[1].Value,
-                    System.Globalization.CultureInfo.InvariantCulture) * 0.75f;
-                float y = 1008 - (float.Parse(styleMatch.Groups[2].Value,
-                    System.Globalization.CultureInfo.InvariantCulture) * 0.75f) - 24;
-        
+                if (styleMatch.Success)
+                {
+                    leftPx = float.Parse(styleMatch.Groups[1].Value,
+                        System.Globalization.CultureInfo.InvariantCulture);
+                    topPx = float.Parse(styleMatch.Groups[2].Value,
+                        System.Globalization.CultureInfo.InvariantCulture);
+                }
+
+                float x = leftPx * 0.75f;
+                float y = pageHeight - (topPx * 0.75f) - 24f;
+
                 var rect = new Rectangle(x, y, 24, 24);
                 var fieldName = $"Toggle_{pageIndex}_{imgId}_{btnCounter++}";
-        
+
                 var buttonField = new PushButtonFormFieldBuilder(pdf, fieldName)
                     .SetWidgetRectangle(rect)
                     .SetCaption("")
                     .CreatePushButton();
-        
-                // Attach the JS action to the WIDGET (required in iText 8 — field has no SetAction)
+
                 foreach (var w in buttonField.GetWidgets())
                 {
-                    w.SetAction(action);                         // primary /A — makes the click fire JS
-                    w.SetFlags(PdfAnnotation.PRINT);             // print with the page
-                    w.SetBorder(new PdfArray(new PdfNumber[] {   // invisible border over the image
+                    // Attach the JS to the widget's primary action (/A) — this is what Acrobat fires on click.
+                    w.Put(PdfName.A, action);
+
+                    w.SetFlags(PdfAnnotation.PRINT);
+
+                    // No border, so the red/HSG image underneath stays visible.
+                    w.SetBorder(new PdfArray(new PdfNumber[] {
                         new PdfNumber(0), new PdfNumber(0), new PdfNumber(0)
                     }));
-                    // NOTE: no SetColor call — the widget stays transparent so the
-                    // red/HSG button image underneath remains visible.
+
+                    // CRITICAL: give the widget a transparent appearance stream so it has a real
+                    // 24×24 clickable hitbox. Without /AP, the push button has no hitbox at all
+                    // and the click never reaches the action.
+                    var ap = new PdfFormXObject(new Rectangle(0, 0, 24, 24));
+                    w.SetAppearance(PdfName.N, ap);
                 }
-        
-                // Belt-and-suspenders: some viewers read AA/U instead of A.
+
+                // Belt-and-suspenders for viewers that look at /AA/U instead of /A.
                 buttonField.SetAdditionalAction(PdfName.U, action);
-        
+
                 form.AddField(buttonField, pdfPage);
             }
         }
