@@ -77,8 +77,8 @@ namespace BookViewer.Services
                     string html = await _bookService.BuildPageHtmlForPdfExportAsync(filePath);
 
                     int rawRedbtnCount = Regex.Matches(html, @"class=""[^""]*\bredbtn\b", RegexOptions.IgnoreCase).Count;
-                    int rawTbredDivs = Regex.Matches(html, @"<div[^>]*class=""[^""]*\btbred\b", RegexOptions.IgnoreCase).Count;
-                    DebugLog($"[HTML] Page {i}: len={html.Length}, redbtn={rawRedbtnCount}, tbred={rawTbredDivs}");
+                    int rawHas2btnCount = Regex.Matches(html, @"class=""[^""]*\bhas2btn\b", RegexOptions.IgnoreCase).Count;
+                    DebugLog($"[HTML] Page {i}: len={html.Length}, redbtn={rawRedbtnCount}, has2btn={rawHas2btnCount}");
 
                     html = InjectPdfCss(html);
                     html = await ExtractBase64ImagesAsync(html, tempDir, i);
@@ -149,12 +149,12 @@ namespace BookViewer.Services
             float pageHeight = pdfPage.GetPageSize().GetHeight();
             int btnCounter = 0;
 
-            // ---- Buttons in DOM order ----
+            // ---- Only HAS2 and HSG buttons are real toggles ----
             var buttonRegex = new Regex(
-                @"<img\b(?=[^>]*\bclass=[""']?[^""']*(?:redbtn|hsgbtn|has2btn)[^""']*[""']?)(?=[^>]*\bid=[""']([^""']+)[""'])(?=[^>]*\b(?:linkname|name)=[""']([^""']+)[""'])[^>]*>",
+                @"<img\b(?=[^>]*\bclass=[""']?[^""']*(?:hsgbtn|has2btn)[^""']*[""']?)(?=[^>]*\bid=[""']([^""']+)[""'])(?=[^>]*\b(?:linkname|name)=[""']([^""']+)[""'])[^>]*>",
                 RegexOptions.IgnoreCase);
             var buttonMatches = buttonRegex.Matches(html);
-            DebugLog($"[INJ] Page {pageIndex}: buttons matched = {buttonMatches.Count}");
+            DebugLog($"[INJ] Page {pageIndex}: toggle buttons matched = {buttonMatches.Count}");
             if (buttonMatches.Count == 0) return;
 
             // ---- Group answers by <has2 name="..."> inside each <div class="tbred/tbnote"> ----
@@ -169,13 +169,11 @@ namespace BookViewer.Services
                 string divTag = am.Groups["divtag"].Value;
                 string body = am.Groups["body"].Value;
 
-                // The answer id lives on the inner <has2 name="...">
                 var keyMatch = Regex.Match(body,
                     @"<has2\b[^>]*\bname=[""']([^""']+)[""']",
                     RegexOptions.IgnoreCase);
                 if (!keyMatch.Success)
                 {
-                    // Fallback: div's own linkname/name
                     keyMatch = Regex.Match(divTag,
                         @"\b(?:linkname|name)=[""']([^""']+)[""']",
                         RegexOptions.IgnoreCase);
@@ -197,8 +195,6 @@ namespace BookViewer.Services
                 list.Add(clean);
             }
 
-            // Join each group into one visible string.
-            // CJK single-character chunks are concatenated without spaces.
             var answers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var kv in answerGroups)
             {
@@ -235,8 +231,8 @@ namespace BookViewer.Services
 
                 DebugLog($"[INJ] Page {pageIndex} {fieldId}: '{(answerText.Length > 40 ? answerText.Substring(0, 40) + "..." : answerText)}' len={answerText.Length}");
 
-                // ---- Answer field (with forced appearance stream) ----
-                var textRect = new Rectangle(x + 25, y, 250, 24);
+                // ---- Answer field ----
+                var textRect = new Rectangle(x + 25, y, 500, 24);
                 var textField = new TextFormFieldBuilder(pdf, fieldId)
                     .SetWidgetRectangle(textRect)
                     .CreateText();
@@ -253,7 +249,7 @@ namespace BookViewer.Services
                     var apStream = new PdfFormXObject(textRect);
                     var canvas = new PdfCanvas(apStream, pdf);
                     canvas.BeginText();
-                    canvas.SetFontAndSize(helveticaFont, 12);
+                    canvas.SetFontAndSize(helveticaFont, 10);
                     canvas.SetTextMatrix(5, 5);
                     canvas.ShowText(answerText ?? "");
                     canvas.EndText();
