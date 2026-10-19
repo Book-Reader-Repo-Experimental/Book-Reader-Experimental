@@ -268,8 +268,9 @@ namespace BookViewer.Services
                 RegexOptions.IgnoreCase);
             var buttonMatches = buttonRegex.Matches(html);
 
-            var allAnswerFields = new List<string>();
-            var allNoteFields = new List<string>();
+            var allFieldIds = new List<string>();
+            var allNoteFieldIds = new List<string>();
+            var allAnswerFieldIds = new List<string>();
             int btnCounter = 0;
 
             foreach (Match buttonMatch in buttonMatches)
@@ -300,8 +301,9 @@ namespace BookViewer.Services
                         var ans = answersForThisButton[f];
                         var fieldId = $"A_{pageIndex}_{linkName}_{f}";
                         currentButtonFields.Add(fieldId);
-                        if (isNoteButton) allNoteFields.Add(fieldId);
-                        else allAnswerFields.Add(fieldId);
+                        allFieldIds.Add(fieldId);
+                        if (isNoteButton) allNoteFieldIds.Add(fieldId);
+                        else allAnswerFieldIds.Add(fieldId);
 
                         var textRect = new Rectangle(ans.x, ans.y, ans.w, 18f);
                         var textField = new TextFormFieldBuilder(pdf, fieldId)
@@ -339,8 +341,9 @@ namespace BookViewer.Services
                         var shape = shapesForThisButton[f];
                         var fieldId = $"S_{pageIndex}_{linkName}_{f}";
                         currentButtonFields.Add(fieldId);
-                        if (isNoteButton) allNoteFields.Add(fieldId);
-                        else allAnswerFields.Add(fieldId);
+                        allFieldIds.Add(fieldId);
+                        if (isNoteButton) allNoteFieldIds.Add(fieldId);
+                        else allAnswerFieldIds.Add(fieldId);
 
                         var shapeRect = new Rectangle(shape.x, shape.y, shape.w, shape.h);
                         
@@ -382,19 +385,19 @@ namespace BookViewer.Services
                 string toggleScript;
                 if (linkName.Contains("all"))
                 {
-                    var targets = isNoteButton ? allNoteFields : allAnswerFields;
-                    if (linkName.Equals("all", StringComparison.OrdinalIgnoreCase))
-                        targets = allAnswerFields.Concat(allNoteFields).ToList();
-
+                    // ALL BUTTON LOGIC
+                    var targetIds = isNoteButton ? allNoteFieldIds : allAnswerFieldIds;
+                    
                     toggleScript = "var anyVisible = false;\n";
-                    foreach (var id in targets)
+                    foreach (var id in targetIds)
                         toggleScript += $"var f = this.getField('{id}'); if (f && f.display === 0) anyVisible = true;\n";
                     toggleScript += "var newDisplay = anyVisible ? 1 : 0;\n";
-                    foreach (var id in targets)
+                    foreach (var id in targetIds)
                         toggleScript += $"var f = this.getField('{id}'); if (f) {{ f.display = newDisplay; var v = f.value; f.value = ''; f.value = v; }}\n";
                 }
                 else
                 {
+                    // INDIVIDUAL BUTTON LOGIC
                     toggleScript = "try {";
                     foreach (var id in currentButtonFields)
                     {
@@ -420,7 +423,6 @@ namespace BookViewer.Services
             }
         }
 
-        // Accurate SVG Path Parser (Handles relative/absolute M, L, C, Z)
         private void DrawSvgPath(PdfCanvas canvas, string pathD, float baseX, float baseY, float height)
         {
             try
@@ -458,9 +460,8 @@ namespace BookViewer.Services
                                 if (!isRel) { currentX = p1; currentY = p2; }
                                 else { currentX += p1; currentY += p2; }
                                 
-                                // MoveTo
                                 canvas.MoveTo(baseX + currentX * pt, baseY + height - (currentY * pt));
-                                upperCmd = 'L'; // Subsequent pairs are LineTo
+                                upperCmd = 'L'; 
                             }
                             else if (upperCmd == 'L')
                             {
@@ -491,7 +492,6 @@ namespace BookViewer.Services
                                 currentX = x3; currentY = y3;
                             }
                             
-                            // Break if next token is a letter
                             if (i + 1 >= matches.Count || char.IsLetter(matches[i + 1].Value[0])) break;
                         }
                     }
