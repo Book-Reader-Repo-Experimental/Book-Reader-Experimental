@@ -154,77 +154,83 @@ namespace BookViewer.Services
             float pageHeight = pdfPage.GetPageSize().GetHeight();
             int btnCounter = 0;
         
+            // ----- BUTTONS in DOM order -----
             var buttonRegex = new Regex(
                 @"<img\b(?=[^>]*\bclass=[""']?[^""']*(?:redbtn|hsgbtn|has2btn)[^""']*[""']?)(?=[^>]*\bid=[""']([^""']+)[""'])(?=[^>]*\b(?:linkname|name)=[""']([^""']+)[""'])[^>]*>",
                 RegexOptions.IgnoreCase);
-            var matches = buttonRegex.Matches(html);
-            DebugLog($"[INJ] Page {pageIndex}: buttons matched in HTML = {matches.Count}");
-            if (matches.Count == 0) return;
+            var buttonMatches = buttonRegex.Matches(html);
+            DebugLog($"[INJ] Page {pageIndex}: buttons matched in HTML = {buttonMatches.Count}");
+            if (buttonMatches.Count == 0) return;
         
-            // Two-pass answer discovery:
-            // Pass 1 — find every element that has name="X" or linkname="X" and contains
-            //          a tbred/tbnote div inside it. Use lazy matching with end-tag awareness
-            //          so we capture the outer block, not just the inner div.
-            var answers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            // ----- ANSWERS in DOM order -----
+            // Only match inside <pane class="redAnswer"> to avoid picking up base/ori text.
+            var answersInOrder = new List<string>();
         
-            // Approach: for each (name|linkname)="X" in the HTML, grab the next 2000 chars
-            // after that attribute's opening tag ends, then find the first tbred/tbnote div
-            // and take the text between its opening tag and the matching </div>.
-            var keyRegex = new Regex(
-                @"(?<attr>\b(?:linkname|name)\s*=\s*[""'])(?<key>[^""']+)(?<close>[""'])",
+            // Extract the redAnswer pane (may not exist on some pages)
+            var paneRegex = new Regex(
+                @"<pane\b[^>]*class=[""'][^""']*\bredAnswer\b[^""']*[""'][^>]*>(?<body>[\s\S]*?)</pane>",
+                RegexOptions.IgnoreCase);
+            var paneMatch = paneRegex.Match(html);
+            string answerPaneHtml = paneMatch.Success ? paneMatch.Groups["body"].Value : html;
+        
+            // Extract every tbred/tbnote div in that pane, in order
+            var answerDivRegex = new Regex(
+                @"<div\b[^>]*\bclass=[""'][^""']*\b(?:tbred|tbnote)\b[^""']*[""'][^>]*>(?<body>[\s\S]*?)</div>",
                 RegexOptions.IgnoreCase);
         
-            foreach (Match km in keyRegex.Matches(html))
+            foreach (Match am in answerDivRegex.Matches(answerPaneHtml))
             {
-                var key = SanitizeFieldName(km.Groups["key"].Value);
-                if (answers.ContainsKey(key)) continue;
-        
-                // Find the > that closes the opening tag this attribute belongs to
-                int afterAttr = km.Index + km.Length;
-                int tagClose = html.IndexOf('>', afterAttr);
-                if (tagClose < 0) continue;
-        
-                // Look ahead up to 5000 chars for a tbred/tbnote div
-                int windowEnd = Math.Min(html.Length, tagClose + 5000);
-                var window = html.Substring(tagClose + 1, windowEnd - tagClose - 1);
-        
-                var ansDiv = Regex.Match(window,
-                    @"<div\b[^>]*\bclass=[""'][^""']*(?:tbred|tbnote)[^""']*[""'][^>]*>([\s\S]*?)</div>",
-                    RegexOptions.IgnoreCase);
-                if (!ansDiv.Success) continue;
-        
-                string raw = ansDiv.Groups[1].Value;
+                string raw = am.Groups["body"].Value;
+                // Strip nested tags and normalise whitespace
                 string clean = Regex.Replace(raw, "<[^>]+>", " ");
                 clean = System.Net.WebUtility.HtmlDecode(clean);
                 clean = Regex.Replace(clean, @"\s+", " ").Trim();
-                if (string.IsNullOrEmpty(clean)) continue;
-        
-                answers[key] = clean;
+                answersInOrder.Add(clean);
             }
         
-            DebugLog($"[INJ] Page {pageIndex}: answers keyed = {answers.Count}");
-            if (answers.Count > 0)
+            DebugLog($"[INJ] Page {pageIndex}: answer divs in redAnswer pane = {answersInOrder.Count}");
+        
+            // ----- classify buttons into two streams -----
+            // has2btn buttons are answer-check toggles that appear AFTER all answers;
+            // keep index-based pairing for them separately.
+            // red1/red2/hsgbtn buttons map 1:1 to answers in DOM order.
+            var orderedButtons = new List<(Match match, string imgId, string linkName, string btnClass)>();
+            foreach (Match bm in buttonMatches)
             {
-                // Log the first 3 keys so we can verify they look right
-                int logged = 0;
-                foreach (var kv in answers)
+                var id = SanitizeFieldName(bm.Groups[1].Value);
+                var ln = SanitizeFieldName(bm.Groups[2].Value);
+                var cls = bm.Value.ToLowerInvariant();
+                string kind = cls.Contains("has2btn") ? "has2"
+                            : cls.Contains("hsgbtn") ? "hsg"
+                            : "red";
+                orderedButtons.Add((bm, id, ln, kind));
+            }
+        
+            // For non-has2 buttons, pair by DOM index within answersInOrder
+            int answerIdx = 0;
+            foreach (var b in orderedButtons)
+            {
+                string answerText = "";
+        
+                if (b.btnClass == "has2")
                 {
-                    if (logged++ >= 3) break;
-                    DebugLog($"[INJ]   sample key='{kv.Key}' text='{(kv.Value.Length > 60 ? kv.Value.Substring(0, 60) + "..." : kv.Value)}'");
+                    // has2 buttons use explicit linkname matching (their answers are one special div each)
+                    // Fall back to index pairing if no match found.
+                    if (answerIdx < answersInOrder.Count)
+                        answerText = answersInOrder[answerIdx];
                 }
-            }
+                else
+                {
+                    if (answerIdx < answersInOrder.Count)
+                        answerText = answersInOrder[answerIdx];
+                }
+                answerIdx++;
         
-            var allFieldIds = new List<string>();
-            var helveticaFont = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
+                DebugLog($"[INJ] Page {pageIndex} {b.linkName} ({b.btnClass}): answer='{(answerText.Length > 40 ? answerText.Substring(0, 40) + "..." : answerText)}' (len={answerText.Length})");
         
-            foreach (Match buttonMatch in matches)
-            {
-                var imgId = SanitizeFieldName(buttonMatch.Groups[1].Value);
-                var linkName = SanitizeFieldName(buttonMatch.Groups[2].Value);
-                var fieldId = $"AnswerField_{pageIndex}_{linkName}";
-        
+                // Position
                 float leftPx = 0f, topPx = 0f;
-                var styleMatch = Regex.Match(buttonMatch.Value,
+                var styleMatch = Regex.Match(b.match.Value,
                     @"style=[""'][^""']*left:\s*([\d\.]+)px[^""']*top:\s*([\d\.]+)px",
                     RegexOptions.IgnoreCase);
                 if (styleMatch.Success)
@@ -236,9 +242,7 @@ namespace BookViewer.Services
                 float x = leftPx * 0.75f;
                 float y = pageHeight - (topPx * 0.75f) - 24f;
         
-                string answerText = answers.ContainsKey(linkName) ? answers[linkName] : "";
-                DebugLog($"[INJ] Page {pageIndex} {linkName}: answer='{(answerText.Length > 40 ? answerText.Substring(0, 40) + "..." : answerText)}' (len={answerText.Length})");
-        
+                var fieldId = $"AnswerField_{pageIndex}_{b.linkName}";
                 var textRect = new Rectangle(x + 25, y, 250, 24);
                 var textField = new TextFormFieldBuilder(pdf, fieldId)
                     .SetWidgetRectangle(textRect)
@@ -247,6 +251,7 @@ namespace BookViewer.Services
                 textField.SetValue(answerText);
                 textField.SetReadOnly(true);
         
+                var helveticaFont = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
                 foreach (var w in textField.GetWidgets())
                 {
                     w.SetBorder(new PdfArray(new PdfNumber[] {
@@ -265,10 +270,10 @@ namespace BookViewer.Services
                     w.SetAppearance(PdfName.N, apStream.GetPdfObject());
                 }
                 form.AddField(textField, pdfPage);
-                allFieldIds.Add(fieldId);
         
+                // Toggle button
                 var buttonRect = new Rectangle(x, y, 24, 24);
-                var toggleFieldName = $"Toggle_{pageIndex}_{imgId}_{btnCounter++}";
+                var toggleFieldName = $"Toggle_{pageIndex}_{b.imgId}_{btnCounter++}";
                 var buttonField = new PushButtonFormFieldBuilder(pdf, toggleFieldName)
                     .SetWidgetRectangle(buttonRect)
                     .SetCaption("")
@@ -280,33 +285,13 @@ namespace BookViewer.Services
                     w.SetFlags(PdfAnnotation.PRINT);
                     w.SetBorder(new PdfArray(new PdfNumber[] {
                         new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
-        
                     var ap = new PdfFormXObject(new Rectangle(0, 0, 24, 24));
                     w.SetAppearance(PdfName.N, ap.GetPdfObject());
                 }
         
-                string toggleScript;
-                if (linkName.Equals("all", StringComparison.OrdinalIgnoreCase) ||
-                    linkName.Equals("allanswers", StringComparison.OrdinalIgnoreCase))
-                {
-                    toggleScript = "var anyVisible = false;\n";
-                    foreach (var id in allFieldIds)
-                    {
-                        toggleScript += $"var f_{id} = this.getField(\"{id}\"); if (f_{id} && f_{id}.display === 0) anyVisible = true;\n";
-                    }
-                    toggleScript += "var newDisplay = anyVisible ? 1 : 0;\n";
-                    foreach (var id in allFieldIds)
-                    {
-                        toggleScript += $"var f_{id} = this.getField(\"{id}\"); if (f_{id}) f_{id}.display = newDisplay;\n";
-                    }
-                }
-                else
-                {
-                    toggleScript =
-                        $"var f = this.getField(\"{fieldId}\"); " +
-                        $"if (f) {{ f.display = (f.display === 1) ? 0 : 1; }}";
-                }
-        
+                var toggleScript =
+                    $"var f = this.getField(\"{fieldId}\"); " +
+                    $"if (f) {{ f.display = (f.display === 1) ? 0 : 1; }}";
                 var action = PdfAction.CreateJavaScript(toggleScript);
         
                 foreach (var w in buttonField.GetWidgets())
@@ -317,7 +302,6 @@ namespace BookViewer.Services
                     w.Put(PdfName.AA, aaDict);
                 }
                 buttonField.SetAdditionalAction(PdfName.U, action);
-        
                 form.AddField(buttonField, pdfPage);
             }
         }
