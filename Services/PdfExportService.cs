@@ -8,8 +8,8 @@ using iText.Kernel.Pdf.Annot;
 using iText.Kernel.Geom;
 using iText.Kernel.Font;
 using iText.Kernel.Utils;
+using iText.IO.Font;              // PdfEncodings lives here in iText 8
 using iText.IO.Font.Constants;
-using iText.IO.Encodings;
 using iText.Forms;
 using iText.Forms.Fields;
 using iText.Kernel.Colors;
@@ -76,7 +76,6 @@ namespace BookViewer.Services
                     var filePath = _bookService.PageFiles[i];
                     string html = await _bookService.BuildPageHtmlForPdfExportAsync(filePath);
 
-                    // Count raw elements for the log
                     int rawRedbtnCount = Regex.Matches(html, @"class=""[^""]*\bredbtn\b", RegexOptions.IgnoreCase).Count;
                     int rawTbredDivs = Regex.Matches(html, @"<div[^>]*class=""[^""]*\btbred\b", RegexOptions.IgnoreCase).Count;
                     DebugLog($"[HTML] Page {i}: len={html.Length}, redbtn={rawRedbtnCount}, tbred={rawTbredDivs}");
@@ -158,8 +157,9 @@ namespace BookViewer.Services
             DebugLog($"[INJ] Page {pageIndex}: buttons matched = {buttonMatches.Count}");
             if (buttonMatches.Count == 0) return;
 
-            // ---- Answers in DOM order from redAnswer pane ----
-            var answersInOrder = new List<string>();
+            // ---- Answers keyed by linkname/name (NOT by DOM index) ----
+            var answers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
             var paneRegex = new Regex(
                 @"<pane\b[^>]*class=[""'][^""']*\bredAnswer\b[^""']*[""'][^>]*>(?<body>[\s\S]*?)</pane>",
                 RegexOptions.IgnoreCase);
@@ -167,35 +167,38 @@ namespace BookViewer.Services
             string answerPaneHtml = paneMatch.Success ? paneMatch.Groups["body"].Value : html;
 
             var answerDivRegex = new Regex(
-                @"<div\b[^>]*\bclass=[""'][^""']*\b(?:tbred|tbnote)\b[^""']*[""'][^>]*>(?<body>[\s\S]*?)</div>",
+                @"<div\b(?<tag>[^>]*\bclass=[""'][^""']*\b(?:tbred|tbnote)\b[^""']*[""'][^>]*)>(?<body>[\s\S]*?)</div>",
                 RegexOptions.IgnoreCase);
 
             foreach (Match am in answerDivRegex.Matches(answerPaneHtml))
             {
+                string tag = am.Groups["tag"].Value;
+                var linkMatch = Regex.Match(tag, @"\b(?:linkname|name)=[""']([^""']+)[""']", RegexOptions.IgnoreCase);
+                if (!linkMatch.Success) continue;
+
+                var key = SanitizeFieldName(linkMatch.Groups[1].Value);
+
                 string raw = am.Groups["body"].Value;
                 string clean = Regex.Replace(raw, "<[^>]+>", " ");
                 clean = System.Net.WebUtility.HtmlDecode(clean);
                 clean = Regex.Replace(clean, @"\s+", " ").Trim();
-                answersInOrder.Add(clean);
+
+                if (!answers.ContainsKey(key))
+                    answers[key] = clean;
             }
 
-            DebugLog($"[INJ] Page {pageIndex}: answers in redAnswer pane = {answersInOrder.Count}");
+            DebugLog($"[INJ] Page {pageIndex}: answers keyed = {answers.Count}");
 
             var helveticaFont = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
 
-            int answerIdx = 0;
             foreach (Match buttonMatch in buttonMatches)
             {
-                var imgId = Regex.Replace(buttonMatch.Groups[1].Value, @"[^A-Za-z0-9_]", "_");
-                var linkName = Regex.Replace(buttonMatch.Groups[2].Value, @"[^A-Za-z0-9_]", "_");
-
-                // Unique per-page field name — used both as the PDF field name AND the JS lookup
+                var imgId = SanitizeFieldName(buttonMatch.Groups[1].Value);
+                var linkName = SanitizeFieldName(buttonMatch.Groups[2].Value);
                 var fieldId = $"A_{pageIndex}_{linkName}";
 
-                string answerText = answerIdx < answersInOrder.Count ? answersInOrder[answerIdx] : "";
-                answerIdx++;
+                string answerText = answers.ContainsKey(linkName) ? answers[linkName] : "";
 
-                // ---- Position ----
                 float leftPx = 0f, topPx = 0f;
                 var styleMatch = Regex.Match(buttonMatch.Value,
                     @"style=[""'][^""']*left:\s*([\d\.]+)px[^""']*top:\s*([\d\.]+)px",
@@ -208,9 +211,9 @@ namespace BookViewer.Services
                 float x = leftPx * 0.75f;
                 float y = pageHeight - (topPx * 0.75f) - 24f;
 
-                DebugLog($"[INJ] Page {pageIndex} {fieldId}: '{(answerText.Length > 40 ? answerText.Substring(0, 40) + "..." : answerText)}' len={answerText.Length} x={x:F1} y={y:F1}");
+                DebugLog($"[INJ] Page {pageIndex} {fieldId}: '{(answerText.Length > 40 ? answerText.Substring(0, 40) + "..." : answerText)}' len={answerText.Length}");
 
-                // ---- Answer field ----
+                // ---- Answer field (appearance stream + value) ----
                 var textRect = new Rectangle(x + 25, y, 250, 24);
                 var textField = new TextFormFieldBuilder(pdf, fieldId)
                     .SetWidgetRectangle(textRect)
@@ -237,7 +240,7 @@ namespace BookViewer.Services
                 }
                 form.AddField(textField, pdfPage);
 
-                // ---- Toggle button ----
+                // ---- Toggle button (JS attached to /A, /AA/U and the field's AA) ----
                 var buttonRect = new Rectangle(x, y, 24, 24);
                 var toggleFieldName = $"T_{pageIndex}_{imgId}_{btnCounter++}";
                 var buttonField = new PushButtonFormFieldBuilder(pdf, toggleFieldName)
@@ -245,14 +248,12 @@ namespace BookViewer.Services
                     .SetCaption("")
                     .CreatePushButton();
 
-                // JavaScript: use ONLY the sanitized field name, quoted safely
                 var toggleScript =
                     "try {" +
                     $"var f = this.getField('{fieldId}'); " +
                     "if (f) { f.display = (f.display === 1) ? 0 : 1; }" +
                     "} catch(e) {}";
 
-                // Build the action dictionary explicitly to guarantee /S /JavaScript /JS exist
                 var actionDict = new PdfDictionary();
                 actionDict.Put(PdfName.S, PdfName.JavaScript);
                 actionDict.Put(PdfName.JS, new PdfString(toggleScript, PdfEncodings.UTF8));
@@ -264,25 +265,34 @@ namespace BookViewer.Services
                     w.SetBorder(new PdfArray(new PdfNumber[] {
                         new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
 
-                    // Attach action to widget /A (primary)
                     w.Put(PdfName.A, actionDict);
 
-                    // Also attach to /AA/U for viewers that read the additional-actions dictionary
                     var aaDict = new PdfDictionary();
                     aaDict.Put(PdfName.U, actionDict);
                     w.Put(PdfName.AA, aaDict);
 
-                    // /MK (appearance characteristics) — Acrobat requires this for push buttons
                     var mkDict = new PdfDictionary();
-                    mkDict.Put(PdfName.CA, new PdfString(""));           // no caption
+                    mkDict.Put(PdfName.CA, new PdfString(""));
                     w.GetPdfObject().Put(PdfName.MK, mkDict);
 
-                    // Transparent hit box
                     var ap = new PdfFormXObject(new Rectangle(0, 0, 24, 24));
                     w.SetAppearance(PdfName.N, ap.GetPdfObject());
                 }
+
+                // Also attach at the field level, so Acrobat picks it up even if it
+                // prefers field AA over widget AA
+                var fieldAA = new PdfDictionary();
+                fieldAA.Put(PdfName.U, actionDict);
+                buttonField.GetPdfObject().Put(PdfName.AA, fieldAA);
+
                 form.AddField(buttonField, pdfPage);
             }
+        }
+
+        private static string SanitizeFieldName(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "x";
+            return Regex.Replace(s, @"[^A-Za-z0-9_\-]", "_");
         }
 
         private string InjectPdfCss(string html)
