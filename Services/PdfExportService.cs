@@ -8,6 +8,7 @@ using iText.Kernel.Pdf.Annot;
 using iText.Kernel.Geom;
 using iText.Kernel.Font;
 using iText.Kernel.Utils;
+using iText.IO.Font;
 using iText.IO.Font.Constants;
 using iText.Forms;
 using iText.Forms.Fields;
@@ -95,7 +96,7 @@ namespace BookViewer.Services
                     using (var reader = new PdfReader(tempPdfPath))
                     using (var pdf = new PdfDocument(reader, new PdfWriter(tempPdfPath + ".tmp")))
                     {
-                        InjectInteractiveElements(pdf, html, i);
+                        await InjectInteractiveElements(pdf, html, i, tempDir);
                     }
 
                     File.Delete(tempPdfPath);
@@ -140,7 +141,7 @@ namespace BookViewer.Services
             }
         }
 
-        private void InjectInteractiveElements(PdfDocument pdf, string html, int pageIndex)
+        private async Task InjectInteractiveElements(PdfDocument pdf, string html, int pageIndex, string tempDir)
         {
             var form = PdfAcroForm.GetAcroForm(pdf, true);
             if (form == null) return;
@@ -148,15 +149,41 @@ namespace BookViewer.Services
             var pdfPage = pdf.GetPage(1);
             float pageHeight = pdfPage.GetPageSize().GetHeight();
 
-            // Use standard Helvetica — 100% safe in all viewers
-            var answerFont = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
+            // 1. Try to extract the exact font from the HTML's CSS
+            PdfFont answerFont = null;
+            try
+            {
+                var fontFaceMatch = Regex.Match(html, @"@font-face\s*\{[^}]*\}", RegexOptions.IgnoreCase);
+                if (fontFaceMatch.Success)
+                {
+                    var fontFace = fontFaceMatch.Value;
+                    var base64Match = Regex.Match(fontFace, @"base64,([^""']+)\)", RegexOptions.IgnoreCase);
+                    if (base64Match.Success)
+                    {
+                        var fontBytes = Convert.FromBase64String(base64Match.Groups[1].Value);
+                        var fontFile = Path.Combine(tempDir, $"page_{pageIndex}_font.ttf");
+                        await File.WriteAllBytesAsync(fontFile, fontBytes);
+                        
+                        // Determine if the font is CID (TrueType) or simple
+                        answerFont = PdfFontFactory.CreateFont(fontFile, PdfEncodings.IDENTITY_H);
+                        DebugLog($"[INJ] Page {pageIndex}: Extracted custom font.");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"[INJ] Page {pageIndex}: Font extraction failed. {ex.Message}");
+            }
+            if (answerFont == null)
+                answerFont = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
 
-            // 1. Find buttons and SVGs
+            // 2. Buttons (hsgbtn, has2btn, redbtn)
             var buttonRegex = new Regex(
                 @"<img\b(?=[^>]*\bclass=[""']?[^""']*(?:hsgbtn|has2btn|redbtn)[^""']*[""']?)(?=[^>]*\bid=[""']([^""']+)[""'])(?=[^>]*\b(?:linkname|name)=[""']([^""']+)[""'])[^>]*>",
                 RegexOptions.IgnoreCase);
             var buttonMatches = buttonRegex.Matches(html);
 
+            // 3. SVG circles (red outlines)
             var svgRegex = new Regex(
                 @"<svg\b(?=[^>]*\bclass=[""'][^""']*\btbred\b[^""']*[""'])(?=[^>]*\bname=[""']([^""']+)[""'])[^>]*>[\s\S]*?</svg>",
                 RegexOptions.IgnoreCase);
@@ -164,7 +191,7 @@ namespace BookViewer.Services
 
             DebugLog($"[INJ] Page {pageIndex}: buttons={buttonMatches.Count}, svg circles={svgMatches.Count}");
 
-            // 2. Parse text answers
+            // 4. Parse text answers
             var answerGroups = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
             var fragmentRegex = new Regex(
                 @"<div\b(?<divtag>[^>]*\bclass=[""'][^""']*\b(?:tbred|tbnote)\b[^""']*[""'][^>]*)>(?<body>[\s\S]*?)</div>",
@@ -205,7 +232,7 @@ namespace BookViewer.Services
 
             int btnCounter = 0;
 
-            // 3. Create answer text fields + toggle buttons
+            // 5. Create answer text fields + toggle buttons
             foreach (Match buttonMatch in buttonMatches)
             {
                 var imgId = SanitizeFieldName(buttonMatch.Groups[1].Value);
@@ -232,13 +259,14 @@ namespace BookViewer.Services
 
                 if (isCircle)
                 {
-                    // Create a checkbox for red circle
+                    // Draw a small checkable box for the circle answer
                     var fieldId = $"A_{pageIndex}_{linkName}";
-                    var textRect = new Rectangle(x + 4, y + 4, 16, 16);
+                    var textRect = new Rectangle(x + 4, y + 4, 16, 16); 
                     var chk = new CheckBoxFormFieldBuilder(pdf, fieldId)
                         .SetWidgetRectangle(textRect)
                         .CreateCheckBox();
                     chk.SetValue("Yes");
+
                     foreach (var w in chk.GetWidgets())
                     {
                         w.SetBorder(new PdfArray(new PdfNumber[] { new PdfNumber(1), new PdfNumber(0), new PdfNumber(0) }));
@@ -250,7 +278,7 @@ namespace BookViewer.Services
                 }
                 else
                 {
-                    // Create the text field
+                    // Create the text answer field
                     var fieldId = $"A_{pageIndex}_{linkName}";
                     var textRect = new Rectangle(x + 25, y, 500, 24);
                     var textField = new TextFormFieldBuilder(pdf, fieldId)
@@ -279,7 +307,6 @@ namespace BookViewer.Services
                     AddToGroup(linkName, fieldId);
                 }
 
-                // Create button
                 var buttonRect = new Rectangle(x, y, 24, 24);
                 var toggleFieldName = $"T_{pageIndex}_{imgId}_{btnCounter++}";
                 var buttonField = new PushButtonFormFieldBuilder(pdf, toggleFieldName)
@@ -291,7 +318,58 @@ namespace BookViewer.Services
                 AddToGroup(linkName, toggleFieldName);
             }
 
-            // 4. Wire up the JavaScript for all buttons
+            // 6. Draw SVG circles and wire them to the same group toggles
+            foreach (Match svgMatch in svgMatches)
+            {
+                var svgName = SanitizeFieldName(svgMatch.Groups[1].Value);
+
+                float leftPx = 0f, topPx = 0f, widthPx = 82f, heightPx = 32f;
+                var styleMatch = Regex.Match(svgMatch.Value,
+                    @"style=[""'][^""']*left:\s*([\d\.]+)px[^""']*top:\s*([\d\.]+)px",
+                    RegexOptions.IgnoreCase);
+                var widthMatch = Regex.Match(svgMatch.Value, @"\bwidth=[""'](\d+)[""']", RegexOptions.IgnoreCase);
+                var heightMatch = Regex.Match(svgMatch.Value, @"\bheight=[""'](\d+)[""']", RegexOptions.IgnoreCase);
+                if (styleMatch.Success)
+                {
+                    leftPx = float.Parse(styleMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+                    topPx = float.Parse(styleMatch.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
+                }
+                if (widthMatch.Success) widthPx = float.Parse(widthMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+                if (heightMatch.Success) heightPx = float.Parse(heightMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+
+                float cx = leftPx * 0.75f;
+                float cy = pageHeight - ((topPx + heightPx) * 0.75f);
+                float cw = widthPx * 0.75f;
+                float ch = heightPx * 0.75f;
+
+                var circleFieldName = $"C_{pageIndex}_{svgName}";
+                var circleRect = new Rectangle(cx, cy, cw, ch);
+
+                var apStream = new PdfFormXObject(circleRect);
+                var canvas = new PdfCanvas(apStream, pdf);
+                canvas.SetStrokeColor(ColorConstants.RED);
+                canvas.SetLineWidth(1.5f);
+                canvas.Ellipse(cx + 2, cy + 2, cx + cw - 2, cy + ch - 2);
+                canvas.Stroke();
+                canvas.Release();
+
+                var chk = new CheckBoxFormFieldBuilder(pdf, circleFieldName)
+                    .SetWidgetRectangle(circleRect)
+                    .CreateCheckBox();
+                chk.SetValue("Yes");
+
+                foreach (var w in chk.GetWidgets())
+                {
+                    w.SetBorder(new PdfArray(new PdfNumber[] { new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
+                    w.SetFlags(PdfAnnotation.PRINT);
+                    w.SetAppearance(PdfName.N, apStream.GetPdfObject());
+                }
+                form.AddField(chk, pdfPage);
+
+                AddToGroup(svgName, circleFieldName);
+            }
+
+            // 7. Wire up the JavaScript for all buttons
             foreach (var kv in fieldsByGroup)
             {
                 var groupKey = kv.Key;
@@ -325,6 +403,7 @@ namespace BookViewer.Services
                         }
 
                         var jsAction = PdfAction.CreateJavaScript(toggleScript);
+
                         foreach (var w in buttonField.GetWidgets())
                         {
                             w.SetHighlightMode(PdfAnnotation.HIGHLIGHT_PUSH);
@@ -365,7 +444,6 @@ namespace BookViewer.Services
     img.redbtn, img.hsgbtn, img.has2btn { display: inline-block !important; visibility: visible !important; opacity: 1 !important; }
     img { max-width: 100% !important; height: auto !important; }
 
-    /* Hide HTML text and SVG initially, we override their display in JS */
     div.tbred, div.tbnote, svg.tbred { display: none !important; }
 </style>
 ";
