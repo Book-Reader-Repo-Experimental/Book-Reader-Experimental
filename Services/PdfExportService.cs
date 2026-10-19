@@ -8,6 +8,7 @@ using iText.Kernel.Pdf.Annot;
 using iText.Kernel.Geom;
 using iText.Kernel.Font;
 using iText.Kernel.Utils;
+using iText.IO.Font.Constants;
 using iText.Forms;
 using iText.Forms.Fields;
 using iText.Kernel.Colors;
@@ -131,7 +132,6 @@ namespace BookViewer.Services
                 @"<img\b(?=[^>]*\bclass=""[^""]*(?:redbtn|hsgbtn|has2btn)[^""]*"")(?=[^>]*\bid=""([^""]+)"")(?=[^>]*\blinkname=""([^""]+)"")[^>]*>",
                 RegexOptions.IgnoreCase);
             var matches = buttonRegex.Matches(html);
-
             if (matches.Count == 0) return;
 
             var answers = new Dictionary<string, string>();
@@ -152,9 +152,7 @@ namespace BookViewer.Services
             }
 
             var allFieldIds = new List<string>();
-
-            // Use Helvetica so text always renders without needing fonts embedded in the HTML
-            var helveticaFont = PdfFontFactory.CreateFont(PdfFontFactory.HELVETICA);
+            var helveticaFont = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
 
             foreach (Match buttonMatch in matches)
             {
@@ -175,7 +173,7 @@ namespace BookViewer.Services
                 float x = leftPx * 0.75f;
                 float y = pageHeight - (topPx * 0.75f) - 24f;
 
-                // -------- Text Field --------
+                // -------- Text Field with forced appearance --------
                 var textRect = new Rectangle(x + 25, y, 250, 24);
                 var textField = new TextFormFieldBuilder(pdf, fieldId)
                     .SetWidgetRectangle(textRect)
@@ -184,7 +182,6 @@ namespace BookViewer.Services
                 string answerText = answers.ContainsKey(linkName) ? answers[linkName] : "";
                 textField.SetValue(answerText);
                 textField.SetReadOnly(true);
-                textField.SetDefaultAppearance("0 0 0 rg /Helv 12 Tf");
 
                 foreach (var w in textField.GetWidgets())
                 {
@@ -192,7 +189,7 @@ namespace BookViewer.Services
                         new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
                     w.SetFlags(PdfAnnotation.PRINT);
 
-                    // --- Force appearance stream so the text is drawn no matter what ---
+                    // Force appearance stream so the answer text is always drawn
                     var apStream = new PdfFormXObject(textRect);
                     var canvas = new PdfCanvas(apStream, pdf);
                     canvas.BeginText();
@@ -275,7 +272,7 @@ namespace BookViewer.Services
     img.redbtn, img.hsgbtn, img.has2btn { display: inline-block !important; visibility: visible !important; opacity: 1 !important; }
     img { max-width: 100% !important; height: auto !important; }
 
-    /* Hide the HTML answer divs so the widget we draw on top is the only visible one */
+    /* Hide the HTML answer divs; the interactive field on top is the visible one */
     div.tbred, div.tbnote { display: none !important; }
 </style>
 ";
