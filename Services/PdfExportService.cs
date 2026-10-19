@@ -162,65 +162,65 @@ namespace BookViewer.Services
         {
             var form = PdfAcroForm.GetAcroForm(pdf, true);
             if (form == null) return;
-
+        
             // Order-independent match: <img> with class=redbtn/hsgbtn/has2btn AND id AND linkname
             var buttonRegex = new Regex(
                 @"<img\b(?=[^>]*\bclass=""[^""]*(?:redbtn|hsgbtn|has2btn)[^""]*"")(?=[^>]*\bid=""([^""]+)"")(?=[^>]*\blinkname=""([^""]+)"")[^>]*>",
                 RegexOptions.IgnoreCase);
-
+        
             int btnCounter = 0;
             var pdfPage = pdf.GetPage(1);
-
+        
             foreach (Match buttonMatch in buttonRegex.Matches(html))
             {
                 var imgId = SanitizeFieldName(buttonMatch.Groups[1].Value);
                 var linkName = SanitizeFieldName(buttonMatch.Groups[2].Value);
-
+        
                 var fieldId = $"AnswerField_{pageIndex}_{linkName}";
                 var targetField = form.GetField(fieldId);
                 if (targetField == null) continue;
-
+        
                 var actualFieldId = targetField.GetFieldName().ToString();
-
-                // Acrobat JavaScript: display constants 0=visible, 1=hidden.
-                // Using numeric constants works in Acrobat AND most JS-capable viewers.
+        
+                // Acrobat JS: display 0 = visible, 1 = hidden (works in Acrobat + most JS viewers)
                 var toggleScript =
                     $"var f = this.getField(\"{actualFieldId}\"); " +
                     $"if (f) {{ f.display = (f.display === 1) ? 0 : 1; }}";
                 var action = PdfAction.CreateJavaScript(toggleScript);
-
+        
                 var styleMatch = Regex.Match(
                     buttonMatch.Value,
                     @"style=""[^""]*left:\s*([\d\.]+)px[^""]*top:\s*([\d\.]+)px",
                     RegexOptions.IgnoreCase);
                 if (!styleMatch.Success) continue;
-
+        
                 float x = float.Parse(styleMatch.Groups[1].Value,
                     System.Globalization.CultureInfo.InvariantCulture) * 0.75f;
                 float y = 1008 - (float.Parse(styleMatch.Groups[2].Value,
                     System.Globalization.CultureInfo.InvariantCulture) * 0.75f) - 24;
-
+        
                 var rect = new Rectangle(x, y, 24, 24);
                 var fieldName = $"Toggle_{pageIndex}_{imgId}_{btnCounter++}";
-
+        
                 var buttonField = new PushButtonFormFieldBuilder(pdf, fieldName)
                     .SetWidgetRectangle(rect)
                     .SetCaption("")
                     .CreatePushButton();
-
-                // ⭐ PRIMARY action — this is what actually makes the click fire JS.
-                buttonField.SetAction(action);
-                // Belt-and-suspenders: some viewers read AA/U instead of A.
-                buttonField.SetAdditionalAction(PdfName.U, action);
-
+        
+                // ⭐ Attach the JS action to the WIDGET, not the field, in iText 8.
                 foreach (var w in buttonField.GetWidgets())
                 {
+                    w.SetAction(action);                                    // primary /A — required for click
                     w.SetFlags(PdfAnnotation.PRINT);
-                    // Borderless, transparent push button over the printed image
-                    w.SetBorder(new PdfArray(new[] { new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
-                    w.SetColor(PdfName.Background, iText.Kernel.Colors.ColorConstants.WHITE);
+                    w.SetBorder(new PdfArray(new PdfNumber[] {
+                        new PdfNumber(0), new PdfNumber(0), new PdfNumber(0)
+                    }));                                                     // invisible border over image
+                    w.SetColor(PdfName.BG, iText.Kernel.Colors.ColorConstants.WHITE);
                 }
-
+        
+                // Belt-and-suspenders: some viewers read AA/U instead of A.
+                buttonField.SetAdditionalAction(PdfName.U, action);
+        
                 form.AddField(buttonField, pdfPage);
             }
         }
