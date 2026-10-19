@@ -78,8 +78,7 @@ namespace BookViewer.Services
 
                     int rawRedbtnCount = Regex.Matches(html, @"class=""[^""]*\bredbtn\b", RegexOptions.IgnoreCase).Count;
                     int rawHas2btnCount = Regex.Matches(html, @"class=""[^""]*\bhas2btn\b", RegexOptions.IgnoreCase).Count;
-                    int rawSvgCount = Regex.Matches(html, @"<svg\b[^>]*\bclass=""[^""]*\btbred\b", RegexOptions.IgnoreCase).Count;
-                    DebugLog($"[HTML] Page {i}: len={html.Length}, redbtn={rawRedbtnCount}, has2btn={rawHas2btnCount}, svg={rawSvgCount}");
+                    DebugLog($"[HTML] Page {i}: len={html.Length}, redbtn={rawRedbtnCount}, has2btn={rawHas2btnCount}");
 
                     html = InjectPdfCss(html);
                     html = await ExtractBase64ImagesAsync(html, tempDir, i);
@@ -243,7 +242,7 @@ namespace BookViewer.Services
                 float bx = leftPx * 0.75f;
                 float by = pageHeight - (topPx * 0.75f) - 24f;
 
-                // If the button points to a specific answer group, create the text fields at those exact coordinates
+                // Create the text fields at their exact coordinates
                 if (answerData.TryGetValue(linkName, out var answersForThisButton))
                 {
                     for (int f = 0; f < answersForThisButton.Count; f++)
@@ -259,7 +258,6 @@ namespace BookViewer.Services
 
                         textField.SetValue(ans.text);
                         textField.SetReadOnly(true);
-                        textField.SetDefaultAppearance("1 0 0 rg /Helv 11 Tf"); // Force Red
 
                         foreach (var w in textField.GetWidgets())
                         {
@@ -271,7 +269,7 @@ namespace BookViewer.Services
                             canvas.BeginText();
                             canvas.SetFontAndSize(answerFont, 11);
                             canvas.SetTextMatrix(2, 4);
-                            canvas.SetFillColor(ColorConstants.RED);
+                            canvas.SetFillColor(ColorConstants.RED); // Set to Red here
                             canvas.ShowText(ans.text);
                             canvas.EndText();
                             canvas.Release();
