@@ -43,8 +43,7 @@ namespace BookViewer.Services
 
                 var converterProperties = new ConverterProperties();
                 converterProperties.SetFontProvider(new DefaultFontProvider(true, true, true));
-                // CRITICAL: without this, iText flattens <input> elements into static text,
-                // so the AnswerField form fields never exist and toggles have nothing to target.
+                // CRITICAL: keep <input> elements as real AcroForm fields instead of flattening them
                 converterProperties.SetCreateAcroForm(true);
 
                 var pageSize = new PageSize(768f, 1008f);
@@ -57,18 +56,12 @@ namespace BookViewer.Services
                     string html = await _bookService.BuildPageHtmlForRenderAsync(
                         filePath, includeAnswers, includeTeacherNotes, includeStudentAnswers);
 
-                    // 1. Preprocess HTML (Convert hidden answers to form fields)
                     html = InjectAnswerFormFields(html, i);
-
-                    // 2. Inject CSS to enforce layout
                     html = InjectPdfCss(html);
-
-                    // 3. Extract base64 images to disk
                     html = await ExtractBase64ImagesAsync(html, tempDir, i);
 
                     var tempPdfPath = System.IO.Path.Combine(tempDir, $"page_{i}.pdf");
 
-                    // 4. Generate the unflattened PDF (AcroForm enabled above)
                     using (var writer = new PdfWriter(tempPdfPath))
                     using (var pdf = new PdfDocument(writer))
                     {
@@ -76,11 +69,14 @@ namespace BookViewer.Services
                         HtmlConverter.ConvertToPdf(html, pdf, converterProperties);
                     }
 
-                    // 5. Re-open and inject the interactive toggle buttons
                     using (var reader = new PdfReader(tempPdfPath))
                     using (var pdf = new PdfDocument(reader, new PdfWriter(tempPdfPath + ".tmp")))
                     {
                         InjectToggleActions(pdf, html, i);
+
+                        var form = PdfAcroForm.GetAcroForm(pdf, false);
+                        if (form != null)
+                            form.SetNeedAppearances(true);
                     }
 
                     File.Delete(tempPdfPath);
@@ -101,12 +97,10 @@ namespace BookViewer.Services
                             merger.Merge(sourcePdf, 1, sourcePdf.GetNumberOfPages());
                         }
                     }
-                    // Preserve AcroForm / NeedAppearances flag on merged document
+
                     var mergedForm = PdfAcroForm.GetAcroForm(mergedPdf, false);
                     if (mergedForm != null)
-                    {
                         mergedForm.SetNeedAppearances(true);
-                    }
                 }
 
                 OnComplete?.Invoke(this, outputPath);
@@ -123,79 +117,111 @@ namespace BookViewer.Services
                 }
             }
         }
-        
+
+        private static string SanitizeFieldName(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "x";
+            return Regex.Replace(s, @"[^A-Za-z0-9_\-]", "_");
+        }
+
         private string InjectAnswerFormFields(string html, int pageIndex)
         {
-            var regex = new Regex(@"<div\b[^>]*class=""[^""]*\b(?:tbred|tbnote)\b[^""]*""([^>]*)>([\s\S]*?)</div>", RegexOptions.IgnoreCase);
-        
+            var regex = new Regex(
+                @"<div\b[^>]*class=""[^""]*\b(?:tbred|tbnote)\b[^""]*""([^>]*)>([\s\S]*?)</div>",
+                RegexOptions.IgnoreCase);
+
             return regex.Replace(html, m =>
             {
                 var attributes = m.Groups[1].Value;
                 var content = m.Groups[2].Value;
-        
-                var linkNameMatch = Regex.Match(attributes, @"linkname=""([^""]+)""");
-                var linkName = linkNameMatch.Success ? linkNameMatch.Groups[1].Value : Guid.NewGuid().ToString("N").Substring(0, 6);
-        
+
+                var linkNameMatch = Regex.Match(attributes, @"linkname=""([^""]+)""", RegexOptions.IgnoreCase);
+                var linkName = linkNameMatch.Success
+                    ? linkNameMatch.Groups[1].Value
+                    : Guid.NewGuid().ToString("N").Substring(0, 6);
+                linkName = SanitizeFieldName(linkName);
+
                 var fieldId = $"AnswerField_{pageIndex}_{linkName}";
-        
-                // Escape the value properly for an HTML attribute
-                var escaped = content.Replace("&", "&amp;").Replace("\"", "&quot;");
-                return $"<input type=\"text\" id=\"{fieldId}\" name=\"{fieldId}\" class=\"pdf-answer-field\" value=\"{escaped}\" readonly=\"readonly\" style=\"display:block; width:100%; border:none; background:none;\" />";
+
+                var escaped = content
+                    .Replace("&", "&amp;")
+                    .Replace("\"", "&quot;")
+                    .Replace("<", "&lt;")
+                    .Replace(">", "&gt;");
+
+                return
+                    $"<input type=\"text\" id=\"{fieldId}\" name=\"{fieldId}\" " +
+                    $"class=\"pdf-answer-field\" value=\"{escaped}\" readonly=\"readonly\" " +
+                    $"style=\"display:block; width:100%; height:auto; " +
+                    $"border:none; background:transparent; color:#000; " +
+                    $"font-family:inherit; font-size:inherit; padding:0; margin:0;\" />";
             });
         }
-                                
+
         private void InjectToggleActions(PdfDocument pdf, string html, int pageIndex)
         {
             var form = PdfAcroForm.GetAcroForm(pdf, true);
             if (form == null) return;
 
-            var buttonRegex = new Regex(@"<img[^>]+class=""[^""]*(?:redbtn|hsgbtn|has2btn)[^""]*""[^>]*id=""([^""]+)""[^>]*linkname=""([^""]+)""", RegexOptions.IgnoreCase);
-            var buttonMatches = buttonRegex.Matches(html);
-        
+            // Order-independent match: <img> with class=redbtn/hsgbtn/has2btn AND id AND linkname
+            var buttonRegex = new Regex(
+                @"<img\b(?=[^>]*\bclass=""[^""]*(?:redbtn|hsgbtn|has2btn)[^""]*"")(?=[^>]*\bid=""([^""]+)"")(?=[^>]*\blinkname=""([^""]+)"")[^>]*>",
+                RegexOptions.IgnoreCase);
+
             int btnCounter = 0;
             var pdfPage = pdf.GetPage(1);
-        
-            foreach (Match buttonMatch in buttonMatches)
+
+            foreach (Match buttonMatch in buttonRegex.Matches(html))
             {
-                var imgId = buttonMatch.Groups[1].Value;
-                var linkName = buttonMatch.Groups[2].Value;
-                
+                var imgId = SanitizeFieldName(buttonMatch.Groups[1].Value);
+                var linkName = SanitizeFieldName(buttonMatch.Groups[2].Value);
+
                 var fieldId = $"AnswerField_{pageIndex}_{linkName}";
                 var targetField = form.GetField(fieldId);
-        
-                if (targetField != null)
+                if (targetField == null) continue;
+
+                var actualFieldId = targetField.GetFieldName().ToString();
+
+                // Acrobat JavaScript: display constants 0=visible, 1=hidden.
+                // Using numeric constants works in Acrobat AND most JS-capable viewers.
+                var toggleScript =
+                    $"var f = this.getField(\"{actualFieldId}\"); " +
+                    $"if (f) {{ f.display = (f.display === 1) ? 0 : 1; }}";
+                var action = PdfAction.CreateJavaScript(toggleScript);
+
+                var styleMatch = Regex.Match(
+                    buttonMatch.Value,
+                    @"style=""[^""]*left:\s*([\d\.]+)px[^""]*top:\s*([\d\.]+)px",
+                    RegexOptions.IgnoreCase);
+                if (!styleMatch.Success) continue;
+
+                float x = float.Parse(styleMatch.Groups[1].Value,
+                    System.Globalization.CultureInfo.InvariantCulture) * 0.75f;
+                float y = 1008 - (float.Parse(styleMatch.Groups[2].Value,
+                    System.Globalization.CultureInfo.InvariantCulture) * 0.75f) - 24;
+
+                var rect = new Rectangle(x, y, 24, 24);
+                var fieldName = $"Toggle_{pageIndex}_{imgId}_{btnCounter++}";
+
+                var buttonField = new PushButtonFormFieldBuilder(pdf, fieldName)
+                    .SetWidgetRectangle(rect)
+                    .SetCaption("")
+                    .CreatePushButton();
+
+                // ⭐ PRIMARY action — this is what actually makes the click fire JS.
+                buttonField.SetAction(action);
+                // Belt-and-suspenders: some viewers read AA/U instead of A.
+                buttonField.SetAdditionalAction(PdfName.U, action);
+
+                foreach (var w in buttonField.GetWidgets())
                 {
-                    var actualFieldId = targetField.GetFieldName().ToString();
-                    
-                    var toggleScript = $"var f = this.getField(\"{actualFieldId}\"); if (f) f.display = (f.display == display.hidden) ? display.visible : display.hidden;";
-                    var action = PdfAction.CreateJavaScript(toggleScript);
-        
-                    var styleMatch = Regex.Match(buttonMatch.Value, @"style=""[^""]*left:\s*([\d\.]+)px[^""]*top:\s*([\d\.]+)px");
-                    if (styleMatch.Success)
-                    {
-                        float x = float.Parse(styleMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) * 0.75f;
-                        float y = 1008 - (float.Parse(styleMatch.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture) * 0.75f) - 24;
-        
-                        var rect = new Rectangle(x, y, 24, 24);
-                        var fieldName = $"Toggle_{pageIndex}_{imgId}_{btnCounter++}";
-        
-                        // Builder pattern for iText 7.2+ / 8.x
-                        var buttonField = new PushButtonFormFieldBuilder(pdf, fieldName)
-                            .SetWidgetRectangle(rect)
-                            .SetCaption("")
-                            .CreatePushButton();
-                        
-                        // Attach the JS to the button's "on mouse up" (U) action
-                        buttonField.SetAdditionalAction(PdfName.U, action);
-                        
-                        foreach (var w in buttonField.GetWidgets())
-                        {
-                            w.SetFlags(PdfAnnotation.PRINT);
-                        }
-        
-                        form.AddField(buttonField, pdfPage);
-                    }
+                    w.SetFlags(PdfAnnotation.PRINT);
+                    // Borderless, transparent push button over the printed image
+                    w.SetBorder(new PdfArray(new[] { new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
+                    w.SetColor(PdfName.Background, iText.Kernel.Colors.ColorConstants.WHITE);
                 }
+
+                form.AddField(buttonField, pdfPage);
             }
         }
 
@@ -209,13 +235,15 @@ namespace BookViewer.Services
     .hideBtn { display: inline-block !important; visibility: visible !important; }
     img.redbtn, img.hsgbtn, img.has2btn { display: inline-block !important; visibility: visible !important; opacity: 1 !important; }
     img { max-width: 100% !important; height: auto !important; }
-    
-    /* Style the text field to look like normal text */
+
+    div.tbred, div.tbnote { display: block !important; visibility: visible !important; }
+
     input.pdf-answer-field {
         display: block !important;
         width: 100% !important;
+        height: auto !important;
         border: none !important;
-        background: none !important;
+        background: transparent !important;
         color: #000 !important;
         font-family: inherit !important;
         font-size: inherit !important;
@@ -232,7 +260,10 @@ namespace BookViewer.Services
 
         private async Task<string> ExtractBase64ImagesAsync(string html, string tempDir, int pageIndex)
         {
-            var matches = Regex.Matches(html, @"src=""(data:image/([^;]+);base64,([^""]+))""", RegexOptions.IgnoreCase);
+            var matches = Regex.Matches(html,
+                @"src=""(data:image/([^;]+);base64,([^""]+))""",
+                RegexOptions.IgnoreCase);
+
             foreach (Match match in matches)
             {
                 var dataUri = match.Groups[1].Value;
