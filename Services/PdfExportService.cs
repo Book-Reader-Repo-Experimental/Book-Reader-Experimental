@@ -171,7 +171,7 @@ namespace BookViewer.Services
             if (answerFont == null)
                 answerFont = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
 
-            // 2. Parse Text Answers
+            // 2. Parse Text Answers (Added +2f to fix vertical shift)
             var fragmentRegex = new Regex(
                 @"<div\b(?<divtag>[^>]*\bclass=[""'][^""']*\b(?:tbred|tbnote)\b[^""']*[""'][^>]*)>(?<body>[\s\S]*?)</div>",
                 RegexOptions.IgnoreCase);
@@ -205,7 +205,7 @@ namespace BookViewer.Services
 
                 float pxToPt = 0.75f;
                 float x = leftPx * pxToPt;
-                float y = pageHeight - (topPx * pxToPt) - 18f; 
+                float y = pageHeight - (topPx * pxToPt) + 2f; // +2f shifts text slightly down to match HTML baseline
                 float w = Math.Max(widthPx * pxToPt, 40f);
 
                 if (!answerData.TryGetValue(key, out var list))
@@ -267,6 +267,9 @@ namespace BookViewer.Services
             var allFieldIds = new List<string>();
             int btnCounter = 0;
 
+            // The exact red from the book's SVG stroke/fill
+            Color bookRed = new DeviceRgb(228, 4, 119); // #E40477
+
             foreach (Match buttonMatch in buttonMatches)
             {
                 var imgId = SanitizeFieldName(buttonMatch.Groups[1].Value);
@@ -311,7 +314,7 @@ namespace BookViewer.Services
                             canvas.BeginText();
                             canvas.SetFontAndSize(answerFont, 11);
                             canvas.SetTextMatrix(2, 4);
-                            canvas.SetFillColor(ColorConstants.RED);
+                            canvas.SetFillColor(bookRed); // EXACT BOOK RED
                             canvas.ShowText(ans.text);
                             canvas.EndText();
                             canvas.Release();
@@ -345,10 +348,10 @@ namespace BookViewer.Services
                             var apStream = new PdfFormXObject(shapeRect);
                             var canvas = new PdfCanvas(apStream, pdf);
                             
-                            canvas.SetStrokeColor(ColorConstants.RED);
+                            canvas.SetStrokeColor(bookRed); // EXACT BOOK RED
                             canvas.SetLineWidth(1.0f);
                             
-                            // This is the 1:1 SVG path parser
+                            // 1:1 SVG path parser
                             DrawSvgPath(canvas, shape.pathD, shape.x, shape.y, shape.h);
                             canvas.Stroke();
                             canvas.Release();
@@ -454,9 +457,8 @@ namespace BookViewer.Services
                                 if (!isRel) { currentX = p1; currentY = p2; }
                                 else { currentX += p1; currentY += p2; }
                                 
-                                // MoveTo
                                 canvas.MoveTo(baseX + currentX * pt, baseY + height - (currentY * pt));
-                                upperCmd = 'L'; // Subsequent pairs are LineTo
+                                upperCmd = 'L'; 
                             }
                             else if (upperCmd == 'L')
                             {
@@ -487,7 +489,6 @@ namespace BookViewer.Services
                                 currentX = x3; currentY = y3;
                             }
                             
-                            // Break if next token is a letter
                             if (i + 1 >= matches.Count || char.IsLetter(matches[i + 1].Value[0])) break;
                         }
                     }
