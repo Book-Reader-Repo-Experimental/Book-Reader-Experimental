@@ -2,11 +2,16 @@ using iText.Html2pdf;
 using iText.Html2pdf.Resolver.Font;
 using iText.Kernel.Pdf;
 using iText.Kernel.Pdf.Canvas;
+using iText.Kernel.Pdf.Xobject;
+using iText.Kernel.Pdf.Action;
+using iText.Kernel.Pdf.Annot;
 using iText.Kernel.Geom;
 using iText.Kernel.Font;
 using iText.Kernel.Utils;
 using iText.IO.Font;
 using iText.IO.Font.Constants;
+using iText.Forms;
+using iText.Forms.Fields;
 using iText.Kernel.Colors;
 using System;
 using System.Collections.Generic;
@@ -163,7 +168,6 @@ namespace BookViewer.Services
             iText.Kernel.Colors.Color bookRed = new DeviceRgb(228, 4, 119);
 
             var pdfCanvas = new PdfCanvas(pdfPage);
-            pdfCanvas.SaveState();
 
             // 2. Parse Text Answers
             var fragmentRegex = new Regex(
@@ -179,8 +183,6 @@ namespace BookViewer.Services
                 if (!keyMatch.Success) continue;
 
                 bool isNote = divTag.Contains("tbnote", StringComparison.OrdinalIgnoreCase);
-
-                // Logic: Skip if the user did not ask for this type of answer
                 if (isNote && !(includeAnswers && includeTeacherNotes)) continue;
                 if (!isNote && !(includeAnswers && includeStudentAnswers)) continue;
 
@@ -200,8 +202,9 @@ namespace BookViewer.Services
                     widthPx = float.Parse(styleMatch.Groups[3].Value, System.Globalization.CultureInfo.InvariantCulture);
                 }
 
-                float x = leftPx * 0.75f;
-                float y = pageHeight - (topPx * 0.75f) - 14f; 
+                float pxToPt = 0.75f;
+                float x = leftPx * pxToPt;
+                float y = pageHeight - (topPx * pxToPt) - 14f; 
                 
                 pdfCanvas.BeginText();
                 pdfCanvas.SetFontAndSize(answerFont, 11);
@@ -221,7 +224,6 @@ namespace BookViewer.Services
                 string tag = sm.Groups["tag"].Value;
                 string content = sm.Groups["content"].Value;
                 
-                // Only draw SVG if answers are included (these are usually part of the answer key)
                 if (!includeAnswers) continue;
 
                 var pathMatch = Regex.Match(content, @"<path\b[^>]*\bd=[""']([^""']+)[""']", RegexOptions.IgnoreCase);
@@ -253,7 +255,6 @@ namespace BookViewer.Services
                 pdfCanvas.Stroke();
             }
 
-            pdfCanvas.RestoreState();
             pdfCanvas.Release();
         }
 
