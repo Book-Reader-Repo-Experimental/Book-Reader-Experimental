@@ -80,7 +80,6 @@ namespace BookViewer.Services
                     int rawHas2btnCount = Regex.Matches(html, @"class=""[^""]*\bhas2btn\b", RegexOptions.IgnoreCase).Count;
                     DebugLog($"[HTML] Page {i}: len={html.Length}, redbtn={rawRedbtnCount}, has2btn={rawHas2btnCount}");
 
-                    // 1. Hide the HTML text divs and SVG circles (we will draw our own)
                     html = InjectPdfCss(html);
                     html = await ExtractBase64ImagesAsync(html, tempDir, i);
 
@@ -201,7 +200,7 @@ namespace BookViewer.Services
                 string body = am.Groups["body"].Value;
                 var keyMatch = Regex.Match(body, @"<has2\b[^>]*\bname=[""']([^""']+)[""']", RegexOptions.IgnoreCase);
                 if (!keyMatch.Success) continue;
-                
+
                 string key = SanitizeFieldName(keyMatch.Groups[1].Value);
                 string clean = Regex.Replace(body, "<[^>]+>", " ");
                 clean = System.Net.WebUtility.HtmlDecode(clean);
@@ -241,7 +240,7 @@ namespace BookViewer.Services
                 bool isCircle = btnClass.Contains("redbtn") && !btnClass.Contains("has2btn") && !btnClass.Contains("hsgbtn");
 
                 if (isCircle && string.IsNullOrEmpty(answerText))
-                    continue; // Skip decorative redbtn
+                    continue;
 
                 float leftPx = 0f, topPx = 0f;
                 var styleMatch = Regex.Match(buttonMatch.Value,
@@ -257,9 +256,8 @@ namespace BookViewer.Services
 
                 if (isCircle)
                 {
-                    // Create a small checkbox/button for the circle answer
                     var fieldId = $"A_{pageIndex}_{linkName}";
-                    var textRect = new Rectangle(x + 4, y + 4, 16, 16); 
+                    var textRect = new Rectangle(x + 4, y + 4, 16, 16);
                     var chk = new CheckBoxFormFieldBuilder(pdf, fieldId)
                         .SetWidgetRectangle(textRect)
                         .CreateCheckBox();
@@ -276,7 +274,6 @@ namespace BookViewer.Services
                 }
                 else
                 {
-                    // Create the text answer field
                     var fieldId = $"A_{pageIndex}_{linkName}";
                     var textRect = new Rectangle(x + 25, y, 500, 24);
                     var textField = new TextFormFieldBuilder(pdf, fieldId)
@@ -295,7 +292,7 @@ namespace BookViewer.Services
                         canvas.BeginText();
                         canvas.SetFontAndSize(answerFont, 10);
                         canvas.SetTextMatrix(5, 5);
-                        canvas.SetFillColor(ColorConstants.RED); // RED TEXT
+                        canvas.SetFillColor(ColorConstants.RED);
                         canvas.ShowText(answerText ?? "");
                         canvas.EndText();
                         canvas.Release();
@@ -305,7 +302,6 @@ namespace BookViewer.Services
                     AddToGroup(linkName, fieldId);
                 }
 
-                // Create the physical toggle button
                 var buttonRect = new Rectangle(x, y, 24, 24);
                 var toggleFieldName = $"T_{pageIndex}_{imgId}_{btnCounter++}";
                 var buttonField = new PushButtonFormFieldBuilder(pdf, toggleFieldName)
@@ -313,8 +309,6 @@ namespace BookViewer.Services
                     .SetCaption("")
                     .CreatePushButton();
 
-                // The JS will be wired up after we've processed the SVG circles too
-                buttonField.SetCaption(""); 
                 form.AddField(buttonField, pdfPage);
                 AddToGroup(linkName, toggleFieldName);
             }
@@ -345,8 +339,7 @@ namespace BookViewer.Services
 
                 var circleFieldName = $"C_{pageIndex}_{svgName}";
                 var circleRect = new Rectangle(cx, cy, cw, ch);
-                
-                // We create a static appearance of the red ellipse
+
                 var apStream = new PdfFormXObject(circleRect);
                 var canvas = new PdfCanvas(apStream, pdf);
                 canvas.SetStrokeColor(ColorConstants.RED);
@@ -367,9 +360,7 @@ namespace BookViewer.Services
                     w.SetAppearance(PdfName.N, apStream.GetPdfObject());
                 }
                 form.AddField(chk, pdfPage);
-                
-                // Attach this SVG circle to the same toggle group as the answer button
-                // (We use the generic svgName, or you can modify to match the answer group)
+
                 AddToGroup(svgName, circleFieldName);
             }
 
@@ -378,8 +369,7 @@ namespace BookViewer.Services
             {
                 var groupKey = kv.Key;
                 var ids = kv.Value;
-                
-                // Find the toggle button for this group
+
                 var toggleFieldName = $"T_{pageIndex}_" + ids.FirstOrDefault(i => i.StartsWith("T_"))?.Substring(4);
 
                 if (toggleFieldName != null)
@@ -408,7 +398,7 @@ namespace BookViewer.Services
                         }
 
                         var jsAction = PdfAction.CreateJavaScript(toggleScript);
-                        
+
                         foreach (var w in buttonField.GetWidgets())
                         {
                             w.SetHighlightMode(PdfAnnotation.HIGHLIGHT_PUSH);
@@ -449,7 +439,6 @@ namespace BookViewer.Services
     img.redbtn, img.hsgbtn, img.has2btn { display: inline-block !important; visibility: visible !important; opacity: 1 !important; }
     img { max-width: 100% !important; height: auto !important; }
 
-    /* Hide the HTML text and SVG shapes since we draw our own interactive ones */
     div.tbred, div.tbnote, svg.tbred { display: none !important; }
 </style>
 ";
