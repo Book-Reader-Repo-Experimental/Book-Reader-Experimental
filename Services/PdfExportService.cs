@@ -187,6 +187,7 @@ namespace BookViewer.Services
         
                 var actualFieldId = targetField.GetFieldName().ToString();
         
+                // Toggle display 1 (hidden) and 0 (visible)
                 var toggleScript =
                     $"var f = this.getField(\"{actualFieldId}\"); " +
                     $"if (f) {{ f.display = (f.display === 1) ? 0 : 1; }}";
@@ -199,10 +200,8 @@ namespace BookViewer.Services
                     RegexOptions.IgnoreCase);
                 if (styleMatch.Success)
                 {
-                    leftPx = float.Parse(styleMatch.Groups[1].Value,
-                        System.Globalization.CultureInfo.InvariantCulture);
-                    topPx = float.Parse(styleMatch.Groups[2].Value,
-                        System.Globalization.CultureInfo.InvariantCulture);
+                    leftPx = float.Parse(styleMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+                    topPx = float.Parse(styleMatch.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
                 }
         
                 float x = leftPx * 0.75f;
@@ -211,30 +210,31 @@ namespace BookViewer.Services
                 var rect = new Rectangle(x, y, 24, 24);
                 var fieldName = $"Toggle_{pageIndex}_{imgId}_{btnCounter++}";
         
+                // 1. Create the button field
                 var buttonField = new PushButtonFormFieldBuilder(pdf, fieldName)
                     .SetWidgetRectangle(rect)
                     .SetCaption("")
                     .CreatePushButton();
         
-                foreach (var w in buttonField.GetWidgets())
-                {
-                    // ✅ FIX: Put requires a PdfObject — use GetPdfObject() on the action
-                    w.Put(PdfName.A, action.GetPdfObject());
-        
-                    w.SetFlags(PdfAnnotation.PRINT);
-        
-                    w.SetBorder(new PdfArray(new PdfNumber[] {
-                        new PdfNumber(0), new PdfNumber(0), new PdfNumber(0)
-                    }));
-        
-                    // ✅ FIX: SetAppearance needs a PdfDictionary — use GetPdfObject() on the XObject
-                    var ap = new PdfFormXObject(new Rectangle(0, 0, 24, 24));
-                    w.SetAppearance(PdfName.N, ap.GetPdfObject());
-                }
-        
+                // 2. Set the JavaScript Action on the Field's "Mouse Up" (U) event
                 buttonField.SetAdditionalAction(PdfName.U, action);
         
+                // 3. Add the field to the page
                 form.AddField(buttonField, pdfPage);
+        
+                // 4. Manually force a blank appearance stream so the widget has a hitbox
+                foreach (var w in buttonField.GetWidgets())
+                {
+                    w.SetFlags(PdfAnnotation.PRINT);
+                    
+                    // Remove borders
+                    w.SetBorder(new PdfArray(new PdfNumber[] { new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
+                    
+                    // Create a 24x24 transparent XObject
+                    var ap = new PdfFormXObject(new Rectangle(0, 0, 24, 24));
+                    // The widget annotation needs this to be clickable
+                    w.SetAppearance(PdfName.N, ap.GetPdfObject());
+                }
             }
         }
 
