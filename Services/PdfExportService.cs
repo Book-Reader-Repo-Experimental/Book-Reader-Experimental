@@ -359,7 +359,7 @@ namespace BookViewer.Services
                     }
                 }
 
-                // Hitbox (Always 24x24pt centered on the icon)
+                // Hitbox (Always 24x24pt centered on the icon, ensuring it's clickable)
                 var buttonRect = new Rectangle(bx - 4, by, 24, 24);
                 var toggleFieldName = $"T_{pageIndex}_{imgId}_{btnCounter++}";
                 
@@ -370,8 +370,6 @@ namespace BookViewer.Services
 
                 string toggleScript;
                 
-                // Check if it's an "All Answers" or "All Notes" button
-                // We look at linkName AND the redanswertype class
                 bool isAll = linkName.Contains("all");
                 bool isAllNotes = isAll && (isNoteButton || fullTag.Contains("allnotes", StringComparison.OrdinalIgnoreCase));
                 bool isAllAnswers = isAll && !isAllNotes;
