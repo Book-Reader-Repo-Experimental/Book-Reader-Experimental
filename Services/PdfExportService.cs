@@ -57,7 +57,7 @@ namespace BookViewer.Services
 
                     var filePath = _bookService.PageFiles[i];
                     
-                    // USE THE NEW METHOD that preserves answers and buttons
+                    // USE THE NEW METHOD that preserves answers and buttons in the HTML
                     string html = await _bookService.BuildPageHtmlForPdfExportAsync(filePath);
 
                     html = InjectPdfCss(html);
@@ -174,7 +174,7 @@ namespace BookViewer.Services
                 float x = leftPx * 0.75f;
                 float y = pageHeight - (topPx * 0.75f) - 24f;
 
-                // Text Field
+                // Create the Text Field
                 var textRect = new Rectangle(x + 25, y, 250, 24);
                 var textField = new TextFormFieldBuilder(pdf, fieldId)
                     .SetWidgetRectangle(textRect)
@@ -192,7 +192,7 @@ namespace BookViewer.Services
                 form.AddField(textField, pdfPage);
                 allFieldIds.Add(fieldId);
 
-                // Button
+                // Create the Button
                 var buttonRect = new Rectangle(x, y, 24, 24);
                 var toggleFieldName = $"Toggle_{pageIndex}_{imgId}_{btnCounter++}";
                 var buttonField = new PushButtonFormFieldBuilder(pdf, toggleFieldName)
@@ -202,11 +202,14 @@ namespace BookViewer.Services
 
                 foreach (var w in buttonField.GetWidgets())
                 {
-                    // Acrobat requires a Border Style and Highlight Mode to execute JS
-                    w.SetBorderStyle(new PdfBorderDictionary(0, PdfBorderDictionary.STYLE_SOLID));
+                    // Removed SetBorderStyle (causes compile error and isn't needed)
                     w.SetHighlightMode(PdfAnnotation.HIGHLIGHT_PUSH);
                     w.SetFlags(PdfAnnotation.PRINT);
                     
+                    // Make it invisible so it doesn't cover the image
+                    w.SetBorder(new PdfArray(new PdfNumber[] { new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
+                    
+                    // Transparent hitbox
                     var ap = new PdfFormXObject(new Rectangle(0, 0, 24, 24));
                     w.SetAppearance(PdfName.N, ap.GetPdfObject());
                 }
