@@ -7,13 +7,14 @@ using iText.Forms;
 using iText.Forms.Fields;
 using iText.Kernel.Pdf.Action;
 using iText.Kernel.Pdf.Annot;
-using iText.Kernel.Pdf.Xobject;   // <-- ADDED: for PdfFormXObject
+using iText.Kernel.Pdf.Xobject;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using Path = System.IO.Path;   // ← ADD THIS LINE: resolves Path conflict with iText.Kernel.Geom.Path
 
 namespace BookViewer.Services
 {
