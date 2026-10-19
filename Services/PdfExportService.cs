@@ -149,7 +149,6 @@ namespace BookViewer.Services
             var pdfPage = pdf.GetPage(1);
             float pageHeight = pdfPage.GetPageSize().GetHeight();
 
-            // Use Helvetica for exact standard alignment
             PdfFont answerFont = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
             float fontSize = 11f;
 
@@ -191,8 +190,6 @@ namespace BookViewer.Services
 
                 float pxToPt = 0.75f;
                 float x = leftPx * pxToPt;
-                
-                // Baseline shift fixed
                 float y = pageHeight - (topPx * pxToPt) - 14f; 
                 float w = Math.Max(widthPx * pxToPt, 40f);
 
@@ -253,7 +250,6 @@ namespace BookViewer.Services
             var buttonMatches = buttonRegex.Matches(html);
 
             int btnCounter = 0;
-
             iText.Kernel.Colors.Color bookRed = new DeviceRgb(228, 4, 119); // #E40477
 
             foreach (Match buttonMatch in buttonMatches)
@@ -359,17 +355,20 @@ namespace BookViewer.Services
                     }
                 }
 
-                // Hitbox (Always 24x24pt centered on the icon, ensuring it's clickable)
+                // Hitbox (Always 24x24pt)
                 var buttonRect = new Rectangle(bx - 4, by, 24, 24);
                 var toggleFieldName = $"T_{pageIndex}_{imgId}_{btnCounter++}";
                 
                 var triggerField = new TextFormFieldBuilder(pdf, toggleFieldName)
                     .SetWidgetRectangle(buttonRect)
                     .CreateText();
+                
+                // CRITICAL: Make the field empty but give it a valid invisible space character 
+                // and a valid appearance so PDFium registers it as clickable.
+                triggerField.SetValue(" ");
                 triggerField.SetReadOnly(false);
 
                 string toggleScript;
-                
                 bool isAll = linkName.Contains("all");
                 bool isAllNotes = isAll && (isNoteButton || fullTag.Contains("allnotes", StringComparison.OrdinalIgnoreCase));
                 bool isAllAnswers = isAll && !isAllNotes;
@@ -392,7 +391,7 @@ namespace BookViewer.Services
                     foreach (var id in allAnswerFieldIds)
                         toggleScript += $"var f = this.getField('{id}'); if (f) {{ f.display = newDisplay; var v = f.value; f.value = ''; f.value = v; }}\n";
                 }
-                else if (isAll) // "All" toggles both
+                else if (isAll) 
                 {
                     toggleScript = "var anyVisible = false;\n";
                     foreach (var id in allFieldIds)
@@ -421,8 +420,14 @@ namespace BookViewer.Services
                     aaDict.Put(PdfName.U, jsAction.GetPdfObject());
                     w.GetPdfObject().Put(PdfName.AA, aaDict);
 
-                    var ap = new PdfFormXObject(buttonRect);
-                    w.SetAppearance(PdfName.N, ap.GetPdfObject());
+                    // Transparent appearance stream
+                    var apStream = new PdfFormXObject(buttonRect);
+                    var canvas = new PdfCanvas(apStream, pdf);
+                    canvas.SetFillColor(ColorConstants.WHITE);
+                    canvas.Rectangle(buttonRect.GetX(), buttonRect.GetY(), buttonRect.GetWidth(), buttonRect.GetHeight());
+                    canvas.Fill();
+                    canvas.Release();
+                    w.SetAppearance(PdfName.N, apStream.GetPdfObject());
                 }
                 form.AddField(triggerField, pdfPage);
             }
