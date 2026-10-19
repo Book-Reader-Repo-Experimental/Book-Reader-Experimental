@@ -76,6 +76,9 @@ namespace BookViewer.Services
                     using (var pdf = new PdfDocument(reader, new PdfWriter(tempPdfPath + ".tmp")))
                     {
                         InjectInteractiveElements(pdf, html, i);
+                        // NOTE: Do NOT call form.SetNeedAppearances(true) here.
+                        // We have already drawn complete appearance streams, and
+                        // NeedAppearances makes Acrobat discard them.
                     }
 
                     File.Delete(tempPdfPath);
@@ -96,6 +99,7 @@ namespace BookViewer.Services
                             merger.Merge(sourcePdf, 1, sourcePdf.GetNumberOfPages());
                         }
                     }
+                    // NOTE: Do NOT set NeedAppearances here either.
                 }
 
                 OnComplete?.Invoke(this, outputPath);
@@ -173,15 +177,15 @@ namespace BookViewer.Services
                 float x = leftPx * 0.75f;
                 float y = pageHeight - (topPx * 0.75f) - 24f;
 
-                // -------- Text Field with forced appearance --------
+                // -------- Text Field with hand-drawn appearance --------
                 var textRect = new Rectangle(x + 25, y, 250, 24);
                 var textField = new TextFormFieldBuilder(pdf, fieldId)
                     .SetWidgetRectangle(textRect)
                     .CreateText();
 
                 string answerText = answers.ContainsKey(linkName) ? answers[linkName] : "";
-                textField.SetValue(answerText);
-                textField.SetReadOnly(true);
+
+                // DO NOT call SetValue/SetReadOnly — the value is drawn directly into the /AP stream.
 
                 foreach (var w in textField.GetWidgets())
                 {
@@ -189,7 +193,7 @@ namespace BookViewer.Services
                         new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
                     w.SetFlags(PdfAnnotation.PRINT);
 
-                    // Force appearance stream so the answer text is always drawn
+                    // Hand-drawn appearance stream containing the answer text
                     var apStream = new PdfFormXObject(textRect);
                     var canvas = new PdfCanvas(apStream, pdf);
                     canvas.BeginText();
