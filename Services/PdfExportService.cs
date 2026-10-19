@@ -149,7 +149,7 @@ namespace BookViewer.Services
             var pdfPage = pdf.GetPage(1);
             float pageHeight = pdfPage.GetPageSize().GetHeight();
 
-            // 1. Try to extract the exact font from the HTML's CSS
+            // 1. Extract Font
             PdfFont answerFont = null;
             try
             {
@@ -171,7 +171,7 @@ namespace BookViewer.Services
             if (answerFont == null)
                 answerFont = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
 
-            // 2. Parse text answers (mapping linkName -> text AND its exact coordinates)
+            // 2. Parse Text Answers
             var fragmentRegex = new Regex(
                 @"<div\b(?<divtag>[^>]*\bclass=[""'][^""']*\b(?:tbred|tbnote)\b[^""']*[""'][^>]*)>(?<body>[\s\S]*?)</div>",
                 RegexOptions.IgnoreCase);
@@ -213,25 +213,20 @@ namespace BookViewer.Services
                 list.Add((clean, x, y, w));
             }
 
-            // 3. Parse SVG circles (ONLY extract their bounding box)
+            // 3. Parse SVG Circles (extract only bounding box)
             var svgRegex = new Regex(
                 @"<svg\b(?<tag>[^>]*\bclass=[""'][^""']*\btbred\b[^""']*[""'][^>]*)>(?<content>[\s\S]*?)</svg>",
                 RegexOptions.IgnoreCase);
 
-            var svgData = new Dictionary<string, List<(string pathD, float x, float y, float w, float h)>>(StringComparer.OrdinalIgnoreCase);
+            var svgData = new Dictionary<string, List<(float x, float y, float w, float h)>>(StringComparer.OrdinalIgnoreCase);
 
             foreach (Match sm in svgRegex.Matches(html))
             {
                 string tag = sm.Groups["tag"].Value;
-                string content = sm.Groups["content"].Value;
-
+                
                 var nameMatch = Regex.Match(tag, @"\bname=[""']([^""']+)[""']", RegexOptions.IgnoreCase);
                 if (!nameMatch.Success) continue;
                 string name = SanitizeFieldName(nameMatch.Groups[1].Value);
-
-                var pathMatch = Regex.Match(content, @"<path\b[^>]*\bd=[""']([^""']+)[""']", RegexOptions.IgnoreCase);
-                if (!pathMatch.Success) continue;
-                string pathD = pathMatch.Groups[1].Value;
 
                 float leftPx = 0f, topPx = 0f, widthPx = 82f, heightPx = 32f;
                 var styleMatch = Regex.Match(tag,
@@ -239,6 +234,7 @@ namespace BookViewer.Services
                     RegexOptions.IgnoreCase);
                 var widthMatch = Regex.Match(tag, @"\bwidth=[""'](\d+)[""']", RegexOptions.IgnoreCase);
                 var heightMatch = Regex.Match(tag, @"\bheight=[""'](\d+)[""']", RegexOptions.IgnoreCase);
+                
                 if (styleMatch.Success)
                 {
                     leftPx = float.Parse(styleMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
@@ -253,11 +249,11 @@ namespace BookViewer.Services
                 float h = heightPx * 0.75f;
 
                 if (!svgData.TryGetValue(name, out var list))
-                    svgData[name] = list = new List<(string, float, float, float, float)>();
-                list.Add((pathD, x, y, w, h));
+                    svgData[name] = list = new List<(float, float, float, float)>();
+                list.Add((x, y, w, h));
             }
 
-            // 4. Find all toggle buttons
+            // 4. Parse Buttons
             var buttonRegex = new Regex(
                 @"<img\b(?=[^>]*\bclass=[""']?[^""']*(?:hsgbtn|has2btn|redbtn)[^""']*[""']?)(?=[^>]*\bid=[""']([^""']+)[""'])(?=[^>]*\b(?:linkname|name)=[""']([^""']+)[""'])[^>]*>",
                 RegexOptions.IgnoreCase);
@@ -283,7 +279,7 @@ namespace BookViewer.Services
                 float bx = leftPx * 0.75f;
                 float by = pageHeight - (topPx * 0.75f) - 24f;
 
-                // --- Create text fields ---
+                // Create Text Fields
                 if (answerData.TryGetValue(linkName, out var answersForThisButton))
                 {
                     for (int f = 0; f < answersForThisButton.Count; f++)
@@ -320,7 +316,7 @@ namespace BookViewer.Services
                     }
                 }
 
-                // --- Draw SVG shapes (exactly 1:1) ---
+                // Create SVG Rectangles (Just the outline, so it matches the red highlight)
                 if (svgData.TryGetValue(linkName, out var shapesForThisButton))
                 {
                     for (int f = 0; f < shapesForThisButton.Count; f++)
@@ -329,7 +325,6 @@ namespace BookViewer.Services
                         var fieldId = $"S_{pageIndex}_{linkName}_{f}";
                         allFieldIds.Add(fieldId);
 
-                        // The SVG width/height from HTML is exactly what we need to draw
                         var shapeRect = new Rectangle(shape.x, shape.y, shape.w, shape.h);
                         
                         var textField = new TextFormFieldBuilder(pdf, fieldId)
@@ -345,13 +340,12 @@ namespace BookViewer.Services
                             var apStream = new PdfFormXObject(shapeRect);
                             var canvas = new PdfCanvas(apStream, pdf);
                             
+                            // Draw a perfectly scaled red oval outline inside the box bounds
                             canvas.SetStrokeColor(ColorConstants.RED);
-                            canvas.SetLineWidth(1.0f);
-                            
-                            // Draw path without scaling. Because coordinates are absolute, 
-                            // we just map them relative to the shape's bounding box.
-                            DrawSvgPathNoScale(canvas, shape.pathD, shape.x, shape.y, shape.h);
+                            canvas.SetLineWidth(1.2f);
+                            canvas.Ellipse(shape.x + 1, shape.y + 1, shape.x + shape.w - 1, shape.y + shape.h - 1);
                             canvas.Stroke();
+                            
                             canvas.Release();
                             w.SetAppearance(PdfName.N, apStream.GetPdfObject());
                         }
@@ -359,7 +353,7 @@ namespace BookViewer.Services
                     }
                 }
 
-                // --- Create the clickable hitbox using a transparent Text Field ---
+                // Create Clickable Trigger
                 var buttonRect = new Rectangle(bx, by, 24, 24);
                 var toggleFieldName = $"T_{pageIndex}_{imgId}_{btnCounter++}";
                 
@@ -415,71 +409,6 @@ namespace BookViewer.Services
                 }
                 form.AddField(triggerField, pdfPage);
             }
-        }
-
-        // Draws the SVG path directly onto the PdfCanvas.
-        // The path coordinates are absolute (no scaling needed), we just apply pt conversion.
-        private void DrawSvgPathNoScale(PdfCanvas canvas, string pathD, float baseX, float baseY, float height)
-        {
-            try
-            {
-                var matches = Regex.Matches(pathD, @"([a-zA-Z])|(-?\d*\.?\d+)");
-                bool currentPointSet = false;
-
-                // Pt conversion factor (1px = 0.75pt)
-                float pt = 0.75f;
-
-                for (int i = 0; i < matches.Count; i++)
-                {
-                    var token = matches[i].Value;
-                    if (char.IsLetter(token[0]))
-                    {
-                        char cmd = token[0];
-                        if (cmd == 'z' || cmd == 'Z') { canvas.ClosePath(); }
-                        else if (cmd == 'm' || cmd == 'M')
-                        {
-                            float x = ParseFloat(matches[++i].Value);
-                            float y = ParseFloat(matches[++i].Value);
-                            // Y axis is flipped in PDF
-                            canvas.MoveTo(baseX + x * pt, baseY + height - (y * pt));
-                            currentPointSet = true;
-                        }
-                        else if (cmd == 'c' || cmd == 'C')
-                        {
-                            float x1 = ParseFloat(matches[++i].Value);
-                            float y1 = ParseFloat(matches[++i].Value);
-                            float x2 = ParseFloat(matches[++i].Value);
-                            float y2 = ParseFloat(matches[++i].Value);
-                            float x3 = ParseFloat(matches[++i].Value);
-                            float y3 = ParseFloat(matches[++i].Value);
-                            
-                            canvas.CurveTo(
-                                baseX + x1 * pt, baseY + height - (y1 * pt),
-                                baseX + x2 * pt, baseY + height - (y2 * pt),
-                                baseX + x3 * pt, baseY + height - (y3 * pt)
-                            );
-                        }
-                        else if (cmd == 'l' || cmd == 'L')
-                        {
-                            float x = ParseFloat(matches[++i].Value);
-                            float y = ParseFloat(matches[++i].Value);
-                            if (currentPointSet) 
-                                canvas.LineTo(baseX + x * pt, baseY + height - (y * pt));
-                            else 
-                            { 
-                                canvas.MoveTo(baseX + x * pt, baseY + height - (y * pt)); 
-                                currentPointSet = true; 
-                            }
-                        }
-                    }
-                }
-            }
-            catch { }
-        }
-
-        private float ParseFloat(string s)
-        {
-            return float.Parse(s, CultureInfo.InvariantCulture);
         }
 
         private static string SanitizeFieldName(string s)
