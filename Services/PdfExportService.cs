@@ -355,18 +355,16 @@ namespace BookViewer.Services
                     }
                 }
 
-                // Hitbox (Always 24x24pt)
+                // Hitbox (Always 24x24pt centered on the icon)
                 var buttonRect = new Rectangle(bx - 4, by, 24, 24);
                 var toggleFieldName = $"T_{pageIndex}_{imgId}_{btnCounter++}";
                 
-                var triggerField = new TextFormFieldBuilder(pdf, toggleFieldName)
+                // RESTORED: CheckBoxFormFieldBuilder is the ONLY form field type 
+                // that Chrome's PDFium viewer consistently registers as clickable.
+                var chk = new CheckBoxFormFieldBuilder(pdf, toggleFieldName)
                     .SetWidgetRectangle(buttonRect)
-                    .CreateText();
-                
-                // CRITICAL: Make the field empty but give it a valid invisible space character 
-                // and a valid appearance so PDFium registers it as clickable.
-                triggerField.SetValue(" ");
-                triggerField.SetReadOnly(false);
+                    .CreateCheckBox();
+                chk.SetValue("Off");
 
                 string toggleScript;
                 bool isAll = linkName.Contains("all");
@@ -391,7 +389,7 @@ namespace BookViewer.Services
                     foreach (var id in allAnswerFieldIds)
                         toggleScript += $"var f = this.getField('{id}'); if (f) {{ f.display = newDisplay; var v = f.value; f.value = ''; f.value = v; }}\n";
                 }
-                else if (isAll) 
+                else if (isAll)
                 {
                     toggleScript = "var anyVisible = false;\n";
                     foreach (var id in allFieldIds)
@@ -411,7 +409,7 @@ namespace BookViewer.Services
                 }
 
                 var jsAction = PdfAction.CreateJavaScript(toggleScript);
-                foreach (var w in triggerField.GetWidgets())
+                foreach (var w in chk.GetWidgets())
                 {
                     w.SetBorder(new PdfArray(new PdfNumber[] { new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
                     w.SetFlags(PdfAnnotation.PRINT);
@@ -420,16 +418,11 @@ namespace BookViewer.Services
                     aaDict.Put(PdfName.U, jsAction.GetPdfObject());
                     w.GetPdfObject().Put(PdfName.AA, aaDict);
 
-                    // Transparent appearance stream
-                    var apStream = new PdfFormXObject(buttonRect);
-                    var canvas = new PdfCanvas(apStream, pdf);
-                    canvas.SetFillColor(ColorConstants.WHITE);
-                    canvas.Rectangle(buttonRect.GetX(), buttonRect.GetY(), buttonRect.GetWidth(), buttonRect.GetHeight());
-                    canvas.Fill();
-                    canvas.Release();
-                    w.SetAppearance(PdfName.N, apStream.GetPdfObject());
+                    // Empty transparent appearance stream
+                    var ap = new PdfFormXObject(new Rectangle(0, 0, 24, 24));
+                    w.SetAppearance(PdfName.N, ap.GetPdfObject());
                 }
-                form.AddField(triggerField, pdfPage);
+                form.AddField(chk, pdfPage);
             }
         }
 
