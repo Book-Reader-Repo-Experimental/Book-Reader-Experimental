@@ -118,30 +118,27 @@ namespace BookViewer.Services
             if (string.IsNullOrEmpty(s)) return "x";
             return Regex.Replace(s, @"[^A-Za-z0-9_\-]", "_");
         }
-
+        
         private void InjectInteractiveElements(PdfDocument pdf, string html, int pageIndex)
         {
             var form = PdfAcroForm.GetAcroForm(pdf, true);
             if (form == null) return;
-
+        
             var pdfPage = pdf.GetPage(1);
             float pageHeight = pdfPage.GetPageSize().GetHeight();
             int btnCounter = 0;
-
-            // 1. Find all buttons
+        
             var buttonRegex = new Regex(
                 @"<img\b(?=[^>]*\bclass=""[^""]*(?:redbtn|hsgbtn|has2btn)[^""]*"")(?=[^>]*\bid=""([^""]+)"")(?=[^>]*\blinkname=""([^""]+)"")[^>]*>",
                 RegexOptions.IgnoreCase);
             var matches = buttonRegex.Matches(html);
-            
             if (matches.Count == 0) return;
-
-            // 2. Parse all answers and notes
+        
             var answers = new Dictionary<string, string>();
             var answerRegex = new Regex(
                 @"<div\b[^>]*class=""[^""]*\b(?:tbred|tbnote)\b[^""]*""([^>]*)>([\s\S]*?)</div>",
                 RegexOptions.IgnoreCase);
-                
+        
             foreach (Match m in answerRegex.Matches(html))
             {
                 var attrs = m.Groups[1].Value;
@@ -153,93 +150,89 @@ namespace BookViewer.Services
                     answers[SanitizeFieldName(linkMatch.Groups[1].Value)] = cleanText;
                 }
             }
-
+        
             var allFieldIds = new List<string>();
-
-            // 3. Create fields and buttons
+        
             foreach (Match buttonMatch in matches)
             {
                 var imgId = SanitizeFieldName(buttonMatch.Groups[1].Value);
                 var linkName = SanitizeFieldName(buttonMatch.Groups[2].Value);
                 var fieldId = $"AnswerField_{pageIndex}_{linkName}";
-
+        
                 float leftPx = 0f, topPx = 0f;
-                var styleMatch = Regex.Match(buttonMatch.Value, @"style=""[^""]*left:\s*([\d\.]+)px[^""]*top:\s*([\d\.]+)px", RegexOptions.IgnoreCase);
+                var styleMatch = Regex.Match(buttonMatch.Value,
+                    @"style=""[^""]*left:\s*([\d\.]+)px[^""]*top:\s*([\d\.]+)px",
+                    RegexOptions.IgnoreCase);
                 if (styleMatch.Success)
                 {
                     leftPx = float.Parse(styleMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
                     topPx = float.Parse(styleMatch.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
                 }
-
+        
                 float x = leftPx * 0.75f;
                 float y = pageHeight - (topPx * 0.75f) - 24f;
-
-                // Create the Text Field
+        
+                // Text Field
                 var textRect = new Rectangle(x + 25, y, 250, 24);
                 var textField = new TextFormFieldBuilder(pdf, fieldId)
                     .SetWidgetRectangle(textRect)
                     .CreateText();
-                
+        
                 string answerText = answers.ContainsKey(linkName) ? answers[linkName] : "";
                 textField.SetValue(answerText);
-                
+        
+                // CRITICAL: Read-only forces Acrobat to generate an appearance stream
+                // from the value, so the answer text is actually visible.
+                textField.SetReadOnly(true);
+        
                 foreach (var w in textField.GetWidgets())
                 {
-                    w.SetBorder(new PdfArray(new PdfNumber[] { new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
+                    w.SetBorder(new PdfArray(new PdfNumber[] {
+                        new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
                     w.SetFlags(PdfAnnotation.PRINT);
                     w.SetColor(ColorConstants.BLACK);
                 }
                 form.AddField(textField, pdfPage);
                 allFieldIds.Add(fieldId);
-
-                // Create the Button
+        
+                // Button
                 var buttonRect = new Rectangle(x, y, 24, 24);
                 var toggleFieldName = $"Toggle_{pageIndex}_{imgId}_{btnCounter++}";
                 var buttonField = new PushButtonFormFieldBuilder(pdf, toggleFieldName)
                     .SetWidgetRectangle(buttonRect)
                     .SetCaption("")
                     .CreatePushButton();
-
+        
                 foreach (var w in buttonField.GetWidgets())
                 {
-                    // Removed SetBorderStyle (causes compile error and isn't needed)
                     w.SetHighlightMode(PdfAnnotation.HIGHLIGHT_PUSH);
                     w.SetFlags(PdfAnnotation.PRINT);
-                    
-                    // Make it invisible so it doesn't cover the image
-                    w.SetBorder(new PdfArray(new PdfNumber[] { new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
-                    
-                    // Transparent hitbox
+                    w.SetBorder(new PdfArray(new PdfNumber[] {
+                        new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
                     var ap = new PdfFormXObject(new Rectangle(0, 0, 24, 24));
                     w.SetAppearance(PdfName.N, ap.GetPdfObject());
                 }
-
-                // Wire up JS
+        
                 string toggleScript;
-                if (linkName.Equals("all", StringComparison.OrdinalIgnoreCase) || 
+                if (linkName.Equals("all", StringComparison.OrdinalIgnoreCase) ||
                     linkName.Equals("allanswers", StringComparison.OrdinalIgnoreCase))
                 {
                     toggleScript = "var anyVisible = false;\n";
                     foreach (var id in allFieldIds)
-                    {
                         toggleScript += $"var f_{id} = this.getField(\"{id}\"); if (f_{id} && f_{id}.display === 0) anyVisible = true;\n";
-                    }
                     toggleScript += "var newDisplay = anyVisible ? 1 : 0;\n";
                     foreach (var id in allFieldIds)
-                    {
                         toggleScript += $"var f_{id} = this.getField(\"{id}\"); if (f_{id}) f_{id}.display = newDisplay;\n";
-                    }
                 }
                 else
                 {
-                    toggleScript = 
+                    toggleScript =
                         $"var f = this.getField(\"{fieldId}\"); " +
                         $"if (f) {{ f.display = (f.display === 1) ? 0 : 1; }}";
                 }
-
+        
                 var action = PdfAction.CreateJavaScript(toggleScript);
-                
-                // Write to both /A and /AA/U for maximum compatibility
+        
                 foreach (var w in buttonField.GetWidgets())
                 {
                     w.Put(PdfName.A, action.GetPdfObject());
@@ -248,7 +241,7 @@ namespace BookViewer.Services
                     w.Put(PdfName.AA, aaDict);
                 }
                 buttonField.SetAdditionalAction(PdfName.U, action);
-                
+        
                 form.AddField(buttonField, pdfPage);
             }
         }
