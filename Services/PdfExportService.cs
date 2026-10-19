@@ -149,40 +149,10 @@ namespace BookViewer.Services
             var pdfPage = pdf.GetPage(1);
             float pageHeight = pdfPage.GetPageSize().GetHeight();
 
-            // 1. Try to extract the exact font from the HTML's CSS
-            PdfFont answerFont = null;
+            // FORCE HELVETICA. The book uses a standard sans-serif. Custom font extraction 
+            // causes missing glyphs (like the "T") and misalignment in Chrome's PDFium.
+            PdfFont answerFont = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
             float fontSize = 11f;
-            try
-            {
-                // Check if a font family is defined in the HTML CSS
-                var fontFamilyMatch = Regex.Match(html, @"font-family:\s*['""]?([^'"";]+)['""]?", RegexOptions.IgnoreCase);
-                string fontFamily = fontFamilyMatch.Success ? fontFamilyMatch.Groups[1].Value.Trim() : "helvetica";
-
-                var fontFaceMatch = Regex.Match(html, @"@font-face\s*\{[^}]*\}", RegexOptions.IgnoreCase);
-                if (fontFaceMatch.Success)
-                {
-                    var fontFace = fontFaceMatch.Value;
-                    var base64Match = Regex.Match(fontFace, @"base64,([^""']+)\)", RegexOptions.IgnoreCase);
-                    if (base64Match.Success)
-                    {
-                        var fontBytes = Convert.FromBase64String(base64Match.Groups[1].Value);
-                        var fontFile = Path.Combine(tempDir, $"page_{pageIndex}_font.ttf");
-                        await File.WriteAllBytesAsync(fontFile, fontBytes);
-                        answerFont = PdfFontFactory.CreateFont(fontFile, PdfEncodings.IDENTITY_H);
-                        DebugLog($"[INJ] Page {pageIndex}: Extracted custom font '{fontFamily}'.");
-                    }
-                }
-            }
-            catch { }
-            
-            // Fallback to standard font if extraction failed
-            if (answerFont == null)
-            {
-                // If the book uses a serif font, use Times. Otherwise Helvetica.
-                answerFont = Regex.IsMatch(html, @"font-family:\s*['""]?([^'"";]*serif[^'"";]*)", RegexOptions.IgnoreCase) 
-                    ? PdfFontFactory.CreateFont(StandardFonts.TIMES_ROMAN) 
-                    : PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
-            }
 
             // 2. Parse Text Answers
             var fragmentRegex = new Regex(
@@ -219,8 +189,8 @@ namespace BookViewer.Services
                 float pxToPt = 0.75f;
                 float x = leftPx * pxToPt;
                 
-                // Exact vertical shift correction: shift down by a small baseline amount
-                float y = pageHeight - (topPx * pxToPt) - 3f; 
+                // EXACT BASELINE FIX: subtract 14f to align text properly with the line
+                float y = pageHeight - (topPx * pxToPt) - 14f; 
                 float w = Math.Max(widthPx * pxToPt, 40f);
 
                 if (!answerData.TryGetValue(key, out var list))
@@ -282,7 +252,8 @@ namespace BookViewer.Services
             var allFieldIds = new List<string>();
             int btnCounter = 0;
 
-            iText.Kernel.Colors.Color bookRed = new DeviceRgb(228, 4, 119); // #E40477
+            // EXACT BOOK RED (#E40477)
+            iText.Kernel.Colors.Color bookRed = new DeviceRgb(228, 4, 119); 
 
             foreach (Match buttonMatch in buttonMatches)
             {
