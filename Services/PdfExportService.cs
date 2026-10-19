@@ -169,36 +169,44 @@ namespace BookViewer.Services
             var form = PdfAcroForm.GetAcroForm(pdf, true);
             if (form == null) return;
         
+            // We look for the buttons. We also capture the text inside the answer divs 
+            // so we can manually create the text fields without relying on iText's HTML parser.
             var buttonRegex = new Regex(
                 @"<img\b(?=[^>]*\bclass=""[^""]*(?:redbtn|hsgbtn|has2btn)[^""]*"")(?=[^>]*\bid=""([^""]+)"")(?=[^>]*\blinkname=""([^""]+)"")[^>]*>",
                 RegexOptions.IgnoreCase);
+        
+            var matches = buttonRegex.Matches(html);
+            if (matches.Count == 0) return;
+        
+            // Create a dictionary of all answers found in the HTML so we can assign them to the fields
+            var answers = new Dictionary<string, string>();
+            var answerRegex = new Regex(
+                @"<div\b[^>]*class=""[^""]*\b(?:tbred|tbnote)\b[^""]*""([^>]*)>([\s\S]*?)</div>",
+                RegexOptions.IgnoreCase);
+                
+            foreach (Match m in answerRegex.Matches(html))
+            {
+                var attrs = m.Groups[1].Value;
+                var content = m.Groups[2].Value;
+                var linkMatch = Regex.Match(attrs, @"linkname=""([^""]+)""", RegexOptions.IgnoreCase);
+                if (linkMatch.Success)
+                {
+                    answers[SanitizeFieldName(linkMatch.Groups[1].Value)] = content;
+                }
+            }
         
             int btnCounter = 0;
             var pdfPage = pdf.GetPage(1);
             float pageHeight = pdfPage.GetPageSize().GetHeight();
         
-            foreach (Match buttonMatch in buttonRegex.Matches(html))
+            foreach (Match buttonMatch in matches)
             {
                 var imgId = SanitizeFieldName(buttonMatch.Groups[1].Value);
                 var linkName = SanitizeFieldName(buttonMatch.Groups[2].Value);
-        
                 var fieldId = $"AnswerField_{pageIndex}_{linkName}";
-                var targetField = form.GetField(fieldId);
-                if (targetField == null) continue;
-        
-                var actualFieldId = targetField.GetFieldName().ToString();
-        
-                // Toggle display 1 (hidden) and 0 (visible)
-                var toggleScript =
-                    $"var f = this.getField(\"{actualFieldId}\"); " +
-                    $"if (f) {{ f.display = (f.display === 1) ? 0 : 1; }}";
-                var action = PdfAction.CreateJavaScript(toggleScript);
         
                 float leftPx = 0f, topPx = 0f;
-                var styleMatch = Regex.Match(
-                    buttonMatch.Value,
-                    @"style=""[^""]*left:\s*([\d\.]+)px[^""]*top:\s*([\d\.]+)px",
-                    RegexOptions.IgnoreCase);
+                var styleMatch = Regex.Match(buttonMatch.Value, @"style=""[^""]*left:\s*([\d\.]+)px[^""]*top:\s*([\d\.]+)px", RegexOptions.IgnoreCase);
                 if (styleMatch.Success)
                 {
                     leftPx = float.Parse(styleMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
@@ -208,34 +216,57 @@ namespace BookViewer.Services
                 float x = leftPx * 0.75f;
                 float y = pageHeight - (topPx * 0.75f) - 24f;
         
-                var rect = new Rectangle(x, y, 24, 24);
-                var fieldName = $"Toggle_{pageIndex}_{imgId}_{btnCounter++}";
+                // 1. CREATE THE TEXT FIELD DIRECTLY IN C#
+                var textRect = new Rectangle(x + 30, y, 200, 24); // Place text field next to the button
+                var textField = new TextFormFieldBuilder(pdf, fieldId)
+                    .SetWidgetRectangle(textRect)
+                    .CreateText();
+                
+                // Set the answer text and make it read-only
+                string answerText = answers.ContainsKey(linkName) ? answers[linkName] : "";
+                // Strip HTML tags from the answer just in case
+                answerText = Regex.Replace(answerText, "<.*?>", string.Empty).Trim();
+                
+                textField.SetValue(answerText);
+                textField.SetReadOnly(true);
+                
+                // Make the text field borderless so it looks like normal text
+                foreach (var w in textField.GetWidgets())
+                {
+                    w.SetBorder(new PdfArray(new PdfNumber[] { new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
+                    w.SetFlags(PdfAnnotation.PRINT);
+                }
+                form.AddField(textField, pdfPage);
         
-                // 1. Create the button field
-                var buttonField = new PushButtonFormFieldBuilder(pdf, fieldName)
-                    .SetWidgetRectangle(rect)
+                // 2. CREATE THE INTERACTIVE BUTTON
+                var toggleScript =
+                    $"var f = this.getField(\"{fieldId}\"); " +
+                    $"if (f) {{ f.display = (f.display === 1) ? 0 : 1; }}";
+                var action = PdfAction.CreateJavaScript(toggleScript);
+        
+                var buttonRect = new Rectangle(x, y, 24, 24);
+                var toggleFieldName = $"Toggle_{pageIndex}_{imgId}_{btnCounter++}";
+        
+                var buttonField = new PushButtonFormFieldBuilder(pdf, toggleFieldName)
+                    .SetWidgetRectangle(buttonRect)
                     .SetCaption("")
                     .CreatePushButton();
         
-                // 2. Set the JavaScript Action on the Field's "Mouse Up" (U) event
-                buttonField.SetAdditionalAction(PdfName.U, action);
-        
-                // 3. Add the field to the page
-                form.AddField(buttonField, pdfPage);
-        
-                // 4. Manually force a blank appearance stream so the widget has a hitbox
                 foreach (var w in buttonField.GetWidgets())
                 {
+                    w.Put(PdfName.A, action.GetPdfObject());
                     w.SetFlags(PdfAnnotation.PRINT);
                     
-                    // Remove borders
+                    // Make it invisible so it doesn't cover your red button image
                     w.SetBorder(new PdfArray(new PdfNumber[] { new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
                     
-                    // Create a 24x24 transparent XObject
+                    // Give it an empty appearance stream so it is clickable
                     var ap = new PdfFormXObject(new Rectangle(0, 0, 24, 24));
-                    // The widget annotation needs this to be clickable
                     w.SetAppearance(PdfName.N, ap.GetPdfObject());
                 }
+        
+                buttonField.SetAdditionalAction(PdfName.U, action);
+                form.AddField(buttonField, pdfPage);
             }
         }
 
