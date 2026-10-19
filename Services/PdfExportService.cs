@@ -32,6 +32,10 @@ namespace BookViewer.Services
 
         public async Task ExportBookAsPdfAsync(string outputPath, bool includeAnswers, bool includeTeacherNotes, bool includeStudentAnswers)
         {
+            // CANARY 1: Prove the method runs
+            string desktop = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+            File.WriteAllText(Path.Combine(desktop, "PDF_RAN.txt"), "New logic executed at " + DateTime.Now.ToString());
+
             var tempFiles = new List<string>();
             try
             {
