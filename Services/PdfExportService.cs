@@ -163,10 +163,14 @@ namespace BookViewer.Services
                         var fontFile = Path.Combine(tempDir, $"page_{pageIndex}_font.ttf");
                         await File.WriteAllBytesAsync(fontFile, fontBytes);
                         answerFont = PdfFontFactory.CreateFont(fontFile, PdfEncodings.IDENTITY_H);
+                        DebugLog($"[INJ] Page {pageIndex}: Extracted custom font.");
                     }
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                DebugLog($"[INJ] Page {pageIndex}: Font extraction failed. {ex.Message}");
+            }
             if (answerFont == null)
                 answerFont = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
 
@@ -181,7 +185,7 @@ namespace BookViewer.Services
             {
                 string divTag = am.Groups["divtag"].Value;
                 string body = am.Groups["body"].Value;
-                
+
                 var keyMatch = Regex.Match(body, @"<has2\b[^>]*\bname=[""']([^""']+)[""']", RegexOptions.IgnoreCase);
                 if (!keyMatch.Success) continue;
                 string key = SanitizeFieldName(keyMatch.Groups[1].Value);
@@ -204,7 +208,7 @@ namespace BookViewer.Services
 
                 float pxToPt = 0.75f;
                 float x = leftPx * pxToPt;
-                float y = pageHeight - (topPx * pxToPt) - 18f; 
+                float y = pageHeight - (topPx * pxToPt) - 18f;
                 float w = Math.Max(widthPx * pxToPt, 40f);
 
                 if (!answerData.TryGetValue(key, out var list))
@@ -330,7 +334,6 @@ namespace BookViewer.Services
 
                         var shapeRect = new Rectangle(shape.x, shape.y, shape.w, shape.h);
                         
-                        // Using a Text Form Field for the shape so Chrome renders it
                         var textField = new TextFormFieldBuilder(pdf, fieldId)
                             .SetWidgetRectangle(shapeRect)
                             .CreateText();
@@ -351,7 +354,8 @@ namespace BookViewer.Services
                             var path = ParseSvgPath(shape.pathD, shape.x, shape.y, shape.h);
                             if (path != null)
                             {
-                                canvas.DrawPath(path, new PdfCanvasOptions().SetStroke(true));
+                                canvas.DrawPath(path);
+                                canvas.Stroke();
                             }
                             canvas.Release();
                             w.SetAppearance(PdfName.N, apStream.GetPdfObject());
@@ -425,7 +429,6 @@ namespace BookViewer.Services
             {
                 var path = new iText.Kernel.Geom.Path();
                 var matches = Regex.Matches(pathD, @"([a-zA-Z])|(-?\d*\.?\d+)");
-                float currentX = 0, currentY = 0;
                 float startX = 0, startY = 0;
                 bool first = true;
 
@@ -435,13 +438,12 @@ namespace BookViewer.Services
                     if (char.IsLetter(token[0]))
                     {
                         char cmd = token[0];
-                        if (cmd == 'z' || cmd == 'Z') { path.ClosePath(); currentX = startX; currentY = startY; }
+                        if (cmd == 'z' || cmd == 'Z') { path.CloseSubpath(); }
                         else if (cmd == 'm' || cmd == 'M')
                         {
                             float x = ParseFloat(matches[++i].Value);
                             float y = ParseFloat(matches[++i].Value);
                             if (first) { startX = x; startY = y; first = false; }
-                            currentX = x; currentY = y;
                             path.MoveTo(baseX + x * 0.75f, baseY + (height - y * 0.75f));
                         }
                         else if (cmd == 'c' || cmd == 'C')
@@ -457,7 +459,6 @@ namespace BookViewer.Services
                                 baseX + x2 * 0.75f, baseY + (height - y2 * 0.75f),
                                 baseX + x3 * 0.75f, baseY + (height - y3 * 0.75f)
                             );
-                            currentX = x3; currentY = y3;
                         }
                     }
                 }
