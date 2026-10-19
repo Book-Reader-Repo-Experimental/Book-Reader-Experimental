@@ -163,8 +163,6 @@ namespace BookViewer.Services
                         var fontBytes = Convert.FromBase64String(base64Match.Groups[1].Value);
                         var fontFile = Path.Combine(tempDir, $"page_{pageIndex}_font.ttf");
                         await File.WriteAllBytesAsync(fontFile, fontBytes);
-                        
-                        // Determine if the font is CID (TrueType) or simple
                         answerFont = PdfFontFactory.CreateFont(fontFile, PdfEncodings.IDENTITY_H);
                         DebugLog($"[INJ] Page {pageIndex}: Extracted custom font.");
                     }
@@ -177,73 +175,61 @@ namespace BookViewer.Services
             if (answerFont == null)
                 answerFont = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
 
-            // 2. Buttons (hsgbtn, has2btn, redbtn)
-            var buttonRegex = new Regex(
-                @"<img\b(?=[^>]*\bclass=[""']?[^""']*(?:hsgbtn|has2btn|redbtn)[^""']*[""']?)(?=[^>]*\bid=[""']([^""']+)[""'])(?=[^>]*\b(?:linkname|name)=[""']([^""']+)[""'])[^>]*>",
-                RegexOptions.IgnoreCase);
-            var buttonMatches = buttonRegex.Matches(html);
-
-            // 3. SVG circles (red outlines)
-            var svgRegex = new Regex(
-                @"<svg\b(?=[^>]*\bclass=[""'][^""']*\btbred\b[^""']*[""'])(?=[^>]*\bname=[""']([^""']+)[""'])[^>]*>[\s\S]*?</svg>",
-                RegexOptions.IgnoreCase);
-            var svgMatches = svgRegex.Matches(html);
-
-            DebugLog($"[INJ] Page {pageIndex}: buttons={buttonMatches.Count}, svg circles={svgMatches.Count}");
-
-            // 4. Parse text answers
-            var answerGroups = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            // 2. Parse text answers (mapping linkName -> text AND its exact coordinates)
             var fragmentRegex = new Regex(
                 @"<div\b(?<divtag>[^>]*\bclass=[""'][^""']*\b(?:tbred|tbnote)\b[^""']*[""'][^>]*)>(?<body>[\s\S]*?)</div>",
                 RegexOptions.IgnoreCase);
+
+            var answerData = new Dictionary<string, List<(string text, float x, float y, float w)>>(StringComparer.OrdinalIgnoreCase);
 
             foreach (Match am in fragmentRegex.Matches(html))
             {
                 string divTag = am.Groups["divtag"].Value;
                 string body = am.Groups["body"].Value;
+                
                 var keyMatch = Regex.Match(body, @"<has2\b[^>]*\bname=[""']([^""']+)[""']", RegexOptions.IgnoreCase);
                 if (!keyMatch.Success) continue;
-
                 string key = SanitizeFieldName(keyMatch.Groups[1].Value);
+
                 string clean = Regex.Replace(body, "<[^>]+>", " ");
                 clean = System.Net.WebUtility.HtmlDecode(clean);
                 clean = Regex.Replace(clean, @"\s+", " ").Trim();
                 if (string.IsNullOrEmpty(clean)) continue;
 
-                if (!answerGroups.TryGetValue(key, out var list))
-                    answerGroups[key] = list = new List<string>();
-                list.Add(clean);
+                float leftPx = 0f, topPx = 0f, widthPx = 50f;
+                var styleMatch = Regex.Match(divTag,
+                    @"style=[""'][^""']*left:\s*([\d\.]+)px[^""']*top:\s*([\d\.]+)px[^""']*width:\s*([\d\.]+)px",
+                    RegexOptions.IgnoreCase);
+                if (styleMatch.Success)
+                {
+                    leftPx = float.Parse(styleMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+                    topPx = float.Parse(styleMatch.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
+                    widthPx = float.Parse(styleMatch.Groups[3].Value, System.Globalization.CultureInfo.InvariantCulture);
+                }
+
+                float pxToPt = 0.75f;
+                float x = leftPx * pxToPt;
+                float y = pageHeight - (topPx * pxToPt) - 18f; 
+                float w = Math.Max(widthPx * pxToPt, 40f);
+
+                if (!answerData.TryGetValue(key, out var list))
+                    answerData[key] = list = new List<(string, float, float, float)>();
+                list.Add((clean, x, y, w));
             }
 
-            var answers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var kv in answerGroups)
-            {
-                bool allShort = kv.Value.All(v => v.Length <= 2);
-                answers[kv.Key] = allShort ? string.Concat(kv.Value) : string.Join(" ", kv.Value);
-            }
+            // 3. Find all toggle buttons
+            var buttonRegex = new Regex(
+                @"<img\b(?=[^>]*\bclass=[""']?[^""']*(?:hsgbtn|has2btn)[^""']*[""']?)(?=[^>]*\bid=[""']([^""']+)[""'])(?=[^>]*\b(?:linkname|name)=[""']([^""']+)[""'])[^>]*>",
+                RegexOptions.IgnoreCase);
+            var buttonMatches = buttonRegex.Matches(html);
 
-            var fieldsByGroup = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-            void AddToGroup(string groupKey, string fieldId)
-            {
-                if (!fieldsByGroup.TryGetValue(groupKey, out var list))
-                    fieldsByGroup[groupKey] = list = new List<string>();
-                list.Add(fieldId);
-            }
-
+            var allFieldIds = new List<string>();
             int btnCounter = 0;
 
-            // 5. Create answer text fields + toggle buttons
             foreach (Match buttonMatch in buttonMatches)
             {
                 var imgId = SanitizeFieldName(buttonMatch.Groups[1].Value);
                 var linkName = SanitizeFieldName(buttonMatch.Groups[2].Value);
-                var btnClass = buttonMatch.Value.ToLower();
-
-                string answerText = answers.TryGetValue(linkName, out var at) ? at : "";
-                bool isCircle = btnClass.Contains("redbtn") && !btnClass.Contains("has2btn") && !btnClass.Contains("hsgbtn");
-
-                if (isCircle && string.IsNullOrEmpty(answerText))
-                    continue; // Skip decorative redbtn
 
                 float leftPx = 0f, topPx = 0f;
                 var styleMatch = Regex.Match(buttonMatch.Value,
@@ -254,176 +240,96 @@ namespace BookViewer.Services
                     leftPx = float.Parse(styleMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
                     topPx = float.Parse(styleMatch.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
                 }
-                float x = leftPx * 0.75f;
-                float y = pageHeight - (topPx * 0.75f) - 24f;
+                float bx = leftPx * 0.75f;
+                float by = pageHeight - (topPx * 0.75f) - 24f;
 
-                if (isCircle)
+                // If the button points to a specific answer group, create the text fields at those exact coordinates
+                if (answerData.TryGetValue(linkName, out var answersForThisButton))
                 {
-                    // Draw a small checkable box for the circle answer
-                    var fieldId = $"A_{pageIndex}_{linkName}";
-                    var textRect = new Rectangle(x + 4, y + 4, 16, 16); 
-                    var chk = new CheckBoxFormFieldBuilder(pdf, fieldId)
-                        .SetWidgetRectangle(textRect)
-                        .CreateCheckBox();
-                    chk.SetValue("Yes");
-
-                    foreach (var w in chk.GetWidgets())
+                    for (int f = 0; f < answersForThisButton.Count; f++)
                     {
-                        w.SetBorder(new PdfArray(new PdfNumber[] { new PdfNumber(1), new PdfNumber(0), new PdfNumber(0) }));
-                        w.SetColor(ColorConstants.RED);
-                        w.SetFlags(PdfAnnotation.PRINT);
-                    }
-                    form.AddField(chk, pdfPage);
-                    AddToGroup(linkName, fieldId);
-                }
-                else
-                {
-                    // Create the text answer field
-                    var fieldId = $"A_{pageIndex}_{linkName}";
-                    var textRect = new Rectangle(x + 25, y, 500, 24);
-                    var textField = new TextFormFieldBuilder(pdf, fieldId)
-                        .SetWidgetRectangle(textRect)
-                        .CreateText();
-                    textField.SetValue(answerText);
-                    textField.SetReadOnly(true);
+                        var ans = answersForThisButton[f];
+                        var fieldId = $"A_{pageIndex}_{linkName}_{f}";
+                        allFieldIds.Add(fieldId);
 
-                    foreach (var w in textField.GetWidgets())
-                    {
-                        w.SetBorder(new PdfArray(new PdfNumber[] { new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
-                        w.SetFlags(PdfAnnotation.PRINT);
+                        var textRect = new Rectangle(ans.x, ans.y, ans.w, 18f);
+                        var textField = new TextFormFieldBuilder(pdf, fieldId)
+                            .SetWidgetRectangle(textRect)
+                            .CreateText();
 
-                        var apStream = new PdfFormXObject(textRect);
-                        var canvas = new PdfCanvas(apStream, pdf);
-                        canvas.BeginText();
-                        canvas.SetFontAndSize(answerFont, 10);
-                        canvas.SetTextMatrix(5, 5);
-                        canvas.SetFillColor(ColorConstants.RED); // RED TEXT
-                        canvas.ShowText(answerText ?? "");
-                        canvas.EndText();
-                        canvas.Release();
-                        w.SetAppearance(PdfName.N, apStream.GetPdfObject());
+                        textField.SetValue(ans.text);
+                        textField.SetReadOnly(true);
+                        textField.SetDefaultAppearance("1 0 0 rg /Helv 11 Tf"); // Force Red
+
+                        foreach (var w in textField.GetWidgets())
+                        {
+                            w.SetBorder(new PdfArray(new PdfNumber[] { new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
+                            w.SetFlags(PdfAnnotation.PRINT);
+
+                            var apStream = new PdfFormXObject(textRect);
+                            var canvas = new PdfCanvas(apStream, pdf);
+                            canvas.BeginText();
+                            canvas.SetFontAndSize(answerFont, 11);
+                            canvas.SetTextMatrix(2, 4);
+                            canvas.SetFillColor(ColorConstants.RED);
+                            canvas.ShowText(ans.text);
+                            canvas.EndText();
+                            canvas.Release();
+                            w.SetAppearance(PdfName.N, apStream.GetPdfObject());
+                        }
+                        form.AddField(textField, pdfPage);
                     }
-                    form.AddField(textField, pdfPage);
-                    AddToGroup(linkName, fieldId);
                 }
 
-                var buttonRect = new Rectangle(x, y, 24, 24);
+                // Create the invisible button on top of the red icon
+                var buttonRect = new Rectangle(bx, by, 24, 24);
                 var toggleFieldName = $"T_{pageIndex}_{imgId}_{btnCounter++}";
                 var buttonField = new PushButtonFormFieldBuilder(pdf, toggleFieldName)
                     .SetWidgetRectangle(buttonRect)
                     .SetCaption("")
                     .CreatePushButton();
 
-                form.AddField(buttonField, pdfPage);
-                AddToGroup(linkName, toggleFieldName);
-            }
-
-            // 6. Draw SVG circles and wire them to the same group toggles
-            foreach (Match svgMatch in svgMatches)
-            {
-                var svgName = SanitizeFieldName(svgMatch.Groups[1].Value);
-
-                float leftPx = 0f, topPx = 0f, widthPx = 82f, heightPx = 32f;
-                var styleMatch = Regex.Match(svgMatch.Value,
-                    @"style=[""'][^""']*left:\s*([\d\.]+)px[^""']*top:\s*([\d\.]+)px",
-                    RegexOptions.IgnoreCase);
-                var widthMatch = Regex.Match(svgMatch.Value, @"\bwidth=[""'](\d+)[""']", RegexOptions.IgnoreCase);
-                var heightMatch = Regex.Match(svgMatch.Value, @"\bheight=[""'](\d+)[""']", RegexOptions.IgnoreCase);
-                if (styleMatch.Success)
+                string toggleScript;
+                if (linkName.Contains("all"))
                 {
-                    leftPx = float.Parse(styleMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
-                    topPx = float.Parse(styleMatch.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
+                    toggleScript = "var anyVisible = false;\n";
+                    foreach (var id in allFieldIds)
+                        toggleScript += $"var f = this.getField('{id}'); if (f && f.display === 0) anyVisible = true;\n";
+                    toggleScript += "var newDisplay = anyVisible ? 1 : 0;\n";
+                    foreach (var id in allFieldIds)
+                        toggleScript += $"var f = this.getField('{id}'); if (f) {{ f.display = newDisplay; var v = f.value; f.value = ''; f.value = v; }}\n";
                 }
-                if (widthMatch.Success) widthPx = float.Parse(widthMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
-                if (heightMatch.Success) heightPx = float.Parse(heightMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
-
-                float cx = leftPx * 0.75f;
-                float cy = pageHeight - ((topPx + heightPx) * 0.75f);
-                float cw = widthPx * 0.75f;
-                float ch = heightPx * 0.75f;
-
-                var circleFieldName = $"C_{pageIndex}_{svgName}";
-                var circleRect = new Rectangle(cx, cy, cw, ch);
-
-                var apStream = new PdfFormXObject(circleRect);
-                var canvas = new PdfCanvas(apStream, pdf);
-                canvas.SetStrokeColor(ColorConstants.RED);
-                canvas.SetLineWidth(1.5f);
-                canvas.Ellipse(cx + 2, cy + 2, cx + cw - 2, cy + ch - 2);
-                canvas.Stroke();
-                canvas.Release();
-
-                var chk = new CheckBoxFormFieldBuilder(pdf, circleFieldName)
-                    .SetWidgetRectangle(circleRect)
-                    .CreateCheckBox();
-                chk.SetValue("Yes");
-
-                foreach (var w in chk.GetWidgets())
+                else
                 {
-                    w.SetBorder(new PdfArray(new PdfNumber[] { new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
-                    w.SetFlags(PdfAnnotation.PRINT);
-                    w.SetAppearance(PdfName.N, apStream.GetPdfObject());
-                }
-                form.AddField(chk, pdfPage);
-
-                AddToGroup(svgName, circleFieldName);
-            }
-
-            // 7. Wire up the JavaScript for all buttons
-            foreach (var kv in fieldsByGroup)
-            {
-                var groupKey = kv.Key;
-                var ids = kv.Value;
-
-                var toggleFieldName = $"T_{pageIndex}_" + ids.FirstOrDefault(i => i.StartsWith("T_"))?.Substring(4);
-
-                if (toggleFieldName != null)
-                {
-                    var buttonField = form.GetField(toggleFieldName) as PdfButtonFormField;
-                    if (buttonField != null)
+                    toggleScript = "try {";
+                    foreach (var ans in answersForThisButton ?? new List<(string, float, float, float)>())
                     {
-                        string toggleScript;
-                        if (groupKey.Contains("all"))
-                        {
-                            toggleScript = "var anyVisible = false;\n";
-                            foreach (var id in ids)
-                                toggleScript += $"var f = this.getField('{id}'); if (f && f.display === 0) anyVisible = true;\n";
-                            toggleScript += "var newDisplay = anyVisible ? 1 : 0;\n";
-                            foreach (var id in ids)
-                                toggleScript += $"var f = this.getField('{id}'); if (f) {{ f.display = newDisplay; var v = f.value; f.value = ''; f.value = v; }}\n";
-                        }
-                        else
-                        {
-                            toggleScript = "try {";
-                            foreach (var id in ids)
-                            {
-                                toggleScript += $"var f = this.getField('{id}'); if (f) {{ f.display = (f.display === 1) ? 0 : 1; var v = f.value; f.value = ''; f.value = v; }}";
-                            }
-                            toggleScript += "} catch(e) {}";
-                        }
-
-                        var jsAction = PdfAction.CreateJavaScript(toggleScript);
-
-                        foreach (var w in buttonField.GetWidgets())
-                        {
-                            w.SetHighlightMode(PdfAnnotation.HIGHLIGHT_PUSH);
-                            w.SetFlags(PdfAnnotation.PRINT);
-                            w.SetBorder(new PdfArray(new PdfNumber[] { new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
-                            w.Put(PdfName.A, jsAction.GetPdfObject());
-
-                            var aaDict = new PdfDictionary();
-                            aaDict.Put(PdfName.U, jsAction.GetPdfObject());
-                            w.Put(PdfName.AA, aaDict);
-
-                            var mkDict = new PdfDictionary();
-                            mkDict.Put(PdfName.CA, new PdfString(""));
-                            w.GetPdfObject().Put(PdfName.MK, mkDict);
-
-                            var ap = new PdfFormXObject(new Rectangle(0, 0, 24, 24));
-                            w.SetAppearance(PdfName.N, ap.GetPdfObject());
-                        }
+                        var id = $"A_{pageIndex}_{linkName}_{answersForThisButton.IndexOf(ans)}";
+                        toggleScript += $"var f = this.getField('{id}'); if (f) {{ f.display = (f.display === 1) ? 0 : 1; var v = f.value; f.value = ''; f.value = v; }}";
                     }
+                    toggleScript += "} catch(e) {}";
                 }
+
+                var jsAction = PdfAction.CreateJavaScript(toggleScript);
+                foreach (var w in buttonField.GetWidgets())
+                {
+                    w.SetHighlightMode(PdfAnnotation.HIGHLIGHT_PUSH);
+                    w.SetFlags(PdfAnnotation.PRINT);
+                    w.SetBorder(new PdfArray(new PdfNumber[] { new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
+                    w.Put(PdfName.A, jsAction.GetPdfObject());
+
+                    var aaDict = new PdfDictionary();
+                    aaDict.Put(PdfName.U, jsAction.GetPdfObject());
+                    w.Put(PdfName.AA, aaDict);
+
+                    var mkDict = new PdfDictionary();
+                    mkDict.Put(PdfName.CA, new PdfString(""));
+                    w.GetPdfObject().Put(PdfName.MK, mkDict);
+
+                    var ap = new PdfFormXObject(new Rectangle(0, 0, 24, 24));
+                    w.SetAppearance(PdfName.N, ap.GetPdfObject());
+                }
+                form.AddField(buttonField, pdfPage);
             }
         }
 
