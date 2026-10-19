@@ -10,6 +10,7 @@ using iText.Kernel.Pdf.Annot;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
@@ -42,6 +43,9 @@ namespace BookViewer.Services
 
                 var converterProperties = new ConverterProperties();
                 converterProperties.SetFontProvider(new DefaultFontProvider(true, true, true));
+                // CRITICAL: without this, iText flattens <input> elements into static text,
+                // so the AnswerField form fields never exist and toggles have nothing to target.
+                converterProperties.SetCreateAcroForm(true);
 
                 var pageSize = new PageSize(768f, 1008f);
 
@@ -64,7 +68,7 @@ namespace BookViewer.Services
 
                     var tempPdfPath = System.IO.Path.Combine(tempDir, $"page_{i}.pdf");
 
-                    // 4. Generate the unflattened PDF
+                    // 4. Generate the unflattened PDF (AcroForm enabled above)
                     using (var writer = new PdfWriter(tempPdfPath))
                     using (var pdf = new PdfDocument(writer))
                     {
@@ -97,6 +101,12 @@ namespace BookViewer.Services
                             merger.Merge(sourcePdf, 1, sourcePdf.GetNumberOfPages());
                         }
                     }
+                    // Preserve AcroForm / NeedAppearances flag on merged document
+                    var mergedForm = PdfAcroForm.GetAcroForm(mergedPdf, false);
+                    if (mergedForm != null)
+                    {
+                        mergedForm.SetNeedAppearances(true);
+                    }
                 }
 
                 OnComplete?.Invoke(this, outputPath);
@@ -128,13 +138,17 @@ namespace BookViewer.Services
         
                 var fieldId = $"AnswerField_{pageIndex}_{linkName}";
         
-                return $"<input type=\"text\" id=\"{fieldId}\" name=\"{fieldId}\" class=\"pdf-answer-field\" value=\"{content.Replace("\"", "&quot;")}\" readonly=\"readonly\" style=\"display:block; width:100%; border:none; background:none;\" />";
+                // Escape the value properly for an HTML attribute
+                var escaped = content.Replace("&", "&amp;").Replace("\"", "&quot;");
+                return $"<input type=\"text\" id=\"{fieldId}\" name=\"{fieldId}\" class=\"pdf-answer-field\" value=\"{escaped}\" readonly=\"readonly\" style=\"display:block; width:100%; border:none; background:none;\" />";
             });
         }
                                 
         private void InjectToggleActions(PdfDocument pdf, string html, int pageIndex)
         {
             var form = PdfAcroForm.GetAcroForm(pdf, true);
+            if (form == null) return;
+
             var buttonRegex = new Regex(@"<img[^>]+class=""[^""]*(?:redbtn|hsgbtn|has2btn)[^""]*""[^>]*id=""([^""]+)""[^>]*linkname=""([^""]+)""", RegexOptions.IgnoreCase);
             var buttonMatches = buttonRegex.Matches(html);
         
@@ -165,13 +179,13 @@ namespace BookViewer.Services
                         var rect = new Rectangle(x, y, 24, 24);
                         var fieldName = $"Toggle_{pageIndex}_{imgId}_{btnCounter++}";
         
-                        // Use the builder pattern (iText 7.2+ / 8.x) instead of the removed
-                        // static factory PdfFormField.CreatePushButton.
+                        // Builder pattern for iText 7.2+ / 8.x
                         var buttonField = new PushButtonFormFieldBuilder(pdf, fieldName)
                             .SetWidgetRectangle(rect)
                             .SetCaption("")
                             .CreatePushButton();
                         
+                        // Attach the JS to the button's "on mouse up" (U) action
                         buttonField.SetAdditionalAction(PdfName.U, action);
                         
                         foreach (var w in buttonField.GetWidgets())
