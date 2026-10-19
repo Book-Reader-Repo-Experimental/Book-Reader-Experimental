@@ -149,8 +149,7 @@ namespace BookViewer.Services
             var pdfPage = pdf.GetPage(1);
             float pageHeight = pdfPage.GetPageSize().GetHeight();
 
-            // FORCE HELVETICA. The book uses a standard sans-serif. Custom font extraction 
-            // causes missing glyphs (like the "T") and misalignment in Chrome's PDFium.
+            // Use Helvetica for exact standard alignment
             PdfFont answerFont = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
             float fontSize = 11f;
 
@@ -160,6 +159,10 @@ namespace BookViewer.Services
                 RegexOptions.IgnoreCase);
 
             var answerData = new Dictionary<string, List<(string text, float x, float y, float w)>>(StringComparer.OrdinalIgnoreCase);
+            
+            var allFieldIds = new List<string>();
+            var allNoteFieldIds = new List<string>();
+            var allAnswerFieldIds = new List<string>();
 
             foreach (Match am in fragmentRegex.Matches(html))
             {
@@ -189,7 +192,7 @@ namespace BookViewer.Services
                 float pxToPt = 0.75f;
                 float x = leftPx * pxToPt;
                 
-                // EXACT BASELINE FIX: subtract 14f to align text properly with the line
+                // Baseline shift fixed
                 float y = pageHeight - (topPx * pxToPt) - 14f; 
                 float w = Math.Max(widthPx * pxToPt, 40f);
 
@@ -245,23 +248,24 @@ namespace BookViewer.Services
 
             // 4. Parse Buttons
             var buttonRegex = new Regex(
-                @"<img\b(?=[^>]*\bclass=[""']?[^""']*(?:hsgbtn|has2btn|redbtn)[^""']*[""']?)(?=[^>]*\bid=[""']([^""']+)[""'])(?=[^>]*\b(?:linkname|name)=[""']([^""']+)[""'])[^>]*>",
+                @"<img\b(?<tag>[^>]*\bclass=[""']?[^""']*(?:hsgbtn|has2btn|redbtn)[^""']*[""']?)(?=[^>]*\bid=[""']([^""']+)[""'])(?=[^>]*\b(?:linkname|name)=[""']([^""']+)[""'])(?<rest>[^>]*)>",
                 RegexOptions.IgnoreCase);
             var buttonMatches = buttonRegex.Matches(html);
 
-            var allFieldIds = new List<string>();
             int btnCounter = 0;
 
-            // EXACT BOOK RED (#E40477)
-            iText.Kernel.Colors.Color bookRed = new DeviceRgb(228, 4, 119); 
+            iText.Kernel.Colors.Color bookRed = new DeviceRgb(228, 4, 119); // #E40477
 
             foreach (Match buttonMatch in buttonMatches)
             {
-                var imgId = SanitizeFieldName(buttonMatch.Groups[1].Value);
-                var linkName = SanitizeFieldName(buttonMatch.Groups[2].Value);
+                var imgId = SanitizeFieldName(buttonMatch.Groups[2].Value);
+                var linkName = SanitizeFieldName(buttonMatch.Groups[3].Value);
+                var fullTag = buttonMatch.Groups[1].Value + buttonMatch.Groups[4].Value;
+
+                bool isNoteButton = fullTag.Contains("teacherNotes", StringComparison.OrdinalIgnoreCase) || linkName.Contains("note", StringComparison.OrdinalIgnoreCase);
 
                 float leftPx = 0f, topPx = 0f;
-                var styleMatch = Regex.Match(buttonMatch.Value,
+                var styleMatch = Regex.Match(fullTag,
                     @"style=[""'][^""']*left:\s*([\d\.]+)px[^""']*top:\s*([\d\.]+)px",
                     RegexOptions.IgnoreCase);
                 if (styleMatch.Success)
@@ -272,6 +276,8 @@ namespace BookViewer.Services
                 float bx = leftPx * 0.75f;
                 float by = pageHeight - (topPx * 0.75f) - 24f;
 
+                var currentButtonFields = new List<string>();
+
                 // Text fields
                 if (answerData.TryGetValue(linkName, out var answersForThisButton))
                 {
@@ -279,7 +285,11 @@ namespace BookViewer.Services
                     {
                         var ans = answersForThisButton[f];
                         var fieldId = $"A_{pageIndex}_{linkName}_{f}";
+                        currentButtonFields.Add(fieldId);
                         allFieldIds.Add(fieldId);
+                        
+                        if (isNoteButton) allNoteFieldIds.Add(fieldId);
+                        else allAnswerFieldIds.Add(fieldId);
 
                         var textRect = new Rectangle(ans.x, ans.y, ans.w, 18f);
                         var textField = new TextFormFieldBuilder(pdf, fieldId)
@@ -316,7 +326,11 @@ namespace BookViewer.Services
                     {
                         var shape = shapesForThisButton[f];
                         var fieldId = $"S_{pageIndex}_{linkName}_{f}";
+                        currentButtonFields.Add(fieldId);
                         allFieldIds.Add(fieldId);
+                        
+                        if (isNoteButton) allNoteFieldIds.Add(fieldId);
+                        else allAnswerFieldIds.Add(fieldId);
 
                         var shapeRect = new Rectangle(shape.x, shape.y, shape.w, shape.h);
                         
@@ -345,8 +359,8 @@ namespace BookViewer.Services
                     }
                 }
 
-                // Hitbox
-                var buttonRect = new Rectangle(bx, by, 24, 24);
+                // Hitbox (Always 24x24pt centered on the icon)
+                var buttonRect = new Rectangle(bx - 4, by, 24, 24);
                 var toggleFieldName = $"T_{pageIndex}_{imgId}_{btnCounter++}";
                 
                 var triggerField = new TextFormFieldBuilder(pdf, toggleFieldName)
@@ -355,7 +369,32 @@ namespace BookViewer.Services
                 triggerField.SetReadOnly(false);
 
                 string toggleScript;
-                if (linkName.Contains("all"))
+                
+                // Check if it's an "All Answers" or "All Notes" button
+                // We look at linkName AND the redanswertype class
+                bool isAll = linkName.Contains("all");
+                bool isAllNotes = isAll && (isNoteButton || fullTag.Contains("allnotes", StringComparison.OrdinalIgnoreCase));
+                bool isAllAnswers = isAll && !isAllNotes;
+
+                if (isAllNotes)
+                {
+                    toggleScript = "var anyVisible = false;\n";
+                    foreach (var id in allNoteFieldIds)
+                        toggleScript += $"var f = this.getField('{id}'); if (f && f.display === 0) anyVisible = true;\n";
+                    toggleScript += "var newDisplay = anyVisible ? 1 : 0;\n";
+                    foreach (var id in allNoteFieldIds)
+                        toggleScript += $"var f = this.getField('{id}'); if (f) {{ f.display = newDisplay; var v = f.value; f.value = ''; f.value = v; }}\n";
+                }
+                else if (isAllAnswers)
+                {
+                    toggleScript = "var anyVisible = false;\n";
+                    foreach (var id in allAnswerFieldIds)
+                        toggleScript += $"var f = this.getField('{id}'); if (f && f.display === 0) anyVisible = true;\n";
+                    toggleScript += "var newDisplay = anyVisible ? 1 : 0;\n";
+                    foreach (var id in allAnswerFieldIds)
+                        toggleScript += $"var f = this.getField('{id}'); if (f) {{ f.display = newDisplay; var v = f.value; f.value = ''; f.value = v; }}\n";
+                }
+                else if (isAll) // "All" toggles both
                 {
                     toggleScript = "var anyVisible = false;\n";
                     foreach (var id in allFieldIds)
@@ -367,21 +406,9 @@ namespace BookViewer.Services
                 else
                 {
                     toggleScript = "try {";
-                    if (answersForThisButton != null)
+                    foreach (var id in currentButtonFields)
                     {
-                        for (int f = 0; f < answersForThisButton.Count; f++)
-                        {
-                            var id = $"A_{pageIndex}_{linkName}_{f}";
-                            toggleScript += $"var f = this.getField('{id}'); if (f) {{ f.display = (f.display === 1) ? 0 : 1; var v = f.value; f.value = ''; f.value = v; }}";
-                        }
-                    }
-                    if (shapesForThisButton != null)
-                    {
-                        for (int f = 0; f < shapesForThisButton.Count; f++)
-                        {
-                            var id = $"S_{pageIndex}_{linkName}_{f}";
-                            toggleScript += $"var f = this.getField('{id}'); if (f) {{ f.display = (f.display === 1) ? 0 : 1; var v = f.value; f.value = ''; f.value = v; }}";
-                        }
+                        toggleScript += $"var f = this.getField('{id}'); if (f) {{ f.display = (f.display === 1) ? 0 : 1; var v = f.value; f.value = ''; f.value = v; }}";
                     }
                     toggleScript += "} catch(e) {}";
                 }
@@ -396,7 +423,7 @@ namespace BookViewer.Services
                     aaDict.Put(PdfName.U, jsAction.GetPdfObject());
                     w.GetPdfObject().Put(PdfName.AA, aaDict);
 
-                    var ap = new PdfFormXObject(new Rectangle(0, 0, 24, 24));
+                    var ap = new PdfFormXObject(buttonRect);
                     w.SetAppearance(PdfName.N, ap.GetPdfObject());
                 }
                 form.AddField(triggerField, pdfPage);
