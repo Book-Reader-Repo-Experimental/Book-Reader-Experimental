@@ -213,20 +213,25 @@ namespace BookViewer.Services
                 list.Add((clean, x, y, w));
             }
 
-            // 3. Parse SVG Circles (extract only bounding box)
+            // 3. Parse SVG Circles
             var svgRegex = new Regex(
                 @"<svg\b(?<tag>[^>]*\bclass=[""'][^""']*\btbred\b[^""']*[""'][^>]*)>(?<content>[\s\S]*?)</svg>",
                 RegexOptions.IgnoreCase);
 
-            var svgData = new Dictionary<string, List<(float x, float y, float w, float h)>>(StringComparer.OrdinalIgnoreCase);
+            var svgData = new Dictionary<string, List<(string pathD, float x, float y, float w, float h)>>(StringComparer.OrdinalIgnoreCase);
 
             foreach (Match sm in svgRegex.Matches(html))
             {
                 string tag = sm.Groups["tag"].Value;
+                string content = sm.Groups["content"].Value;
                 
                 var nameMatch = Regex.Match(tag, @"\bname=[""']([^""']+)[""']", RegexOptions.IgnoreCase);
                 if (!nameMatch.Success) continue;
                 string name = SanitizeFieldName(nameMatch.Groups[1].Value);
+
+                var pathMatch = Regex.Match(content, @"<path\b[^>]*\bd=[""']([^""']+)[""']", RegexOptions.IgnoreCase);
+                if (!pathMatch.Success) continue;
+                string pathD = pathMatch.Groups[1].Value;
 
                 float leftPx = 0f, topPx = 0f, widthPx = 82f, heightPx = 32f;
                 var styleMatch = Regex.Match(tag,
@@ -249,8 +254,8 @@ namespace BookViewer.Services
                 float h = heightPx * 0.75f;
 
                 if (!svgData.TryGetValue(name, out var list))
-                    svgData[name] = list = new List<(float, float, float, float)>();
-                list.Add((x, y, w, h));
+                    svgData[name] = list = new List<(string, float, float, float, float)>();
+                list.Add((pathD, x, y, w, h));
             }
 
             // 4. Parse Buttons
@@ -279,7 +284,7 @@ namespace BookViewer.Services
                 float bx = leftPx * 0.75f;
                 float by = pageHeight - (topPx * 0.75f) - 24f;
 
-                // Create Text Fields
+                // Text fields
                 if (answerData.TryGetValue(linkName, out var answersForThisButton))
                 {
                     for (int f = 0; f < answersForThisButton.Count; f++)
@@ -316,7 +321,7 @@ namespace BookViewer.Services
                     }
                 }
 
-                // Create SVG Rectangles (Just the outline, so it matches the red highlight)
+                // SVG Shapes (1:1)
                 if (svgData.TryGetValue(linkName, out var shapesForThisButton))
                 {
                     for (int f = 0; f < shapesForThisButton.Count; f++)
@@ -340,12 +345,12 @@ namespace BookViewer.Services
                             var apStream = new PdfFormXObject(shapeRect);
                             var canvas = new PdfCanvas(apStream, pdf);
                             
-                            // Draw a perfectly scaled red oval outline inside the box bounds
                             canvas.SetStrokeColor(ColorConstants.RED);
-                            canvas.SetLineWidth(1.2f);
-                            canvas.Ellipse(shape.x + 1, shape.y + 1, shape.x + shape.w - 1, shape.y + shape.h - 1);
-                            canvas.Stroke();
+                            canvas.SetLineWidth(1.0f);
                             
+                            // This is the 1:1 SVG path parser
+                            DrawSvgPath(canvas, shape.pathD, shape.x, shape.y, shape.h);
+                            canvas.Stroke();
                             canvas.Release();
                             w.SetAppearance(PdfName.N, apStream.GetPdfObject());
                         }
@@ -353,7 +358,7 @@ namespace BookViewer.Services
                     }
                 }
 
-                // Create Clickable Trigger
+                // Hitbox
                 var buttonRect = new Rectangle(bx, by, 24, 24);
                 var toggleFieldName = $"T_{pageIndex}_{imgId}_{btnCounter++}";
                 
@@ -409,6 +414,91 @@ namespace BookViewer.Services
                 }
                 form.AddField(triggerField, pdfPage);
             }
+        }
+
+        // Accurate SVG Path Parser (Handles relative/absolute M, L, C, Z)
+        private void DrawSvgPath(PdfCanvas canvas, string pathD, float baseX, float baseY, float height)
+        {
+            try
+            {
+                var matches = Regex.Matches(pathD, @"([a-zA-Z])|(-?\d*\.?\d+)");
+                float currentX = 0, currentY = 0;
+                float startX = 0, startY = 0;
+                bool hasPoint = false;
+                float pt = 0.75f;
+
+                for (int i = 0; i < matches.Count; i++)
+                {
+                    var token = matches[i].Value;
+                    if (char.IsLetter(token[0]))
+                    {
+                        char cmd = token[0];
+                        bool isRel = char.IsLower(cmd);
+                        char upperCmd = char.ToUpper(cmd);
+
+                        if (upperCmd == 'Z')
+                        {
+                            canvas.ClosePath();
+                            currentX = startX; currentY = startY;
+                            continue;
+                        }
+
+                        while (i + 1 < matches.Count && !char.IsLetter(matches[i + 1].Value[0]))
+                        {
+                            float p1 = ParseFloat(matches[++i].Value);
+                            float p2 = ParseFloat(matches[++i].Value);
+
+                            if (upperCmd == 'M')
+                            {
+                                if (!hasPoint) { startX = p1; startY = p2; hasPoint = true; }
+                                if (!isRel) { currentX = p1; currentY = p2; }
+                                else { currentX += p1; currentY += p2; }
+                                
+                                // MoveTo
+                                canvas.MoveTo(baseX + currentX * pt, baseY + height - (currentY * pt));
+                                upperCmd = 'L'; // Subsequent pairs are LineTo
+                            }
+                            else if (upperCmd == 'L')
+                            {
+                                if (!isRel) { currentX = p1; currentY = p2; }
+                                else { currentX += p1; currentY += p2; }
+                                canvas.LineTo(baseX + currentX * pt, baseY + height - (currentY * pt));
+                            }
+                            else if (upperCmd == 'C')
+                            {
+                                float p3 = ParseFloat(matches[++i].Value);
+                                float p4 = ParseFloat(matches[++i].Value);
+                                float p5 = ParseFloat(matches[++i].Value);
+                                float p6 = ParseFloat(matches[++i].Value);
+                                
+                                float x1 = p1, y1 = p2, x2 = p3, y2 = p4, x3 = p5, y3 = p6;
+                                if (isRel)
+                                {
+                                    x1 += currentX; y1 += currentY;
+                                    x2 += currentX; y2 += currentY;
+                                    x3 += currentX; y3 += currentY;
+                                }
+                                
+                                canvas.CurveTo(
+                                    baseX + x1 * pt, baseY + height - (y1 * pt),
+                                    baseX + x2 * pt, baseY + height - (y2 * pt),
+                                    baseX + x3 * pt, baseY + height - (y3 * pt)
+                                );
+                                currentX = x3; currentY = y3;
+                            }
+                            
+                            // Break if next token is a letter
+                            if (i + 1 >= matches.Count || char.IsLetter(matches[i + 1].Value[0])) break;
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private float ParseFloat(string s)
+        {
+            return float.Parse(s, CultureInfo.InvariantCulture);
         }
 
         private static string SanitizeFieldName(string s)
