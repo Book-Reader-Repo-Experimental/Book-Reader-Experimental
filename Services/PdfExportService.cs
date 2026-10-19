@@ -139,84 +139,136 @@ namespace BookViewer.Services
                 }
             }
         }
-
+        
         private void InjectInteractiveElements(PdfDocument pdf, string html, int pageIndex)
         {
             var form = PdfAcroForm.GetAcroForm(pdf, true);
             if (form == null) return;
-
+        
             var pdfPage = pdf.GetPage(1);
             float pageHeight = pdfPage.GetPageSize().GetHeight();
-            int btnCounter = 0;
-
-            // 1. Only HAS2 and HSG buttons are real toggles
+            var helveticaFont = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
+        
+            // ---- Toggle buttons (only has2btn/hsgbtn) ----
             var buttonRegex = new Regex(
                 @"<img\b(?=[^>]*\bclass=[""']?[^""']*(?:hsgbtn|has2btn)[^""']*[""']?)(?=[^>]*\bid=[""']([^""']+)[""'])(?=[^>]*\b(?:linkname|name)=[""']([^""']+)[""'])[^>]*>",
                 RegexOptions.IgnoreCase);
             var buttonMatches = buttonRegex.Matches(html);
             DebugLog($"[INJ] Page {pageIndex}: toggle buttons matched = {buttonMatches.Count}");
             if (buttonMatches.Count == 0) return;
-
-            // 2. Group answers by <has2 name="...">
-            var answerGroups = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-
-            var answerDivRegex = new Regex(
-                @"<div\b(?<divtag>[^>]*\bclass=[""'][^""']*\b(?:tbred|tbnote)\b[^""']*[""'][^>]*)>(?<body>[\s\S]*?)</div>",
+        
+            // ---- For each button, gather its fragment divs in DOM order ----
+            // The fragment divs are the ones whose inner <has2> matches the button's linkname.
+            var fragmentRegex = new Regex(
+                @"<div\b(?<divtag>[^>]*\bclass=[""'][^""']*\b(?:tbred|tbnote)\b[^""']*[""'][^>]*)>" +
+                @"(?<body>[\s\S]*?)</div>",
                 RegexOptions.IgnoreCase);
-
-            foreach (Match am in answerDivRegex.Matches(html))
+        
+            // Build a dictionary: linkname -> list of fragments
+            var fragmentsByKey = new Dictionary<string, List<FragmentInfo>>(StringComparer.OrdinalIgnoreCase);
+        
+            foreach (Match fm in fragmentRegex.Matches(html))
             {
-                string divTag = am.Groups["divtag"].Value;
-                string body = am.Groups["body"].Value;
-
-                var keyMatch = Regex.Match(body,
-                    @"<has2\b[^>]*\bname=[""']([^""']+)[""']",
-                    RegexOptions.IgnoreCase);
-                if (!keyMatch.Success)
-                {
-                    keyMatch = Regex.Match(divTag,
-                        @"\b(?:linkname|name)=[""']([^""']+)[""']",
-                        RegexOptions.IgnoreCase);
-                    if (!keyMatch.Success) continue;
-                }
-
+                string divTag = fm.Groups["divtag"].Value;
+                string body = fm.Groups["body"].Value;
+        
+                // Get the group key from <has2 name="...">
+                var keyMatch = Regex.Match(body, @"<has2\b[^>]*\bname=[""']([^""']+)[""']", RegexOptions.IgnoreCase);
+                if (!keyMatch.Success) continue;
+        
                 string key = SanitizeFieldName(keyMatch.Groups[1].Value);
-
+        
+                // Extract text (strip has2 tags)
                 string clean = Regex.Replace(body, "<[^>]+>", " ");
                 clean = System.Net.WebUtility.HtmlDecode(clean);
                 clean = Regex.Replace(clean, @"\s+", " ").Trim();
                 if (string.IsNullOrEmpty(clean)) continue;
-
-                if (!answerGroups.TryGetValue(key, out var list))
+        
+                // Extract position and width from the div's own style
+                float leftPx = 0f, topPx = 0f, widthPx = 0f;
+                var styleMatch = Regex.Match(divTag,
+                    @"style=[""'][^""']*left:\s*([\d\.]+)px[^""']*top:\s*([\d\.]+)px[^""']*width:\s*([\d\.]+)px",
+                    RegexOptions.IgnoreCase);
+                if (!styleMatch.Success) continue;
+        
+                leftPx = float.Parse(styleMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+                topPx = float.Parse(styleMatch.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
+                widthPx = float.Parse(styleMatch.Groups[3].Value, System.Globalization.CultureInfo.InvariantCulture);
+        
+                if (!fragmentsByKey.TryGetValue(key, out var list))
                 {
-                    list = new List<string>();
-                    answerGroups[key] = list;
+                    list = new List<FragmentInfo>();
+                    fragmentsByKey[key] = list;
                 }
-                list.Add(clean);
+        
+                list.Add(new FragmentInfo
+                {
+                    Text = clean,
+                    LeftPx = leftPx,
+                    TopPx = topPx,
+                    WidthPx = widthPx
+                });
             }
-
-            var answers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var kv in answerGroups)
-            {
-                bool allShort = kv.Value.All(v => v.Length <= 2);
-                string joined = allShort ? string.Concat(kv.Value) : string.Join(" ", kv.Value);
-                answers[kv.Key] = joined;
-            }
-
-            DebugLog($"[INJ] Page {pageIndex}: answer groups = {answers.Count}");
-            foreach (var kv in answers.Take(3))
-                DebugLog($"[INJ]   sample key='{kv.Key}' -> '{(kv.Value.Length > 60 ? kv.Value.Substring(0, 60) + "..." : kv.Value)}'");
-
-            var helveticaFont = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
-
+        
+            DebugLog($"[INJ] Page {pageIndex}: fragments grouped = {fragmentsByKey.Count}");
+            foreach (var kv in fragmentsByKey.Take(3))
+                DebugLog($"[INJ]   group '{kv.Key}' -> {kv.Value.Count} fragment(s): '{kv.Value[0].Text}' at ({kv.Value[0].LeftPx}, {kv.Value[0].TopPx})");
+        
+            // ---- Create answer fields for each fragment, toggle buttons for each button ----
+            int btnCounter = 0;
             foreach (Match buttonMatch in buttonMatches)
             {
                 var imgId = SanitizeFieldName(buttonMatch.Groups[1].Value);
                 var linkName = SanitizeFieldName(buttonMatch.Groups[2].Value);
-                var fieldId = $"A_{pageIndex}_{linkName}";
-
-                string answerText = answers.TryGetValue(linkName, out var at) ? at : "";
-
+        
+                if (!fragmentsByKey.TryGetValue(linkName, out var fragments) || fragments.Count == 0)
+                {
+                    DebugLog($"[INJ] Page {pageIndex} {linkName}: no fragments");
+                    continue;
+                }
+        
+                // Create one form field per fragment, all toggled by the single button
+                var fieldIdsForThisGroup = new List<string>();
+                for (int f = 0; f < fragments.Count; f++)
+                {
+                    var frag = fragments[f];
+                    var fieldId = $"A_{pageIndex}_{linkName}_f{f}";
+        
+                    // Fragment div gives us the exact position and width of the blank
+                    float x = frag.LeftPx * 0.75f;
+                    float y = pageHeight - (frag.TopPx * 0.75f) - 18f;
+                    float w = Math.Max(frag.WidthPx * 0.75f, 40f); // at least 40pt wide
+                    float h = 18f;
+        
+                    var textRect = new Rectangle(x, y, w, h);
+                    var textField = new TextFormFieldBuilder(pdf, fieldId)
+                        .SetWidgetRectangle(textRect)
+                        .CreateText();
+        
+                    textField.SetValue(frag.Text);
+                    textField.SetReadOnly(true);
+        
+                    foreach (var wg in textField.GetWidgets())
+                    {
+                        wg.SetBorder(new PdfArray(new PdfNumber[] {
+                            new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
+                        wg.SetFlags(PdfAnnotation.PRINT);
+        
+                        var apStream = new PdfFormXObject(textRect);
+                        var canvas = new PdfCanvas(apStream, pdf);
+                        canvas.BeginText();
+                        canvas.SetFontAndSize(helveticaFont, 11);
+                        canvas.SetTextMatrix(1, 2);
+                        canvas.ShowText(frag.Text);
+                        canvas.EndText();
+                        canvas.Release();
+                        wg.SetAppearance(PdfName.N, apStream.GetPdfObject());
+                    }
+                    form.AddField(textField, pdfPage);
+                    fieldIdsForThisGroup.Add(fieldId);
+                }
+        
+                // Create the toggle button at the button's own position
                 float leftPx = 0f, topPx = 0f;
                 var styleMatch = Regex.Match(buttonMatch.Value,
                     @"style=[""'][^""']*left:\s*([\d\.]+)px[^""']*top:\s*([\d\.]+)px",
@@ -226,85 +278,61 @@ namespace BookViewer.Services
                     leftPx = float.Parse(styleMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
                     topPx = float.Parse(styleMatch.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
                 }
-                float x = leftPx * 0.75f;
-                float y = pageHeight - (topPx * 0.75f) - 24f;
-
-                DebugLog($"[INJ] Page {pageIndex} {fieldId}: '{(answerText.Length > 40 ? answerText.Substring(0, 40) + "..." : answerText)}' len={answerText.Length}");
-
-                // ---- Answer field (with custom appearance stream) ----
-                var textRect = new Rectangle(x + 25, y, 500, 24);
-                var textField = new TextFormFieldBuilder(pdf, fieldId)
-                    .SetWidgetRectangle(textRect)
-                    .CreateText();
-
-                textField.SetValue(answerText);
-                textField.SetReadOnly(true);
-
-                foreach (var w in textField.GetWidgets())
-                {
-                    w.SetBorder(new PdfArray(new PdfNumber[] {
-                        new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
-                    w.SetFlags(PdfAnnotation.PRINT);
-
-                    var apStream = new PdfFormXObject(textRect);
-                    var canvas = new PdfCanvas(apStream, pdf);
-                    canvas.BeginText();
-                    canvas.SetFontAndSize(helveticaFont, 10);
-                    canvas.SetTextMatrix(5, 5);
-                    canvas.ShowText(answerText ?? "");
-                    canvas.EndText();
-                    canvas.Release();
-                    w.SetAppearance(PdfName.N, apStream.GetPdfObject());
-                }
-                form.AddField(textField, pdfPage);
-
-                // ---- Toggle button ----
-                var buttonRect = new Rectangle(x, y, 24, 24);
+                float bx = leftPx * 0.75f;
+                float by = pageHeight - (topPx * 0.75f) - 24f;
+        
+                var buttonRect = new Rectangle(bx, by, 24, 24);
                 var toggleFieldName = $"T_{pageIndex}_{imgId}_{btnCounter++}";
                 var buttonField = new PushButtonFormFieldBuilder(pdf, toggleFieldName)
                     .SetWidgetRectangle(buttonRect)
                     .SetCaption("")
                     .CreatePushButton();
-
-                // The JavaScript now forces Chrome to redraw the text by resetting the value
-                var toggleScript =
-                    "try {" +
-                    $"var f = this.getField('{fieldId}'); " +
-                    "if (f) {" +
-                    "f.display = (f.display === 1) ? 0 : 1;" +
-                    "var v = f.value; f.value = ''; f.value = v;" +
-                    "}" +
-                    "} catch(e) {}";
-                
-                var jsAction = PdfAction.CreateJavaScript(toggleScript);
-
-                foreach (var w in buttonField.GetWidgets())
+        
+                // JS toggles ALL fields in this group
+                var toggleScript = "try {";
+                foreach (var id in fieldIdsForThisGroup)
                 {
-                    w.SetHighlightMode(PdfAnnotation.HIGHLIGHT_PUSH);
-                    w.SetFlags(PdfAnnotation.PRINT);
-                    w.SetBorder(new PdfArray(new PdfNumber[] {
+                    toggleScript += $"var f_{id.Replace("-", "_")} = this.getField('{id}'); " +
+                                    $"if (f_{id.Replace("-", "_")}) {{ " +
+                                    $"f_{id.Replace("-", "_")}.display = (f_{id.Replace("-", "_")}.display === 1) ? 0 : 1; " +
+                                    $"var v = f_{id.Replace("-", "_")}.value; " +
+                                    $"f_{id.Replace("-", "_")}.value = ''; " +
+                                    $"f_{id.Replace("-", "_")}.value = v; }} ";
+                }
+                toggleScript += "} catch(e) {}";
+        
+                var jsAction = PdfAction.CreateJavaScript(toggleScript);
+        
+                foreach (var wg in buttonField.GetWidgets())
+                {
+                    wg.SetHighlightMode(PdfAnnotation.HIGHLIGHT_PUSH);
+                    wg.SetFlags(PdfAnnotation.PRINT);
+                    wg.SetBorder(new PdfArray(new PdfNumber[] {
                         new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
-
-                    w.Put(PdfName.A, jsAction.GetPdfObject());
-
+                    wg.Put(PdfName.A, jsAction.GetPdfObject());
                     var aaDict = new PdfDictionary();
                     aaDict.Put(PdfName.U, jsAction.GetPdfObject());
-                    w.Put(PdfName.AA, aaDict);
-
+                    wg.Put(PdfName.AA, aaDict);
                     var mkDict = new PdfDictionary();
                     mkDict.Put(PdfName.CA, new PdfString(""));
-                    w.GetPdfObject().Put(PdfName.MK, mkDict);
-
+                    wg.GetPdfObject().Put(PdfName.MK, mkDict);
                     var ap = new PdfFormXObject(new Rectangle(0, 0, 24, 24));
-                    w.SetAppearance(PdfName.N, ap.GetPdfObject());
+                    wg.SetAppearance(PdfName.N, ap.GetPdfObject());
                 }
-
                 var fieldAA = new PdfDictionary();
                 fieldAA.Put(PdfName.U, jsAction.GetPdfObject());
                 buttonField.GetPdfObject().Put(PdfName.AA, fieldAA);
-
+        
                 form.AddField(buttonField, pdfPage);
             }
+        }
+        
+        private class FragmentInfo
+        {
+            public string Text { get; set; } = "";
+            public float LeftPx { get; set; }
+            public float TopPx { get; set; }
+            public float WidthPx { get; set; }
         }
 
         private static string SanitizeFieldName(string s)
