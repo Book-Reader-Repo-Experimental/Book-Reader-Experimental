@@ -1755,6 +1755,67 @@ img.resbtn:active { opacity: .6 !important; }
             finally { _showTeacherNotes = prevT; _showStudentAnswers = prevS; }
         }
 
+        public async Task<string> BuildPageHtmlForPdfExportAsync(string filePath)
+        {
+            // This method deliberately DOES NOT strip the answers or red buttons.
+            // The PDF exporter needs them in the HTML so it can read the text
+            // and find the button positions to recreate them as interactive PDF elements.
+            bool prevT = _showTeacherNotes, prevS = _showStudentAnswers;
+            _showTeacherNotes = false;
+            _showStudentAnswers = false;
+            try
+            {
+                var rawHtml = await File.ReadAllTextAsync(filePath);
+        
+                string directory = Path.GetDirectoryName(filePath) ?? "";
+                string fileName = Path.GetFileName(filePath) ?? "";
+                if (!IsPureStepsFile(fileName)) return rawHtml;
+        
+                string nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
+                string redFilePath = Path.Combine(directory, nameWithoutExt + "_redAnswer.html");
+                bool hasRedFile = File.Exists(redFilePath);
+        
+                string baseRaw = await ReadIfExists(Path.Combine(directory, nameWithoutExt + "_base.html"));
+                string oriRaw  = await ReadIfExists(Path.Combine(directory, nameWithoutExt + "_ori.html"));
+                string redHtml = await ReadIfExists(redFilePath);
+        
+                // *** KEY CHANGE: do NOT call StripAnswerDivs here ***
+                string baseHtml = baseRaw;
+                string oriHtml  = oriRaw;
+        
+                string fontCss = await GetFontCssWithEmbeddedFonts(directory);
+                _lastFontCss = fontCss;
+        
+                int pageWidth = 1024, pageHeight = 1344;
+                var rezMatch = Regex.Match(rawHtml, @"id\s*=\s*[""']rez[""'][^>]*style\s*=\s*[""'][^""']*width\s*:\s*(\d+)px[^""']*height\s*:\s*(\d+)px", RegexOptions.IgnoreCase);
+                if (rezMatch.Success)
+                {
+                    if (int.TryParse(rezMatch.Groups[1].Value, out int w)) pageWidth = w;
+                    if (int.TryParse(rezMatch.Groups[2].Value, out int h)) pageHeight = h;
+                }
+        
+                CurrentPageWidth = pageWidth;
+                CurrentPageHeight = pageHeight;
+        
+                string skeleton = rawHtml;
+                skeleton = Regex.Replace(skeleton, @"(<pane\s+class=""base""[^>]*>)([\s\S]*?)(</pane>)", m => m.Groups[1].Value + baseHtml + m.Groups[3].Value, RegexOptions.IgnoreCase);
+                skeleton = Regex.Replace(skeleton, @"(<pane\s+class=""ori""[^>]*>)([\s\S]*?)(</pane>)", m => m.Groups[1].Value + oriHtml + m.Groups[3].Value, RegexOptions.IgnoreCase);
+                skeleton = Regex.Replace(skeleton, @"(<pane\s+class=""redAnswer""[^>]*>)([\s\S]*?)(</pane>)", m => m.Groups[1].Value + redHtml + m.Groups[3].Value, RegexOptions.IgnoreCase);
+        
+                var resButtons = await BuildResourceButtonsAsync(directory, nameWithoutExt);
+                if (!string.IsNullOrEmpty(resButtons)) skeleton = skeleton + resButtons;
+        
+                skeleton = InlineAllAssets(skeleton, directory);
+                return BuildFinalHtml(skeleton, fontCss, pageWidth, pageHeight, fileName);
+            }
+            finally
+            {
+                _showTeacherNotes = prevT;
+                _showStudentAnswers = prevS;
+            }
+        }
+                
+
         public void NavigatePrevious() { if (_currentPageIndex > 0) _ = LoadPageAsync(_currentPageIndex - 1); }
         public void NavigateNext() { if (_currentPageIndex < _pageFiles.Count - 1) _ = LoadPageAsync(_currentPageIndex + 1); }
         public void ToggleAnswers(bool show) { OnToggleAnswersRequested?.Invoke(this, show); OnStatusChanged?.Invoke(this, show ? "Answers shown" : "Answers hidden"); }
