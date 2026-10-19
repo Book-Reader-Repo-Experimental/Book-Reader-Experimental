@@ -258,7 +258,7 @@ namespace BookViewer.Services
                 }
                 form.AddField(textField, pdfPage);
 
-                // ---- Toggle button (The critical part) ----
+                // ---- Toggle button ----
                 var buttonRect = new Rectangle(x, y, 24, 24);
                 var toggleFieldName = $"T_{pageIndex}_{imgId}_{btnCounter++}";
                 var buttonField = new PushButtonFormFieldBuilder(pdf, toggleFieldName)
@@ -266,11 +266,14 @@ namespace BookViewer.Services
                     .SetCaption("")
                     .CreatePushButton();
 
-                // Use PdfAction.CreateJavaScript for correct encoding
+                // The JavaScript now forces Chrome to redraw the text by resetting the value
                 var toggleScript =
                     "try {" +
                     $"var f = this.getField('{fieldId}'); " +
-                    "if (f) { f.display = (f.display === 1) ? 0 : 1; }" +
+                    "if (f) {" +
+                    "f.display = (f.display === 1) ? 0 : 1;" +
+                    "var v = f.value; f.value = ''; f.value = v;" +
+                    "}" +
                     "} catch(e) {}";
                 
                 var jsAction = PdfAction.CreateJavaScript(toggleScript);
@@ -282,25 +285,20 @@ namespace BookViewer.Services
                     w.SetBorder(new PdfArray(new PdfNumber[] {
                         new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
 
-                    // 1. Attach to the annotation's /A entry
                     w.Put(PdfName.A, jsAction.GetPdfObject());
 
-                    // 2. Attach to the annotation's /AA (Additional Actions) for Mouse Up
                     var aaDict = new PdfDictionary();
                     aaDict.Put(PdfName.U, jsAction.GetPdfObject());
                     w.Put(PdfName.AA, aaDict);
 
-                    // 3. Appearance Characteristics (MK) so Acrobat treats it as a button
                     var mkDict = new PdfDictionary();
                     mkDict.Put(PdfName.CA, new PdfString(""));
                     w.GetPdfObject().Put(PdfName.MK, mkDict);
 
-                    // 4. Transparent appearance stream so it has a hitbox
                     var ap = new PdfFormXObject(new Rectangle(0, 0, 24, 24));
                     w.SetAppearance(PdfName.N, ap.GetPdfObject());
                 }
 
-                // 5. Attach to the FIELD's /AA entry as well
                 var fieldAA = new PdfDictionary();
                 fieldAA.Put(PdfName.U, jsAction.GetPdfObject());
                 buttonField.GetPdfObject().Put(PdfName.AA, fieldAA);
