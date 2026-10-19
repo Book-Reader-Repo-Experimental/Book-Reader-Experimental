@@ -149,10 +149,15 @@ namespace BookViewer.Services
             var pdfPage = pdf.GetPage(1);
             float pageHeight = pdfPage.GetPageSize().GetHeight();
 
-            // 1. Extract Font
+            // 1. Try to extract the exact font from the HTML's CSS
             PdfFont answerFont = null;
+            float fontSize = 11f;
             try
             {
+                // Check if a font family is defined in the HTML CSS
+                var fontFamilyMatch = Regex.Match(html, @"font-family:\s*['""]?([^'"";]+)['""]?", RegexOptions.IgnoreCase);
+                string fontFamily = fontFamilyMatch.Success ? fontFamilyMatch.Groups[1].Value.Trim() : "helvetica";
+
                 var fontFaceMatch = Regex.Match(html, @"@font-face\s*\{[^}]*\}", RegexOptions.IgnoreCase);
                 if (fontFaceMatch.Success)
                 {
@@ -164,14 +169,22 @@ namespace BookViewer.Services
                         var fontFile = Path.Combine(tempDir, $"page_{pageIndex}_font.ttf");
                         await File.WriteAllBytesAsync(fontFile, fontBytes);
                         answerFont = PdfFontFactory.CreateFont(fontFile, PdfEncodings.IDENTITY_H);
+                        DebugLog($"[INJ] Page {pageIndex}: Extracted custom font '{fontFamily}'.");
                     }
                 }
             }
             catch { }
+            
+            // Fallback to standard font if extraction failed
             if (answerFont == null)
-                answerFont = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
+            {
+                // If the book uses a serif font, use Times. Otherwise Helvetica.
+                answerFont = Regex.IsMatch(html, @"font-family:\s*['""]?([^'"";]*serif[^'"";]*)", RegexOptions.IgnoreCase) 
+                    ? PdfFontFactory.CreateFont(StandardFonts.TIMES_ROMAN) 
+                    : PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
+            }
 
-            // 2. Parse Text Answers (Added +2f to fix vertical shift)
+            // 2. Parse Text Answers
             var fragmentRegex = new Regex(
                 @"<div\b(?<divtag>[^>]*\bclass=[""'][^""']*\b(?:tbred|tbnote)\b[^""']*[""'][^>]*)>(?<body>[\s\S]*?)</div>",
                 RegexOptions.IgnoreCase);
@@ -205,7 +218,9 @@ namespace BookViewer.Services
 
                 float pxToPt = 0.75f;
                 float x = leftPx * pxToPt;
-                float y = pageHeight - (topPx * pxToPt) + 2f; // +2f shifts text slightly down to match HTML baseline
+                
+                // Exact vertical shift correction: shift down by a small baseline amount
+                float y = pageHeight - (topPx * pxToPt) - 3f; 
                 float w = Math.Max(widthPx * pxToPt, 40f);
 
                 if (!answerData.TryGetValue(key, out var list))
@@ -267,8 +282,7 @@ namespace BookViewer.Services
             var allFieldIds = new List<string>();
             int btnCounter = 0;
 
-            // The exact red from the book's SVG stroke/fill
-            Color bookRed = new DeviceRgb(228, 4, 119); // #E40477
+            iText.Kernel.Colors.Color bookRed = new DeviceRgb(228, 4, 119); // #E40477
 
             foreach (Match buttonMatch in buttonMatches)
             {
@@ -312,9 +326,9 @@ namespace BookViewer.Services
                             var apStream = new PdfFormXObject(textRect);
                             var canvas = new PdfCanvas(apStream, pdf);
                             canvas.BeginText();
-                            canvas.SetFontAndSize(answerFont, 11);
+                            canvas.SetFontAndSize(answerFont, fontSize);
                             canvas.SetTextMatrix(2, 4);
-                            canvas.SetFillColor(bookRed); // EXACT BOOK RED
+                            canvas.SetFillColor(bookRed);
                             canvas.ShowText(ans.text);
                             canvas.EndText();
                             canvas.Release();
@@ -348,10 +362,9 @@ namespace BookViewer.Services
                             var apStream = new PdfFormXObject(shapeRect);
                             var canvas = new PdfCanvas(apStream, pdf);
                             
-                            canvas.SetStrokeColor(bookRed); // EXACT BOOK RED
+                            canvas.SetStrokeColor(bookRed);
                             canvas.SetLineWidth(1.0f);
                             
-                            // 1:1 SVG path parser
                             DrawSvgPath(canvas, shape.pathD, shape.x, shape.y, shape.h);
                             canvas.Stroke();
                             canvas.Release();
@@ -419,7 +432,6 @@ namespace BookViewer.Services
             }
         }
 
-        // Accurate SVG Path Parser (Handles relative/absolute M, L, C, Z)
         private void DrawSvgPath(PdfCanvas canvas, string pathD, float baseX, float baseY, float height)
         {
             try
