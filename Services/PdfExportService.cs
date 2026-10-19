@@ -171,7 +171,7 @@ namespace BookViewer.Services
             if (answerFont == null)
                 answerFont = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
 
-            // 2. Parse text answers
+            // 2. Parse text answers (mapping linkName -> text AND its exact coordinates)
             var fragmentRegex = new Regex(
                 @"<div\b(?<divtag>[^>]*\bclass=[""'][^""']*\b(?:tbred|tbnote)\b[^""']*[""'][^>]*)>(?<body>[\s\S]*?)</div>",
                 RegexOptions.IgnoreCase);
@@ -206,7 +206,6 @@ namespace BookViewer.Services
                 float pxToPt = 0.75f;
                 float x = leftPx * pxToPt;
                 float y = pageHeight - (topPx * pxToPt) - 18f; 
-                // Keep the width exactly as specified in the div, but enforce a minimum of 40pt to fit text
                 float w = Math.Max(widthPx * pxToPt, 40f);
 
                 if (!answerData.TryGetValue(key, out var list))
@@ -214,7 +213,7 @@ namespace BookViewer.Services
                 list.Add((clean, x, y, w));
             }
 
-            // 3. Parse SVG circles
+            // 3. Parse SVG circles (ONLY extract their bounding box)
             var svgRegex = new Regex(
                 @"<svg\b(?<tag>[^>]*\bclass=[""'][^""']*\btbred\b[^""']*[""'][^>]*)>(?<content>[\s\S]*?)</svg>",
                 RegexOptions.IgnoreCase);
@@ -330,6 +329,7 @@ namespace BookViewer.Services
                         var fieldId = $"S_{pageIndex}_{linkName}_{f}";
                         allFieldIds.Add(fieldId);
 
+                        // The SVG width/height from HTML is exactly what we need to draw
                         var shapeRect = new Rectangle(shape.x, shape.y, shape.w, shape.h);
                         
                         var textField = new TextFormFieldBuilder(pdf, fieldId)
@@ -348,7 +348,8 @@ namespace BookViewer.Services
                             canvas.SetStrokeColor(ColorConstants.RED);
                             canvas.SetLineWidth(1.0f);
                             
-                            // Draw path without scaling because coordinates are absolute
+                            // Draw path without scaling. Because coordinates are absolute, 
+                            // we just map them relative to the shape's bounding box.
                             DrawSvgPathNoScale(canvas, shape.pathD, shape.x, shape.y, shape.h);
                             canvas.Stroke();
                             canvas.Release();
