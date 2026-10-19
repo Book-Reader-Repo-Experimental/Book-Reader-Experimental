@@ -1,13 +1,15 @@
 using iText.Html2pdf;
 using iText.Html2pdf.Resolver.Font;
 using iText.Kernel.Pdf;
-using iText.Kernel.Utils;
-using iText.Kernel.Geom;
-using iText.Forms;
-using iText.Forms.Fields;
+using iText.Kernel.Pdf.Canvas;
+using iText.Kernel.Pdf.Xobject;
 using iText.Kernel.Pdf.Action;
 using iText.Kernel.Pdf.Annot;
-using iText.Kernel.Pdf.Xobject;
+using iText.Kernel.Geom;
+using iText.Kernel.Font;
+using iText.Kernel.Utils;
+using iText.Forms;
+using iText.Forms.Fields;
 using iText.Kernel.Colors;
 using System;
 using System.Collections.Generic;
@@ -46,7 +48,6 @@ namespace BookViewer.Services
 
                 var converterProperties = new ConverterProperties();
                 converterProperties.SetFontProvider(new DefaultFontProvider(true, true, true));
-                // We manually create form fields in C#, so we don't need iText to parse <input> tags
                 converterProperties.SetCreateAcroForm(false);
 
                 var pageSize = new PageSize(768f, 1008f);
@@ -56,8 +57,6 @@ namespace BookViewer.Services
                     OnProgress?.Invoke(this, (int)((i / (double)totalPages) * 100));
 
                     var filePath = _bookService.PageFiles[i];
-                    
-                    // USE THE NEW METHOD that preserves answers and buttons in the HTML
                     string html = await _bookService.BuildPageHtmlForPdfExportAsync(filePath);
 
                     html = InjectPdfCss(html);
@@ -118,27 +117,28 @@ namespace BookViewer.Services
             if (string.IsNullOrEmpty(s)) return "x";
             return Regex.Replace(s, @"[^A-Za-z0-9_\-]", "_");
         }
-        
+
         private void InjectInteractiveElements(PdfDocument pdf, string html, int pageIndex)
         {
             var form = PdfAcroForm.GetAcroForm(pdf, true);
             if (form == null) return;
-        
+
             var pdfPage = pdf.GetPage(1);
             float pageHeight = pdfPage.GetPageSize().GetHeight();
             int btnCounter = 0;
-        
+
             var buttonRegex = new Regex(
                 @"<img\b(?=[^>]*\bclass=""[^""]*(?:redbtn|hsgbtn|has2btn)[^""]*"")(?=[^>]*\bid=""([^""]+)"")(?=[^>]*\blinkname=""([^""]+)"")[^>]*>",
                 RegexOptions.IgnoreCase);
             var matches = buttonRegex.Matches(html);
+
             if (matches.Count == 0) return;
-        
+
             var answers = new Dictionary<string, string>();
             var answerRegex = new Regex(
                 @"<div\b[^>]*class=""[^""]*\b(?:tbred|tbnote)\b[^""]*""([^>]*)>([\s\S]*?)</div>",
                 RegexOptions.IgnoreCase);
-        
+
             foreach (Match m in answerRegex.Matches(html))
             {
                 var attrs = m.Groups[1].Value;
@@ -150,15 +150,18 @@ namespace BookViewer.Services
                     answers[SanitizeFieldName(linkMatch.Groups[1].Value)] = cleanText;
                 }
             }
-        
+
             var allFieldIds = new List<string>();
-        
+
+            // Use Helvetica so text always renders without needing fonts embedded in the HTML
+            var helveticaFont = PdfFontFactory.CreateFont(PdfFontFactory.HELVETICA);
+
             foreach (Match buttonMatch in matches)
             {
                 var imgId = SanitizeFieldName(buttonMatch.Groups[1].Value);
                 var linkName = SanitizeFieldName(buttonMatch.Groups[2].Value);
                 var fieldId = $"AnswerField_{pageIndex}_{linkName}";
-        
+
                 float leftPx = 0f, topPx = 0f;
                 var styleMatch = Regex.Match(buttonMatch.Value,
                     @"style=""[^""]*left:\s*([\d\.]+)px[^""]*top:\s*([\d\.]+)px",
@@ -168,61 +171,76 @@ namespace BookViewer.Services
                     leftPx = float.Parse(styleMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
                     topPx = float.Parse(styleMatch.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
                 }
-        
+
                 float x = leftPx * 0.75f;
                 float y = pageHeight - (topPx * 0.75f) - 24f;
-        
-                // Text Field
+
+                // -------- Text Field --------
                 var textRect = new Rectangle(x + 25, y, 250, 24);
                 var textField = new TextFormFieldBuilder(pdf, fieldId)
                     .SetWidgetRectangle(textRect)
                     .CreateText();
-        
+
                 string answerText = answers.ContainsKey(linkName) ? answers[linkName] : "";
                 textField.SetValue(answerText);
-        
-                // CRITICAL: Read-only forces Acrobat to generate an appearance stream
-                // from the value, so the answer text is actually visible.
                 textField.SetReadOnly(true);
-        
+                textField.SetDefaultAppearance("0 0 0 rg /Helv 12 Tf");
+
                 foreach (var w in textField.GetWidgets())
                 {
                     w.SetBorder(new PdfArray(new PdfNumber[] {
                         new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
                     w.SetFlags(PdfAnnotation.PRINT);
-                    w.SetColor(ColorConstants.BLACK);
+
+                    // --- Force appearance stream so the text is drawn no matter what ---
+                    var apStream = new PdfFormXObject(textRect);
+                    var canvas = new PdfCanvas(apStream, pdf);
+                    canvas.BeginText();
+                    canvas.SetFontAndSize(helveticaFont, 12);
+                    canvas.SetTextMatrix(5, 5);
+                    canvas.ShowText(answerText ?? "");
+                    canvas.EndText();
+                    canvas.Release();
+
+                    w.SetAppearance(PdfName.N, apStream.GetPdfObject());
                 }
                 form.AddField(textField, pdfPage);
                 allFieldIds.Add(fieldId);
-        
-                // Button
+
+                // -------- Toggle Button --------
                 var buttonRect = new Rectangle(x, y, 24, 24);
                 var toggleFieldName = $"Toggle_{pageIndex}_{imgId}_{btnCounter++}";
                 var buttonField = new PushButtonFormFieldBuilder(pdf, toggleFieldName)
                     .SetWidgetRectangle(buttonRect)
                     .SetCaption("")
                     .CreatePushButton();
-        
+
                 foreach (var w in buttonField.GetWidgets())
                 {
                     w.SetHighlightMode(PdfAnnotation.HIGHLIGHT_PUSH);
                     w.SetFlags(PdfAnnotation.PRINT);
                     w.SetBorder(new PdfArray(new PdfNumber[] {
                         new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
+
                     var ap = new PdfFormXObject(new Rectangle(0, 0, 24, 24));
                     w.SetAppearance(PdfName.N, ap.GetPdfObject());
                 }
-        
+
+                // -------- JavaScript --------
                 string toggleScript;
                 if (linkName.Equals("all", StringComparison.OrdinalIgnoreCase) ||
                     linkName.Equals("allanswers", StringComparison.OrdinalIgnoreCase))
                 {
                     toggleScript = "var anyVisible = false;\n";
                     foreach (var id in allFieldIds)
+                    {
                         toggleScript += $"var f_{id} = this.getField(\"{id}\"); if (f_{id} && f_{id}.display === 0) anyVisible = true;\n";
+                    }
                     toggleScript += "var newDisplay = anyVisible ? 1 : 0;\n";
                     foreach (var id in allFieldIds)
+                    {
                         toggleScript += $"var f_{id} = this.getField(\"{id}\"); if (f_{id}) f_{id}.display = newDisplay;\n";
+                    }
                 }
                 else
                 {
@@ -230,9 +248,9 @@ namespace BookViewer.Services
                         $"var f = this.getField(\"{fieldId}\"); " +
                         $"if (f) {{ f.display = (f.display === 1) ? 0 : 1; }}";
                 }
-        
+
                 var action = PdfAction.CreateJavaScript(toggleScript);
-        
+
                 foreach (var w in buttonField.GetWidgets())
                 {
                     w.Put(PdfName.A, action.GetPdfObject());
@@ -241,7 +259,7 @@ namespace BookViewer.Services
                     w.Put(PdfName.AA, aaDict);
                 }
                 buttonField.SetAdditionalAction(PdfName.U, action);
-        
+
                 form.AddField(buttonField, pdfPage);
             }
         }
@@ -257,7 +275,7 @@ namespace BookViewer.Services
     img.redbtn, img.hsgbtn, img.has2btn { display: inline-block !important; visibility: visible !important; opacity: 1 !important; }
     img { max-width: 100% !important; height: auto !important; }
 
-    /* Keep answers hidden in the background so we can overlay the interactive fields */
+    /* Hide the HTML answer divs so the widget we draw on top is the only visible one */
     div.tbred, div.tbnote { display: none !important; }
 </style>
 ";
