@@ -218,7 +218,7 @@ namespace BookViewer.Services
 
             // 3. Find all toggle buttons
             var buttonRegex = new Regex(
-                @"<img\b(?=[^>]*\bclass=[""']?[^""']*(?:hsgbtn|has2btn)[^""']*[""']?)(?=[^>]*\bid=[""']([^""']+)[""'])(?=[^>]*\b(?:linkname|name)=[""']([^""']+)[""'])[^>]*>",
+                @"<img\b(?=[^>]*\bclass=[""']?[^""']*(?:hsgbtn|has2btn|redbtn)[^""']*[""']?)(?=[^>]*\bid=[""']([^""']+)[""'])(?=[^>]*\b(?:linkname|name)=[""']([^""']+)[""'])[^>]*>",
                 RegexOptions.IgnoreCase);
             var buttonMatches = buttonRegex.Matches(html);
 
@@ -229,6 +229,7 @@ namespace BookViewer.Services
             {
                 var imgId = SanitizeFieldName(buttonMatch.Groups[1].Value);
                 var linkName = SanitizeFieldName(buttonMatch.Groups[2].Value);
+                var btnClass = buttonMatch.Value.ToLower();
 
                 float leftPx = 0f, topPx = 0f;
                 var styleMatch = Regex.Match(buttonMatch.Value,
@@ -242,44 +243,80 @@ namespace BookViewer.Services
                 float bx = leftPx * 0.75f;
                 float by = pageHeight - (topPx * 0.75f) - 24f;
 
-                // Create the text fields at their exact coordinates
-                if (answerData.TryGetValue(linkName, out var answersForThisButton))
+                bool isCircle = btnClass.Contains("redbtn") && !btnClass.Contains("has2btn") && !btnClass.Contains("hsgbtn");
+
+                if (isCircle)
                 {
-                    for (int f = 0; f < answersForThisButton.Count; f++)
+                    // --- Draw a red circle/ellipse for "Circle the answer" buttons ---
+                    var fieldId = $"A_{pageIndex}_{linkName}";
+                    allFieldIds.Add(fieldId);
+
+                    var circleRect = new Rectangle(bx, by, 30, 30);
+                    
+                    // Create a Text Field disguised as an ellipse
+                    var textField = new TextFormFieldBuilder(pdf, fieldId)
+                        .SetWidgetRectangle(circleRect)
+                        .CreateText();
+                    textField.SetReadOnly(true);
+
+                    foreach (var w in textField.GetWidgets())
                     {
-                        var ans = answersForThisButton[f];
-                        var fieldId = $"A_{pageIndex}_{linkName}_{f}";
-                        allFieldIds.Add(fieldId);
+                        w.SetBorder(new PdfArray(new PdfNumber[] { new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
+                        w.SetFlags(PdfAnnotation.PRINT);
 
-                        var textRect = new Rectangle(ans.x, ans.y, ans.w, 18f);
-                        var textField = new TextFormFieldBuilder(pdf, fieldId)
-                            .SetWidgetRectangle(textRect)
-                            .CreateText();
-
-                        textField.SetValue(ans.text);
-                        textField.SetReadOnly(true);
-
-                        foreach (var w in textField.GetWidgets())
+                        // Draw the ellipse appearance
+                        var apStream = new PdfFormXObject(circleRect);
+                        var canvas = new PdfCanvas(apStream, pdf);
+                        canvas.SetStrokeColor(ColorConstants.RED);
+                        canvas.SetLineWidth(1.5f);
+                        canvas.Ellipse(bx + 2, by + 2, bx + 28, by + 28);
+                        canvas.Stroke();
+                        canvas.Release();
+                        w.SetAppearance(PdfName.N, apStream.GetPdfObject());
+                    }
+                    form.AddField(textField, pdfPage);
+                }
+                else
+                {
+                    // --- Draw the text answers ---
+                    if (answerData.TryGetValue(linkName, out var answersForThisButton))
+                    {
+                        for (int f = 0; f < answersForThisButton.Count; f++)
                         {
-                            w.SetBorder(new PdfArray(new PdfNumber[] { new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
-                            w.SetFlags(PdfAnnotation.PRINT);
+                            var ans = answersForThisButton[f];
+                            var fieldId = $"A_{pageIndex}_{linkName}_{f}";
+                            allFieldIds.Add(fieldId);
 
-                            var apStream = new PdfFormXObject(textRect);
-                            var canvas = new PdfCanvas(apStream, pdf);
-                            canvas.BeginText();
-                            canvas.SetFontAndSize(answerFont, 11);
-                            canvas.SetTextMatrix(2, 4);
-                            canvas.SetFillColor(ColorConstants.RED); // Set to Red here
-                            canvas.ShowText(ans.text);
-                            canvas.EndText();
-                            canvas.Release();
-                            w.SetAppearance(PdfName.N, apStream.GetPdfObject());
+                            var textRect = new Rectangle(ans.x, ans.y, ans.w, 18f);
+                            var textField = new TextFormFieldBuilder(pdf, fieldId)
+                                .SetWidgetRectangle(textRect)
+                                .CreateText();
+
+                            textField.SetValue(ans.text);
+                            textField.SetReadOnly(true);
+
+                            foreach (var w in textField.GetWidgets())
+                            {
+                                w.SetBorder(new PdfArray(new PdfNumber[] { new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
+                                w.SetFlags(PdfAnnotation.PRINT);
+
+                                var apStream = new PdfFormXObject(textRect);
+                                var canvas = new PdfCanvas(apStream, pdf);
+                                canvas.BeginText();
+                                canvas.SetFontAndSize(answerFont, 11);
+                                canvas.SetTextMatrix(2, 4);
+                                canvas.SetFillColor(ColorConstants.RED);
+                                canvas.ShowText(ans.text);
+                                canvas.EndText();
+                                canvas.Release();
+                                w.SetAppearance(PdfName.N, apStream.GetPdfObject());
+                            }
+                            form.AddField(textField, pdfPage);
                         }
-                        form.AddField(textField, pdfPage);
                     }
                 }
 
-                // Create the invisible button on top of the red icon
+                // Create the physical toggle button (clickable area over the red icon)
                 var buttonRect = new Rectangle(bx, by, 24, 24);
                 var toggleFieldName = $"T_{pageIndex}_{imgId}_{btnCounter++}";
                 var buttonField = new PushButtonFormFieldBuilder(pdf, toggleFieldName)
@@ -300,10 +337,18 @@ namespace BookViewer.Services
                 else
                 {
                     toggleScript = "try {";
-                    foreach (var ans in answersForThisButton ?? new List<(string, float, float, float)>())
+                    if (isCircle)
                     {
-                        var id = $"A_{pageIndex}_{linkName}_{answersForThisButton.IndexOf(ans)}";
+                        var id = $"A_{pageIndex}_{linkName}";
                         toggleScript += $"var f = this.getField('{id}'); if (f) {{ f.display = (f.display === 1) ? 0 : 1; var v = f.value; f.value = ''; f.value = v; }}";
+                    }
+                    else if (answerData.TryGetValue(linkName, out var answersForThisButton))
+                    {
+                        for (int f = 0; f < answersForThisButton.Count; f++)
+                        {
+                            var id = $"A_{pageIndex}_{linkName}_{f}";
+                            toggleScript += $"var f = this.getField('{id}'); if (f) {{ f.display = (f.display === 1) ? 0 : 1; var v = f.value; f.value = ''; f.value = v; }}";
+                        }
                     }
                     toggleScript += "} catch(e) {}";
                 }
