@@ -144,6 +144,7 @@ namespace BookViewer.Services
             if (string.IsNullOrEmpty(s)) return "x";
             return Regex.Replace(s, @"[^A-Za-z0-9_\-]", "_");
         }
+        
         private void InjectInteractiveElements(PdfDocument pdf, string html, int pageIndex)
         {
             var form = PdfAcroForm.GetAcroForm(pdf, true);
@@ -154,45 +155,64 @@ namespace BookViewer.Services
             int btnCounter = 0;
         
             var buttonRegex = new Regex(
-                @"<img\b(?=[^>]*\bclass=[""']?[^""']*(?:redbtn|hsgbtn|has2btn)[^""']*[""']?)(?=[^>]*\bid=[""']([^""']+)[""'])(?=[^>]*\blinkname=[""']([^""']+)[""'])[^>]*>",
+                @"<img\b(?=[^>]*\bclass=[""']?[^""']*(?:redbtn|hsgbtn|has2btn)[^""']*[""']?)(?=[^>]*\bid=[""']([^""']+)[""'])(?=[^>]*\b(?:linkname|name)=[""']([^""']+)[""'])[^>]*>",
                 RegexOptions.IgnoreCase);
             var matches = buttonRegex.Matches(html);
             DebugLog($"[INJ] Page {pageIndex}: buttons matched in HTML = {matches.Count}");
             if (matches.Count == 0) return;
         
-            // Match both quote styles and both class presence
-            var answerRegex = new Regex(
-                @"<div\b(?=[^>]*\bclass=[""'][^""']*(?:tbred|tbnote)[^""']*[""'])[^>]*>([\s\S]*?)</div>",
+            // Two-pass answer discovery:
+            // Pass 1 — find every element that has name="X" or linkname="X" and contains
+            //          a tbred/tbnote div inside it. Use lazy matching with end-tag awareness
+            //          so we capture the outer block, not just the inner div.
+            var answers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        
+            // Approach: for each (name|linkname)="X" in the HTML, grab the next 2000 chars
+            // after that attribute's opening tag ends, then find the first tbred/tbnote div
+            // and take the text between its opening tag and the matching </div>.
+            var keyRegex = new Regex(
+                @"(?<attr>\b(?:linkname|name)\s*=\s*[""'])(?<key>[^""']+)(?<close>[""'])",
                 RegexOptions.IgnoreCase);
         
-            // Parse answers keyed by *either* linkname or id, using whichever is present
-            var answers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            int parsedDivs = 0;
-            foreach (Match m in answerRegex.Matches(html))
+            foreach (Match km in keyRegex.Matches(html))
             {
-                parsedDivs++;
-                var tag = m.Value;
-                var content = m.Groups[1].Value;
+                var key = SanitizeFieldName(km.Groups["key"].Value);
+                if (answers.ContainsKey(key)) continue;
         
-                var linkMatch = Regex.Match(tag,
-                    @"\blinkname\s*=\s*[""']([^""']+)[""']",
+                // Find the > that closes the opening tag this attribute belongs to
+                int afterAttr = km.Index + km.Length;
+                int tagClose = html.IndexOf('>', afterAttr);
+                if (tagClose < 0) continue;
+        
+                // Look ahead up to 5000 chars for a tbred/tbnote div
+                int windowEnd = Math.Min(html.Length, tagClose + 5000);
+                var window = html.Substring(tagClose + 1, windowEnd - tagClose - 1);
+        
+                var ansDiv = Regex.Match(window,
+                    @"<div\b[^>]*\bclass=[""'][^""']*(?:tbred|tbnote)[^""']*[""'][^>]*>([\s\S]*?)</div>",
                     RegexOptions.IgnoreCase);
-                var idMatch = Regex.Match(tag,
-                    @"\bid\s*=\s*[""']([^""']+)[""']",
-                    RegexOptions.IgnoreCase);
+                if (!ansDiv.Success) continue;
         
-                var linkName = linkMatch.Success ? linkMatch.Groups[1].Value
-                             : (idMatch.Success ? idMatch.Groups[1].Value : null);
+                string raw = ansDiv.Groups[1].Value;
+                string clean = Regex.Replace(raw, "<[^>]+>", " ");
+                clean = System.Net.WebUtility.HtmlDecode(clean);
+                clean = Regex.Replace(clean, @"\s+", " ").Trim();
+                if (string.IsNullOrEmpty(clean)) continue;
         
-                if (linkName != null)
+                answers[key] = clean;
+            }
+        
+            DebugLog($"[INJ] Page {pageIndex}: answers keyed = {answers.Count}");
+            if (answers.Count > 0)
+            {
+                // Log the first 3 keys so we can verify they look right
+                int logged = 0;
+                foreach (var kv in answers)
                 {
-                    string cleanText = Regex.Replace(content, "<.*?>", string.Empty).Trim();
-                    var key = SanitizeFieldName(linkName);
-                    if (!answers.ContainsKey(key))
-                        answers[key] = cleanText;
+                    if (logged++ >= 3) break;
+                    DebugLog($"[INJ]   sample key='{kv.Key}' text='{(kv.Value.Length > 60 ? kv.Value.Substring(0, 60) + "..." : kv.Value)}'");
                 }
             }
-            DebugLog($"[INJ] Page {pageIndex}: answer divs seen = {parsedDivs}, answers keyed = {answers.Count}");
         
             var allFieldIds = new List<string>();
             var helveticaFont = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
@@ -217,7 +237,7 @@ namespace BookViewer.Services
                 float y = pageHeight - (topPx * 0.75f) - 24f;
         
                 string answerText = answers.ContainsKey(linkName) ? answers[linkName] : "";
-                DebugLog($"[INJ] Page {pageIndex} {linkName}: answer='{(answerText.Length > 40 ? answerText.Substring(0, 40) + "..." : answerText)}' (len={answerText.Length}), x={x:F1}, y={y:F1}");
+                DebugLog($"[INJ] Page {pageIndex} {linkName}: answer='{(answerText.Length > 40 ? answerText.Substring(0, 40) + "..." : answerText)}' (len={answerText.Length})");
         
                 var textRect = new Rectangle(x + 25, y, 250, 24);
                 var textField = new TextFormFieldBuilder(pdf, fieldId)
@@ -301,6 +321,7 @@ namespace BookViewer.Services
                 form.AddField(buttonField, pdfPage);
             }
         }
+                
         private string InjectPdfCss(string html)
         {
             var css = @"
