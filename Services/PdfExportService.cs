@@ -30,9 +30,23 @@ namespace BookViewer.Services
         public event EventHandler<string>? OnComplete;
         public event EventHandler<string>? OnError;
 
+        private string _debugLogPath = "";
+
         public PdfExportService(BookService bookService)
         {
             _bookService = bookService;
+            try
+            {
+                var desktop = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+                _debugLogPath = Path.Combine(desktop, "PDF_Debug.txt");
+                File.WriteAllText(_debugLogPath, $"=== PDF Export started {DateTime.Now} ===\n");
+            }
+            catch { }
+        }
+
+        private void DebugLog(string msg)
+        {
+            try { File.AppendAllText(_debugLogPath, msg + "\n"); } catch { }
         }
 
         public async Task ExportBookAsPdfAsync(string outputPath, bool includeAnswers, bool includeTeacherNotes, bool includeStudentAnswers)
@@ -41,6 +55,7 @@ namespace BookViewer.Services
             try
             {
                 var totalPages = _bookService.PageFiles.Count;
+                DebugLog($"[MAIN] Total pages = {totalPages}");
                 if (totalPages == 0) { OnError?.Invoke(this, "No pages to export"); return; }
 
                 var tempDir = Path.Combine(Path.GetTempPath(), "BookViewerPdfExport");
@@ -60,6 +75,16 @@ namespace BookViewer.Services
                     var filePath = _bookService.PageFiles[i];
                     string html = await _bookService.BuildPageHtmlForPdfExportAsync(filePath);
 
+                    // ---- HTML audit (before we touch it) ----
+                    int rawRedbtnCount = Regex.Matches(html, @"class=""[^""]*\bredbtn\b", RegexOptions.IgnoreCase).Count;
+                    int rawHsgbtnCount = Regex.Matches(html, @"class=""[^""]*\bhsgbtn\b", RegexOptions.IgnoreCase).Count;
+                    int rawHas2btnCount = Regex.Matches(html, @"class=""[^""]*\bhas2btn\b", RegexOptions.IgnoreCase).Count;
+                    int rawTbredDivs = Regex.Matches(html, @"<div[^>]*class=""[^""]*\btbred\b", RegexOptions.IgnoreCase).Count;
+                    int rawTbnoteDivs = Regex.Matches(html, @"<div[^>]*class=""[^""]*\btbnote\b", RegexOptions.IgnoreCase).Count;
+                    int rawLinknameAttrs = Regex.Matches(html, @"\blinkname=""", RegexOptions.IgnoreCase).Count;
+
+                    DebugLog($"[HTML] Page {i}: len={html.Length}, redbtn={rawRedbtnCount}, hsgbtn={rawHsgbtnCount}, has2btn={rawHas2btnCount}, tbred={rawTbredDivs}, tbnote={rawTbnoteDivs}, linkname={rawLinknameAttrs}");
+
                     html = InjectPdfCss(html);
                     html = await ExtractBase64ImagesAsync(html, tempDir, i);
 
@@ -76,9 +101,6 @@ namespace BookViewer.Services
                     using (var pdf = new PdfDocument(reader, new PdfWriter(tempPdfPath + ".tmp")))
                     {
                         InjectInteractiveElements(pdf, html, i);
-                        // NOTE: Do NOT call form.SetNeedAppearances(true) here.
-                        // We have already drawn complete appearance streams, and
-                        // NeedAppearances makes Acrobat discard them.
                     }
 
                     File.Delete(tempPdfPath);
@@ -99,13 +121,19 @@ namespace BookViewer.Services
                             merger.Merge(sourcePdf, 1, sourcePdf.GetNumberOfPages());
                         }
                     }
-                    // NOTE: Do NOT set NeedAppearances here either.
                 }
+
+                try
+                {
+                    var fi = new FileInfo(outputPath);
+                    DebugLog($"[DONE] Output={outputPath}, size={fi.Length} bytes");
+                } catch { }
 
                 OnComplete?.Invoke(this, outputPath);
             }
             catch (Exception ex)
             {
+                DebugLog($"[FATAL] {ex}");
                 OnError?.Invoke(this, ex.Message);
             }
             finally
@@ -125,11 +153,8 @@ namespace BookViewer.Services
 
         private void InjectInteractiveElements(PdfDocument pdf, string html, int pageIndex)
         {
-
-            System.Diagnostics.Debug.WriteLine($"[PDF] Page {pageIndex}: {matches.Count} buttons, {answers.Count} answers");
-            
             var form = PdfAcroForm.GetAcroForm(pdf, true);
-            if (form == null) return;
+            if (form == null) { DebugLog($"[INJ] Page {pageIndex}: form is null"); return; }
 
             var pdfPage = pdf.GetPage(1);
             float pageHeight = pdfPage.GetPageSize().GetHeight();
@@ -139,6 +164,7 @@ namespace BookViewer.Services
                 @"<img\b(?=[^>]*\bclass=""[^""]*(?:redbtn|hsgbtn|has2btn)[^""]*"")(?=[^>]*\bid=""([^""]+)"")(?=[^>]*\blinkname=""([^""]+)"")[^>]*>",
                 RegexOptions.IgnoreCase);
             var matches = buttonRegex.Matches(html);
+            DebugLog($"[INJ] Page {pageIndex}: buttons matched in HTML = {matches.Count}");
             if (matches.Count == 0) return;
 
             var answers = new Dictionary<string, string>();
@@ -157,6 +183,7 @@ namespace BookViewer.Services
                     answers[SanitizeFieldName(linkMatch.Groups[1].Value)] = cleanText;
                 }
             }
+            DebugLog($"[INJ] Page {pageIndex}: answers parsed from HTML = {answers.Count}");
 
             var allFieldIds = new List<string>();
             var helveticaFont = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
@@ -180,15 +207,13 @@ namespace BookViewer.Services
                 float x = leftPx * 0.75f;
                 float y = pageHeight - (topPx * 0.75f) - 24f;
 
-                // -------- Text Field with hand-drawn appearance --------
+                string answerText = answers.ContainsKey(linkName) ? answers[linkName] : "";
+                DebugLog($"[INJ] Page {pageIndex} {linkName}: answer='{(answerText.Length > 40 ? answerText.Substring(0, 40) + "..." : answerText)}' (len={answerText.Length}), x={x:F1}, y={y:F1}");
+
                 var textRect = new Rectangle(x + 25, y, 250, 24);
                 var textField = new TextFormFieldBuilder(pdf, fieldId)
                     .SetWidgetRectangle(textRect)
                     .CreateText();
-
-                string answerText = answers.ContainsKey(linkName) ? answers[linkName] : "";
-
-                // DO NOT call SetValue/SetReadOnly — the value is drawn directly into the /AP stream.
 
                 foreach (var w in textField.GetWidgets())
                 {
@@ -196,7 +221,6 @@ namespace BookViewer.Services
                         new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
                     w.SetFlags(PdfAnnotation.PRINT);
 
-                    // Hand-drawn appearance stream containing the answer text
                     var apStream = new PdfFormXObject(textRect);
                     var canvas = new PdfCanvas(apStream, pdf);
                     canvas.BeginText();
@@ -211,7 +235,6 @@ namespace BookViewer.Services
                 form.AddField(textField, pdfPage);
                 allFieldIds.Add(fieldId);
 
-                // -------- Toggle Button --------
                 var buttonRect = new Rectangle(x, y, 24, 24);
                 var toggleFieldName = $"Toggle_{pageIndex}_{imgId}_{btnCounter++}";
                 var buttonField = new PushButtonFormFieldBuilder(pdf, toggleFieldName)
@@ -230,7 +253,6 @@ namespace BookViewer.Services
                     w.SetAppearance(PdfName.N, ap.GetPdfObject());
                 }
 
-                // -------- JavaScript --------
                 string toggleScript;
                 if (linkName.Equals("all", StringComparison.OrdinalIgnoreCase) ||
                     linkName.Equals("allanswers", StringComparison.OrdinalIgnoreCase))
@@ -279,7 +301,6 @@ namespace BookViewer.Services
     img.redbtn, img.hsgbtn, img.has2btn { display: inline-block !important; visibility: visible !important; opacity: 1 !important; }
     img { max-width: 100% !important; height: auto !important; }
 
-    /* Hide the HTML answer divs; the interactive field on top is the visible one */
     div.tbred, div.tbnote { display: none !important; }
 </style>
 ";
