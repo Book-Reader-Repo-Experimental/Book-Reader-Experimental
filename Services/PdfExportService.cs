@@ -75,15 +75,9 @@ namespace BookViewer.Services
                     var filePath = _bookService.PageFiles[i];
                     string html = await _bookService.BuildPageHtmlForPdfExportAsync(filePath);
 
-                    // ---- HTML audit (before we touch it) ----
                     int rawRedbtnCount = Regex.Matches(html, @"class=""[^""]*\bredbtn\b", RegexOptions.IgnoreCase).Count;
-                    int rawHsgbtnCount = Regex.Matches(html, @"class=""[^""]*\bhsgbtn\b", RegexOptions.IgnoreCase).Count;
-                    int rawHas2btnCount = Regex.Matches(html, @"class=""[^""]*\bhas2btn\b", RegexOptions.IgnoreCase).Count;
                     int rawTbredDivs = Regex.Matches(html, @"<div[^>]*class=""[^""]*\btbred\b", RegexOptions.IgnoreCase).Count;
-                    int rawTbnoteDivs = Regex.Matches(html, @"<div[^>]*class=""[^""]*\btbnote\b", RegexOptions.IgnoreCase).Count;
-                    int rawLinknameAttrs = Regex.Matches(html, @"\blinkname=""", RegexOptions.IgnoreCase).Count;
-
-                    DebugLog($"[HTML] Page {i}: len={html.Length}, redbtn={rawRedbtnCount}, hsgbtn={rawHsgbtnCount}, has2btn={rawHas2btnCount}, tbred={rawTbredDivs}, tbnote={rawTbnoteDivs}, linkname={rawLinknameAttrs}");
+                    DebugLog($"[HTML] Page {i}: len={html.Length}, redbtn={rawRedbtnCount}, tbred={rawTbredDivs}");
 
                     html = InjectPdfCss(html);
                     html = await ExtractBase64ImagesAsync(html, tempDir, i);
@@ -154,7 +148,7 @@ namespace BookViewer.Services
         private void InjectInteractiveElements(PdfDocument pdf, string html, int pageIndex)
         {
             var form = PdfAcroForm.GetAcroForm(pdf, true);
-            if (form == null) { DebugLog($"[INJ] Page {pageIndex}: form is null"); return; }
+            if (form == null) return;
 
             var pdfPage = pdf.GetPage(1);
             float pageHeight = pdfPage.GetPageSize().GetHeight();
@@ -164,7 +158,6 @@ namespace BookViewer.Services
                 @"<img\b(?=[^>]*\bclass=""[^""]*(?:redbtn|hsgbtn|has2btn)[^""]*"")(?=[^>]*\bid=""([^""]+)"")(?=[^>]*\blinkname=""([^""]+)"")[^>]*>",
                 RegexOptions.IgnoreCase);
             var matches = buttonRegex.Matches(html);
-            DebugLog($"[INJ] Page {pageIndex}: buttons matched in HTML = {matches.Count}");
             if (matches.Count == 0) return;
 
             var answers = new Dictionary<string, string>();
@@ -183,7 +176,6 @@ namespace BookViewer.Services
                     answers[SanitizeFieldName(linkMatch.Groups[1].Value)] = cleanText;
                 }
             }
-            DebugLog($"[INJ] Page {pageIndex}: answers parsed from HTML = {answers.Count}");
 
             var allFieldIds = new List<string>();
             var helveticaFont = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
@@ -208,12 +200,21 @@ namespace BookViewer.Services
                 float y = pageHeight - (topPx * 0.75f) - 24f;
 
                 string answerText = answers.ContainsKey(linkName) ? answers[linkName] : "";
-                DebugLog($"[INJ] Page {pageIndex} {linkName}: answer='{(answerText.Length > 40 ? answerText.Substring(0, 40) + "..." : answerText)}' (len={answerText.Length}), x={x:F1}, y={y:F1}");
 
                 var textRect = new Rectangle(x + 25, y, 250, 24);
                 var textField = new TextFormFieldBuilder(pdf, fieldId)
                     .SetWidgetRectangle(textRect)
                     .CreateText();
+
+                // 1. Give the field a value so Acrobat has something to render
+                textField.SetValue(answerText);
+                textField.SetReadOnly(true);
+
+                // 2. Manually set the Default Appearance (DA) on the field dictionary
+                //    iText 8 removed SetDefaultAppearance; we write directly.
+                //    /Helv is the built-in Helvetica alias Acrobat always has.
+                var fieldDict = textField.GetPdfObject();
+                fieldDict.Put(PdfName.DA, new PdfString("0 0 0 rg /Helv 12 Tf"));
 
                 foreach (var w in textField.GetWidgets())
                 {
@@ -221,6 +222,7 @@ namespace BookViewer.Services
                         new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
                     w.SetFlags(PdfAnnotation.PRINT);
 
+                    // 3. Force a hand-drawn appearance stream with the visible text
                     var apStream = new PdfFormXObject(textRect);
                     var canvas = new PdfCanvas(apStream, pdf);
                     canvas.BeginText();
