@@ -149,7 +149,7 @@ namespace BookViewer.Services
             float pageHeight = pdfPage.GetPageSize().GetHeight();
             int btnCounter = 0;
 
-            // ---- Only HAS2 and HSG buttons are real toggles ----
+            // 1. Only HAS2 and HSG buttons are real toggles
             var buttonRegex = new Regex(
                 @"<img\b(?=[^>]*\bclass=[""']?[^""']*(?:hsgbtn|has2btn)[^""']*[""']?)(?=[^>]*\bid=[""']([^""']+)[""'])(?=[^>]*\b(?:linkname|name)=[""']([^""']+)[""'])[^>]*>",
                 RegexOptions.IgnoreCase);
@@ -157,7 +157,7 @@ namespace BookViewer.Services
             DebugLog($"[INJ] Page {pageIndex}: toggle buttons matched = {buttonMatches.Count}");
             if (buttonMatches.Count == 0) return;
 
-            // ---- Group answers by <has2 name="..."> inside each <div class="tbred/tbnote"> ----
+            // 2. Group answers by <has2 name="...">
             var answerGroups = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
 
             var answerDivRegex = new Regex(
@@ -231,7 +231,7 @@ namespace BookViewer.Services
 
                 DebugLog($"[INJ] Page {pageIndex} {fieldId}: '{(answerText.Length > 40 ? answerText.Substring(0, 40) + "..." : answerText)}' len={answerText.Length}");
 
-                // ---- Answer field ----
+                // ---- Answer field (with custom appearance stream) ----
                 var textRect = new Rectangle(x + 25, y, 500, 24);
                 var textField = new TextFormFieldBuilder(pdf, fieldId)
                     .SetWidgetRectangle(textRect)
@@ -258,7 +258,7 @@ namespace BookViewer.Services
                 }
                 form.AddField(textField, pdfPage);
 
-                // ---- Toggle button ----
+                // ---- Toggle button (The critical part) ----
                 var buttonRect = new Rectangle(x, y, 24, 24);
                 var toggleFieldName = $"T_{pageIndex}_{imgId}_{btnCounter++}";
                 var buttonField = new PushButtonFormFieldBuilder(pdf, toggleFieldName)
@@ -266,15 +266,14 @@ namespace BookViewer.Services
                     .SetCaption("")
                     .CreatePushButton();
 
+                // Use PdfAction.CreateJavaScript for correct encoding
                 var toggleScript =
                     "try {" +
                     $"var f = this.getField('{fieldId}'); " +
                     "if (f) { f.display = (f.display === 1) ? 0 : 1; }" +
                     "} catch(e) {}";
-
-                var actionDict = new PdfDictionary();
-                actionDict.Put(PdfName.S, PdfName.JavaScript);
-                actionDict.Put(PdfName.JS, new PdfString(toggleScript, PdfEncodings.UTF8));
+                
+                var jsAction = PdfAction.CreateJavaScript(toggleScript);
 
                 foreach (var w in buttonField.GetWidgets())
                 {
@@ -283,22 +282,27 @@ namespace BookViewer.Services
                     w.SetBorder(new PdfArray(new PdfNumber[] {
                         new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
 
-                    w.Put(PdfName.A, actionDict);
+                    // 1. Attach to the annotation's /A entry
+                    w.Put(PdfName.A, jsAction.GetPdfObject());
 
+                    // 2. Attach to the annotation's /AA (Additional Actions) for Mouse Up
                     var aaDict = new PdfDictionary();
-                    aaDict.Put(PdfName.U, actionDict);
+                    aaDict.Put(PdfName.U, jsAction.GetPdfObject());
                     w.Put(PdfName.AA, aaDict);
 
+                    // 3. Appearance Characteristics (MK) so Acrobat treats it as a button
                     var mkDict = new PdfDictionary();
                     mkDict.Put(PdfName.CA, new PdfString(""));
                     w.GetPdfObject().Put(PdfName.MK, mkDict);
 
+                    // 4. Transparent appearance stream so it has a hitbox
                     var ap = new PdfFormXObject(new Rectangle(0, 0, 24, 24));
                     w.SetAppearance(PdfName.N, ap.GetPdfObject());
                 }
 
+                // 5. Attach to the FIELD's /AA entry as well
                 var fieldAA = new PdfDictionary();
-                fieldAA.Put(PdfName.U, actionDict);
+                fieldAA.Put(PdfName.U, jsAction.GetPdfObject());
                 buttonField.GetPdfObject().Put(PdfName.AA, fieldAA);
 
                 form.AddField(buttonField, pdfPage);
