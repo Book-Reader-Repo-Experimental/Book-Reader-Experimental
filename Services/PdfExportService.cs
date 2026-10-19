@@ -171,7 +171,7 @@ namespace BookViewer.Services
             if (answerFont == null)
                 answerFont = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
 
-            // 2. Parse text answers (mapping linkName -> text AND its exact coordinates)
+            // 2. Parse text answers
             var fragmentRegex = new Regex(
                 @"<div\b(?<divtag>[^>]*\bclass=[""'][^""']*\b(?:tbred|tbnote)\b[^""']*[""'][^>]*)>(?<body>[\s\S]*?)</div>",
                 RegexOptions.IgnoreCase);
@@ -206,6 +206,7 @@ namespace BookViewer.Services
                 float pxToPt = 0.75f;
                 float x = leftPx * pxToPt;
                 float y = pageHeight - (topPx * pxToPt) - 18f; 
+                // Keep the width exactly as specified in the div, but enforce a minimum of 40pt to fit text
                 float w = Math.Max(widthPx * pxToPt, 40f);
 
                 if (!answerData.TryGetValue(key, out var list))
@@ -213,12 +214,12 @@ namespace BookViewer.Services
                 list.Add((clean, x, y, w));
             }
 
-            // 3. Parse SVG circles with their original viewBox for scaling
+            // 3. Parse SVG circles
             var svgRegex = new Regex(
                 @"<svg\b(?<tag>[^>]*\bclass=[""'][^""']*\btbred\b[^""']*[""'][^>]*)>(?<content>[\s\S]*?)</svg>",
                 RegexOptions.IgnoreCase);
 
-            var svgData = new Dictionary<string, List<(string pathD, string viewBox, float x, float y, float w, float h)>>(StringComparer.OrdinalIgnoreCase);
+            var svgData = new Dictionary<string, List<(string pathD, float x, float y, float w, float h)>>(StringComparer.OrdinalIgnoreCase);
 
             foreach (Match sm in svgRegex.Matches(html))
             {
@@ -232,11 +233,6 @@ namespace BookViewer.Services
                 var pathMatch = Regex.Match(content, @"<path\b[^>]*\bd=[""']([^""']+)[""']", RegexOptions.IgnoreCase);
                 if (!pathMatch.Success) continue;
                 string pathD = pathMatch.Groups[1].Value;
-
-                var viewBoxMatch = Regex.Match(tag, @"\bviewBox=[""']([^""']+)[""']", RegexOptions.IgnoreCase);
-                string viewBox = viewBoxMatch.Success ? viewBoxMatch.Groups[1].Value : "0 0 " + 
-                    (Regex.Match(tag, @"\bwidth=[""'](\d+)[""']").Groups[1].Value) + " " + 
-                    (Regex.Match(tag, @"\bheight=[""'](\d+)[""']").Groups[1].Value);
 
                 float leftPx = 0f, topPx = 0f, widthPx = 82f, heightPx = 32f;
                 var styleMatch = Regex.Match(tag,
@@ -258,8 +254,8 @@ namespace BookViewer.Services
                 float h = heightPx * 0.75f;
 
                 if (!svgData.TryGetValue(name, out var list))
-                    svgData[name] = list = new List<(string, string, float, float, float, float)>();
-                list.Add((pathD, viewBox, x, y, w, h));
+                    svgData[name] = list = new List<(string, float, float, float, float)>();
+                list.Add((pathD, x, y, w, h));
             }
 
             // 4. Find all toggle buttons
@@ -352,8 +348,8 @@ namespace BookViewer.Services
                             canvas.SetStrokeColor(ColorConstants.RED);
                             canvas.SetLineWidth(1.0f);
                             
-                            // Parse the SVG path data manually with correct scaling
-                            DrawSvgPath(canvas, shape.pathD, shape.viewBox, shape.x, shape.y, shape.w, shape.h);
+                            // Draw path without scaling because coordinates are absolute
+                            DrawSvgPathNoScale(canvas, shape.pathD, shape.x, shape.y, shape.h);
                             canvas.Stroke();
                             canvas.Release();
                             w.SetAppearance(PdfName.N, apStream.GetPdfObject());
@@ -420,32 +416,17 @@ namespace BookViewer.Services
             }
         }
 
-        // Draws the SVG path directly onto the PdfCanvas, scaling it correctly
-        private void DrawSvgPath(PdfCanvas canvas, string pathD, string viewBox, float baseX, float baseY, float width, float height)
+        // Draws the SVG path directly onto the PdfCanvas.
+        // The path coordinates are absolute (no scaling needed), we just apply pt conversion.
+        private void DrawSvgPathNoScale(PdfCanvas canvas, string pathD, float baseX, float baseY, float height)
         {
             try
             {
-                float vbX = 0, vbY = 0, vbW = width, vbH = height;
-                if (!string.IsNullOrEmpty(viewBox))
-                {
-                    var parts = viewBox.Split(new[] { ' ', ',' }, StringSplitOptions.RemoveEmptyEntries);
-                    if (parts.Length == 4)
-                    {
-                        vbX = float.Parse(parts[0], CultureInfo.InvariantCulture);
-                        vbY = float.Parse(parts[1], CultureInfo.InvariantCulture);
-                        vbW = float.Parse(parts[2], CultureInfo.InvariantCulture);
-                        vbH = float.Parse(parts[3], CultureInfo.InvariantCulture);
-                    }
-                }
-
-                float scaleX = width / vbW;
-                float scaleY = height / vbH;
-                
-                float SX(float x) => baseX + (x - vbX) * scaleX;
-                float SY(float y) => baseY + height - (y - vbY) * scaleY;
-
                 var matches = Regex.Matches(pathD, @"([a-zA-Z])|(-?\d*\.?\d+)");
                 bool currentPointSet = false;
+
+                // Pt conversion factor (1px = 0.75pt)
+                float pt = 0.75f;
 
                 for (int i = 0; i < matches.Count; i++)
                 {
@@ -458,7 +439,8 @@ namespace BookViewer.Services
                         {
                             float x = ParseFloat(matches[++i].Value);
                             float y = ParseFloat(matches[++i].Value);
-                            canvas.MoveTo(SX(x), SY(y));
+                            // Y axis is flipped in PDF
+                            canvas.MoveTo(baseX + x * pt, baseY + height - (y * pt));
                             currentPointSet = true;
                         }
                         else if (cmd == 'c' || cmd == 'C')
@@ -470,14 +452,23 @@ namespace BookViewer.Services
                             float x3 = ParseFloat(matches[++i].Value);
                             float y3 = ParseFloat(matches[++i].Value);
                             
-                            canvas.CurveTo(SX(x1), SY(y1), SX(x2), SY(y2), SX(x3), SY(y3));
+                            canvas.CurveTo(
+                                baseX + x1 * pt, baseY + height - (y1 * pt),
+                                baseX + x2 * pt, baseY + height - (y2 * pt),
+                                baseX + x3 * pt, baseY + height - (y3 * pt)
+                            );
                         }
                         else if (cmd == 'l' || cmd == 'L')
                         {
                             float x = ParseFloat(matches[++i].Value);
                             float y = ParseFloat(matches[++i].Value);
-                            if (currentPointSet) canvas.LineTo(SX(x), SY(y));
-                            else { canvas.MoveTo(SX(x), SY(y)); currentPointSet = true; }
+                            if (currentPointSet) 
+                                canvas.LineTo(baseX + x * pt, baseY + height - (y * pt));
+                            else 
+                            { 
+                                canvas.MoveTo(baseX + x * pt, baseY + height - (y * pt)); 
+                                currentPointSet = true; 
+                            }
                         }
                     }
                 }
