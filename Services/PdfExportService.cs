@@ -125,6 +125,9 @@ namespace BookViewer.Services
 
         private void InjectInteractiveElements(PdfDocument pdf, string html, int pageIndex)
         {
+
+            System.Diagnostics.Debug.WriteLine($"[PDF] Page {pageIndex}: {matches.Count} buttons, {answers.Count} answers");
+            
             var form = PdfAcroForm.GetAcroForm(pdf, true);
             if (form == null) return;
 
