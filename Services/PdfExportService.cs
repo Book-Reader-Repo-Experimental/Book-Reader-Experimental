@@ -141,18 +141,18 @@ namespace BookViewer.Services
         {
             var form = PdfAcroForm.GetAcroForm(pdf, true);
             if (form == null) return;
-
+        
             var pdfPage = pdf.GetPage(1);
             float pageHeight = pdfPage.GetPageSize().GetHeight();
-
+        
+            // ---- font (unchanged) ----
             PdfFont answerFont = null;
             try
             {
                 var fontFaceMatch = Regex.Match(html, @"@font-face\s*\{[^}]*\}", RegexOptions.IgnoreCase);
                 if (fontFaceMatch.Success)
                 {
-                    var fontFace = fontFaceMatch.Value;
-                    var base64Match = Regex.Match(fontFace, @"base64,([^""']+)\)", RegexOptions.IgnoreCase);
+                    var base64Match = Regex.Match(fontFaceMatch.Value, @"base64,([^""']+)\)", RegexOptions.IgnoreCase);
                     if (base64Match.Success)
                     {
                         var fontBytes = Convert.FromBase64String(base64Match.Groups[1].Value);
@@ -165,288 +165,338 @@ namespace BookViewer.Services
             catch { }
             if (answerFont == null)
                 answerFont = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
-
+        
             iText.Kernel.Colors.Color bookRed = new DeviceRgb(228, 4, 119);
-
+            float pxToPt = 0.75f;
+        
+            // =====================================================================
+            // A single dictionary: groupKey -> list of field descriptors.
+            // groupKey is the <has2 name="..."> value (e.g. "has2_5_1", "has2_5_2").
+            // Field descriptor carries type (text/shape), rect, payload, isNote.
+            // =====================================================================
+            var groups = new Dictionary<string, List<FieldSpec>>(StringComparer.OrdinalIgnoreCase);
+            var noteGroupKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        
+            void AddSpec(string groupKey, FieldSpec spec)
+            {
+                if (!groups.TryGetValue(groupKey, out var list))
+                    groups[groupKey] = list = new List<FieldSpec>();
+                list.Add(spec);
+            }
+        
+            // ---------- 1) text divs (tbred / tbnote) ----------
             var fragmentRegex = new Regex(
                 @"<div\b(?<divtag>[^>]*\bclass=[""'][^""']*\b(?:tbred|tbnote)\b[^""']*[""'][^>]*)>(?<body>[\s\S]*?)</div>",
                 RegexOptions.IgnoreCase);
-
-            var answerData = new Dictionary<string, List<(string text, float x, float y, float w)>>(StringComparer.OrdinalIgnoreCase);
-            var noteKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
+        
             foreach (Match am in fragmentRegex.Matches(html))
             {
                 string divTag = am.Groups["divtag"].Value;
                 string body = am.Groups["body"].Value;
-                
+        
                 var keyMatch = Regex.Match(body, @"<has2\b[^>]*\bname=[""']([^""']+)[""']", RegexOptions.IgnoreCase);
                 if (!keyMatch.Success) continue;
-                string key = SanitizeFieldName(keyMatch.Groups[1].Value);
-
-                if (divTag.Contains("tbnote", StringComparison.OrdinalIgnoreCase)) 
-                    noteKeys.Add(key);
-
+                string groupKey = SanitizeFieldName(keyMatch.Groups[1].Value);
+        
+                bool isNote = divTag.Contains("tbnote", StringComparison.OrdinalIgnoreCase)
+                           || divTag.Contains("teacherNotes", StringComparison.OrdinalIgnoreCase);
+                if (isNote) noteGroupKeys.Add(groupKey);
+        
                 string clean = Regex.Replace(body, "<[^>]+>", " ");
                 clean = System.Net.WebUtility.HtmlDecode(clean);
                 clean = Regex.Replace(clean, @"\s+", " ").Trim();
                 if (string.IsNullOrEmpty(clean)) continue;
-
+        
                 float leftPx = 0f, topPx = 0f, widthPx = 50f;
                 var styleMatch = Regex.Match(divTag,
                     @"style=[""'][^""']*left:\s*([\d\.]+)px[^""']*top:\s*([\d\.]+)px[^""']*width:\s*([\d\.]+)px",
                     RegexOptions.IgnoreCase);
                 if (styleMatch.Success)
                 {
-                    leftPx = float.Parse(styleMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
-                    topPx = float.Parse(styleMatch.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
-                    widthPx = float.Parse(styleMatch.Groups[3].Value, System.Globalization.CultureInfo.InvariantCulture);
+                    leftPx = float.Parse(styleMatch.Groups[1].Value, CultureInfo.InvariantCulture);
+                    topPx = float.Parse(styleMatch.Groups[2].Value, CultureInfo.InvariantCulture);
+                    widthPx = float.Parse(styleMatch.Groups[3].Value, CultureInfo.InvariantCulture);
                 }
-
-                float pxToPt = 0.75f;
+        
                 float x = leftPx * pxToPt;
-                float y = pageHeight - (topPx * pxToPt) - 18f; 
+                float y = pageHeight - (topPx * pxToPt) - 18f;
                 float w = Math.Max(widthPx * pxToPt, 40f);
-
-                if (!answerData.TryGetValue(key, out var list))
-                    answerData[key] = list = new List<(string, float, float, float)>();
-                list.Add((clean, x, y, w));
+        
+                AddSpec(groupKey, new FieldSpec
+                {
+                    Kind = FieldKind.Text,
+                    X = x, Y = y, W = w, H = 18f,
+                    Text = clean,
+                    IsNote = isNote
+                });
             }
-
+        
+            // ---------- 2) svg shapes (tbred / tbnote) ----------
             var svgRegex = new Regex(
-                @"<svg\b(?<tag>[^>]*\bclass=[""'][^""']*\btbred\b[^""']*[""'][^>]*)>(?<content>[\s\S]*?)</svg>",
+                @"<svg\b(?<tag>[^>]*\bclass=[""'][^""']*\b(?:tbred|tbnote)\b[^""']*[""'][^>]*)>(?<content>[\s\S]*?)</svg>",
                 RegexOptions.IgnoreCase);
-
-            var svgData = new Dictionary<string, List<(string pathD, float x, float y, float w, float h)>>(StringComparer.OrdinalIgnoreCase);
-
+        
             foreach (Match sm in svgRegex.Matches(html))
             {
                 string tag = sm.Groups["tag"].Value;
                 string content = sm.Groups["content"].Value;
-                
-                var nameMatch = Regex.Match(tag, @"\bname=[""']([^""']+)[""']", RegexOptions.IgnoreCase);
-                if (!nameMatch.Success) continue;
-                string name = SanitizeFieldName(nameMatch.Groups[1].Value);
-
+        
+                // group key: prefer the <has2 name="..."> inside content, else the svg's own name
+                string groupKey = null;
+                var has2Match = Regex.Match(content, @"<has2\b[^>]*\bname=[""']([^""']+)[""']", RegexOptions.IgnoreCase);
+                if (has2Match.Success)
+                    groupKey = SanitizeFieldName(has2Match.Groups[1].Value);
+                else
+                {
+                    var nameMatch = Regex.Match(tag, @"\bname=[""']([^""']+)[""']", RegexOptions.IgnoreCase);
+                    if (nameMatch.Success)
+                        groupKey = SanitizeFieldName(nameMatch.Groups[1].Value);
+                }
+                if (groupKey == null) continue;
+        
+                bool isNote = tag.Contains("tbnote", StringComparison.OrdinalIgnoreCase)
+                           || tag.Contains("teacherNotes", StringComparison.OrdinalIgnoreCase);
+                if (isNote) noteGroupKeys.Add(groupKey);
+        
                 var pathMatch = Regex.Match(content, @"<path\b[^>]*\bd=[""']([^""']+)[""']", RegexOptions.IgnoreCase);
                 if (!pathMatch.Success) continue;
                 string pathD = pathMatch.Groups[1].Value;
-
+        
                 float leftPx = 0f, topPx = 0f, widthPx = 82f, heightPx = 32f;
                 var styleMatch = Regex.Match(tag,
                     @"style=[""'][^""']*left:\s*([\d\.]+)px[^""']*top:\s*([\d\.]+)px",
                     RegexOptions.IgnoreCase);
-                var widthMatch = Regex.Match(tag, @"\bwidth=[""'](\d+)[""']", RegexOptions.IgnoreCase);
-                var heightMatch = Regex.Match(tag, @"\bheight=[""'](\d+)[""']", RegexOptions.IgnoreCase);
-                
+                var widthMatch = Regex.Match(tag, @"\bwidth=[""'](\d+(?:\.\d+)?)[""']", RegexOptions.IgnoreCase);
+                var heightMatch = Regex.Match(tag, @"\bheight=[""'](\d+(?:\.\d+)?)[""']", RegexOptions.IgnoreCase);
+        
                 if (styleMatch.Success)
                 {
-                    leftPx = float.Parse(styleMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
-                    topPx = float.Parse(styleMatch.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
+                    leftPx = float.Parse(styleMatch.Groups[1].Value, CultureInfo.InvariantCulture);
+                    topPx = float.Parse(styleMatch.Groups[2].Value, CultureInfo.InvariantCulture);
                 }
-                if (widthMatch.Success) widthPx = float.Parse(widthMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
-                if (heightMatch.Success) heightPx = float.Parse(heightMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
-
-                float x = (leftPx - 10) * 0.75f;
-                float y = pageHeight - ((topPx + heightPx + 10) * 0.75f);
-                float w = (widthPx + 20) * 0.75f;
-                float h = (heightPx + 20) * 0.75f;
-
-                if (!svgData.TryGetValue(name, out var list))
-                    svgData[name] = list = new List<(string, float, float, float, float)>();
-                list.Add((pathD, x, y, w, h));
+                if (widthMatch.Success) widthPx = float.Parse(widthMatch.Groups[1].Value, CultureInfo.InvariantCulture);
+                if (heightMatch.Success) heightPx = float.Parse(heightMatch.Groups[1].Value, CultureInfo.InvariantCulture);
+        
+                float x = leftPx * pxToPt;
+                float y = pageHeight - ((topPx + heightPx) * pxToPt);
+                float w = widthPx * pxToPt;
+                float h = heightPx * pxToPt;
+        
+                AddSpec(groupKey, new FieldSpec
+                {
+                    Kind = FieldKind.Shape,
+                    X = x, Y = y, W = w, H = h,
+                    PathD = pathD,
+                    IsNote = isNote
+                });
             }
-
+        
+            // ---------- 3) buttons ----------
             var buttonRegex = new Regex(
-                @"<img\b(?<tag>[^>]*\bclass=[""']?[^""']*(?:hsgbtn|has2btn|redbtn)[^""']*[""']?)(?=[^>]*\bid=[""']([^""']+)[""'])(?=[^>]*\b(?:linkname|name)=[""']([^""']+)[""'])(?<rest>[^>]*)>",
+                @"<img\b(?=[^>]*\bclass=[""']?[^""']*(?:hsgbtn|has2btn|redbtn)[^""']*[""']?)(?=[^>]*\bid=[""']([^""']+)[""'])(?=[^>]*\b(?:linkname|name)=[""']([^""']+)[""'])[^>]*>",
                 RegexOptions.IgnoreCase);
             var buttonMatches = buttonRegex.Matches(html);
-
-            var allNoteFieldIds = new List<string>();
-            var allAnswerFieldIds = new List<string>();
+        
             int btnCounter = 0;
-
+        
+            // collect the set of group keys present on this page (for "all" buttons)
+            var allGroupKeys = groups.Keys.ToList();
+            var answerGroupKeys = allGroupKeys.Where(k => !noteGroupKeys.Contains(k)).ToList();
+            var noteGroupKeysList = allGroupKeys.Where(k =>  noteGroupKeys.Contains(k)).ToList();
+        
             foreach (Match buttonMatch in buttonMatches)
             {
-                var imgId = SanitizeFieldName(buttonMatch.Groups[2].Value);
-                var linkName = SanitizeFieldName(buttonMatch.Groups[3].Value);
-                var fullTag = buttonMatch.Groups[1].Value + buttonMatch.Groups[4].Value;
-                
-                bool isNoteButton = noteKeys.Contains(linkName) || fullTag.Contains("teacherNotes", StringComparison.OrdinalIgnoreCase);
-                bool isAll = linkName.Contains("all") || imgId.Contains("all") || fullTag.Contains("allanswers") || fullTag.Contains("allnotes");
-                bool isAllNotes = isAll && isNoteButton;
-                bool isAllAnswers = isAll && !isNoteButton;
-
+                var imgId = SanitizeFieldName(buttonMatch.Groups[1].Value);
+                var linkName = SanitizeFieldName(buttonMatch.Groups[2].Value);
+                bool isNoteButton = noteGroupKeys.Contains(linkName)
+                                 || buttonMatch.Value.Contains("teacherNotes", StringComparison.OrdinalIgnoreCase)
+                                 || buttonMatch.Value.Contains("tbnote", StringComparison.OrdinalIgnoreCase);
+        
                 float leftPx = 0f, topPx = 0f;
-                var styleMatch = Regex.Match(fullTag,
+                var styleMatch = Regex.Match(buttonMatch.Value,
                     @"style=[""'][^""']*left:\s*([\d\.]+)px[^""']*top:\s*([\d\.]+)px",
                     RegexOptions.IgnoreCase);
                 if (styleMatch.Success)
                 {
-                    leftPx = float.Parse(styleMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
-                    topPx = float.Parse(styleMatch.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
+                    leftPx = float.Parse(styleMatch.Groups[1].Value, CultureInfo.InvariantCulture);
+                    topPx = float.Parse(styleMatch.Groups[2].Value, CultureInfo.InvariantCulture);
                 }
-                float bx = leftPx * 0.75f;
-                float by = pageHeight - (topPx * 0.75f) - 24f;
-
+                float bx = leftPx * pxToPt;
+                float by = pageHeight - (topPx * pxToPt) - 24f;
+        
+                // Which groups does this individual button control?
+                var controlledGroups = new List<string>();
+        
+                // direct group match (e.g. linkName == "has2_5_1")
+                if (groups.ContainsKey(linkName))
+                    controlledGroups.Add(linkName);
+        
+                // "all answers" / "all notes" detection:
+                //   linkName contains "all" AND (contains "note"/"teacher" for notes, else answers)
+                bool isAllButton = linkName.IndexOf("all", StringComparison.OrdinalIgnoreCase) >= 0;
+                bool isAllNotes = isAllButton && (
+                    linkName.IndexOf("note", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    linkName.IndexOf("teacher", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    isNoteButton);
+        
+                // Create the fields for every controlled group (individual mode)
                 var currentButtonFields = new List<string>();
-
-                if (answerData.TryGetValue(linkName, out var answersForThisButton))
+                foreach (var gk in controlledGroups)
                 {
-                    for (int f = 0; f < answersForThisButton.Count; f++)
+                    foreach (var spec in groups[gk])
                     {
-                        var ans = answersForThisButton[f];
-                        var fieldId = isNoteButton ? $"N_{pageIndex}_{linkName}_{f}" : $"A_{pageIndex}_{linkName}_{f}";
+                        var fieldId = CreateFieldForSpec(pdf, pdfPage, form, spec,
+                            pageIndex, gk, answerFont, bookRed, currentButtonFields.Count);
                         currentButtonFields.Add(fieldId);
-                        if (isNoteButton) allNoteFieldIds.Add(fieldId);
-                        else allAnswerFieldIds.Add(fieldId);
-
-                        var textRect = new Rectangle(ans.x, ans.y, ans.w, 18f);
-                        var textField = new TextFormFieldBuilder(pdf, fieldId)
-                            .SetWidgetRectangle(textRect)
-                            .CreateText();
-                        textField.SetValue(ans.text);
-                        textField.SetReadOnly(false); // MUST be false to allow JS to change display
-
-                        foreach (var w in textField.GetWidgets())
-                        {
-                            w.SetBorder(new PdfArray(new PdfNumber[] { new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
-                            w.SetFlags(PdfAnnotation.PRINT);
-                            var apStream = new PdfFormXObject(textRect);
-                            var canvas = new PdfCanvas(apStream, pdf);
-                            canvas.BeginText();
-                            canvas.SetFontAndSize(answerFont, 11);
-                            canvas.SetTextMatrix(2, 4);
-                            canvas.SetFillColor(bookRed);
-                            canvas.ShowText(ans.text);
-                            canvas.EndText();
-                            canvas.Release();
-                            w.SetAppearance(PdfName.N, apStream.GetPdfObject());
-                        }
-                        form.AddField(textField, pdfPage);
                     }
                 }
-
-                if (svgData.TryGetValue(linkName, out var shapesForThisButton))
+        
+                // ---------- build JS ----------
+                string toggleScript;
+                if (isAllButton)
                 {
-                    for (int f = 0; f < shapesForThisButton.Count; f++)
+                    // Toggle EVERY field belonging to the answer (or note) groups on THIS page.
+                    // Field names are  A_{page}_{group}_{idx}  /  S_{page}_{group}_{idx}
+                    var targetGroups = isAllNotes ? noteGroupKeysList : answerGroupKeys;
+                    if (targetGroups.Count == 0)
                     {
-                        var shape = shapesForThisButton[f];
-                        var fieldId = isNoteButton ? $"NS_{pageIndex}_{linkName}_{f}" : $"AS_{pageIndex}_{linkName}_{f}";
-                        currentButtonFields.Add(fieldId);
-                        if (isNoteButton) allNoteFieldIds.Add(fieldId);
-                        else allAnswerFieldIds.Add(fieldId);
-
-                        var shapeRect = new Rectangle(shape.x, shape.y, shape.w, shape.h);
-                        var textField = new TextFormFieldBuilder(pdf, fieldId)
-                            .SetWidgetRectangle(shapeRect)
-                            .CreateText();
-                        textField.SetReadOnly(false); // MUST be false to allow JS to change display
-
-                        foreach (var w in textField.GetWidgets())
-                        {
-                            w.SetBorder(new PdfArray(new PdfNumber[] { new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
-                            w.SetFlags(PdfAnnotation.PRINT);
-                            var apStream = new PdfFormXObject(shapeRect);
-                            var canvas = new PdfCanvas(apStream, pdf);
-                            canvas.SetStrokeColor(bookRed);
-                            canvas.SetLineWidth(1.0f);
-                            DrawSvgPath(canvas, shape.pathD, shape.x, shape.y, shape.h);
-                            canvas.Stroke();
-                            canvas.Release();
-                            w.SetAppearance(PdfName.N, apStream.GetPdfObject());
-                        }
-                        form.AddField(textField, pdfPage);
+                        toggleScript = "app.alert('No fields to toggle');";
+                    }
+                    else
+                    {
+                        // Build a matcher list: each group key, prefixed and suffixed to avoid partial matches.
+                        var prefixes = targetGroups
+                            .Select(g => $"A_{pageIndex}_{g}_")
+                            .Concat(targetGroups.Select(g => $"S_{pageIndex}_{g}_"))
+                            .ToArray();
+        
+                        var sb = new System.Text.StringBuilder();
+                        sb.Append("try {\n");
+                        sb.Append("  var prefs = [");
+                        sb.Append(string.Join(",", prefixes.Select(p => $"'{p}'")));
+                        sb.Append("];\n");
+                        sb.Append("  var anyVisible = false;\n");
+                        sb.Append("  for (var i = 0; i < this.numFields; i++) {\n");
+                        sb.Append("    var f = this.getField(this.getNthFieldName(i));\n");
+                        sb.Append("    if (!f) continue;\n");
+                        sb.Append("    var hit = false;\n");
+                        sb.Append("    for (var p = 0; p < prefs.length; p++) {\n");
+                        sb.Append("      if (f.name.indexOf(prefs[p]) === 0) { hit = true; break; }\n");
+                        sb.Append("    }\n");
+                        sb.Append("    if (hit && f.display === 0) anyVisible = true;\n");
+                        sb.Append("  }\n");
+                        sb.Append("  var newDisplay = anyVisible ? 1 : 0;\n");
+                        sb.Append("  for (var i = 0; i < this.numFields; i++) {\n");
+                        sb.Append("    var f = this.getField(this.getNthFieldName(i));\n");
+                        sb.Append("    if (!f) continue;\n");
+                        sb.Append("    var hit = false;\n");
+                        sb.Append("    for (var p = 0; p < prefs.length; p++) {\n");
+                        sb.Append("      if (f.name.indexOf(prefs[p]) === 0) { hit = true; break; }\n");
+                        sb.Append("    }\n");
+                        sb.Append("    if (!hit) continue;\n");
+                        sb.Append("    f.display = newDisplay;\n");
+                        sb.Append("    var v = f.value; f.value = ''; f.value = v;\n");
+                        sb.Append("  }\n");
+                        sb.Append("} catch(e) {}\n");
+                        toggleScript = sb.ToString();
                     }
                 }
-
+                else
+                {
+                    // INDIVIDUAL BUTTON: toggle only its own fields
+                    var sb = new System.Text.StringBuilder();
+                    sb.Append("try {\n");
+                    foreach (var id in currentButtonFields)
+                        sb.Append($"var f = this.getField('{id}'); if (f) {{ f.display = (f.display === 1) ? 0 : 1; var v = f.value; f.value = ''; f.value = v; }}\n");
+                    sb.Append("} catch(e) {}\n");
+                    toggleScript = sb.ToString();
+                }
+        
+                // ---------- create pushbutton with JS action ----------
                 var buttonRect = new Rectangle(bx, by, 24, 24);
                 var toggleFieldName = $"T_{pageIndex}_{imgId}_{btnCounter++}";
-                
-                // Use PushButton with explicit /A action
                 var buttonField = new PushButtonFormFieldBuilder(pdf, toggleFieldName)
                     .SetWidgetRectangle(buttonRect)
                     .SetCaption("")
                     .CreatePushButton();
-
-                string toggleScript;
-                if (isAllNotes)
-                {
-                    toggleScript = "var anyVisible = false;\n" +
-                                   "for (var i = 0; i < this.numFields; i++) {\n" +
-                                   "  var f = this.getField(this.getNthFieldName(i));\n" +
-                                   "  if (f && (f.name.indexOf('N_') === 0 || f.name.indexOf('NS_') === 0)) {\n" +
-                                   "    if (f.display === 0) anyVisible = true;\n" +
-                                   "  }\n" +
-                                   "}\n" +
-                                   "var newDisplay = anyVisible ? 1 : 0;\n" +
-                                   "for (var i = 0; i < this.numFields; i++) {\n" +
-                                   "  var f = this.getField(this.getNthFieldName(i));\n" +
-                                   "  if (f && (f.name.indexOf('N_') === 0 || f.name.indexOf('NS_') === 0)) {\n" +
-                                   "    f.display = newDisplay;\n" +
-                                   "    var v = f.value; f.value = ''; f.value = v;\n" +
-                                   "  }\n" +
-                                   "}\n";
-                }
-                else if (isAllAnswers)
-                {
-                    toggleScript = "var anyVisible = false;\n" +
-                                   "for (var i = 0; i < this.numFields; i++) {\n" +
-                                   "  var f = this.getField(this.getNthFieldName(i));\n" +
-                                   "  if (f && (f.name.indexOf('A_') === 0 || f.name.indexOf('AS_') === 0)) {\n" +
-                                   "    if (f.display === 0) anyVisible = true;\n" +
-                                   "  }\n" +
-                                   "}\n" +
-                                   "var newDisplay = anyVisible ? 1 : 0;\n" +
-                                   "for (var i = 0; i < this.numFields; i++) {\n" +
-                                   "  var f = this.getField(this.getNthFieldName(i));\n" +
-                                   "  if (f && (f.name.indexOf('A_') === 0 || f.name.indexOf('AS_') === 0)) {\n" +
-                                   "    f.display = newDisplay;\n" +
-                                   "    var v = f.value; f.value = ''; f.value = v;\n" +
-                                   "  }\n" +
-                                   "}\n";
-                }
-                else if (isNoteButton)
-                {
-                    toggleScript = "";
-                }
-                else
-                {
-                    toggleScript = "try {";
-                    foreach (var id in currentButtonFields)
-                    {
-                        toggleScript += $"var f = this.getField('{id}'); if (f) {{ f.display = (f.display === 1) ? 0 : 1; var v = f.value; f.value = ''; f.value = v; }}";
-                    }
-                    toggleScript += "} catch(e) {}";
-                }
-
+        
                 var jsAction = PdfAction.CreateJavaScript(toggleScript);
                 foreach (var w in buttonField.GetWidgets())
                 {
-                    if (isNoteButton && !isAllNotes)
-                    {
-                        w.SetFlags(PdfAnnotation.HIDDEN);
-                    }
-                    else
-                    {
-                        w.SetBorder(new PdfArray(new PdfNumber[] { new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
-                        w.SetFlags(PdfAnnotation.PRINT);
-                        
-                        // THE ABSOLUTE CRITICAL FIX FOR ACROBAT / CHROME
-                        w.Put(PdfName.A, jsAction.GetPdfObject());
-                        
-                        var mkDict = new PdfDictionary();
-                        mkDict.Put(PdfName.CA, new PdfString(""));
-                        w.GetPdfObject().Put(PdfName.MK, mkDict);
-
-                        var ap = new PdfFormXObject(new Rectangle(0, 0, 24, 24));
-                        w.SetAppearance(PdfName.N, ap.GetPdfObject());
-                    }
+                    w.SetBorder(new PdfArray(new PdfNumber[] { new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
+                    w.SetFlags(PdfAnnotation.PRINT);
+                    w.Put(PdfName.A, jsAction.GetPdfObject());
+                    var aaDict = new PdfDictionary();
+                    aaDict.Put(PdfName.U, jsAction.GetPdfObject());
+                    w.Put(PdfName.AA, aaDict);
+                    var mkDict = new PdfDictionary();
+                    mkDict.Put(PdfName.CA, new PdfString(""));
+                    w.GetPdfObject().Put(PdfName.MK, mkDict);
+                    var ap = new PdfFormXObject(new Rectangle(0, 0, 24, 24));
+                    w.SetAppearance(PdfName.N, ap.GetPdfObject());
                 }
                 form.AddField(buttonField, pdfPage);
             }
         }
-
+        
+        // ---- helpers -------------------------------------------------------------
+        
+        private enum FieldKind { Text, Shape }
+        
+        private sealed class FieldSpec
+        {
+            public FieldKind Kind;
+            public float X, Y, W, H;
+            public string? Text;
+            public string? PathD;
+            public bool IsNote;
+        }
+        
+        private string CreateFieldForSpec(
+            PdfDocument pdf, PdfPage pdfPage, PdfAcroForm form,
+            FieldSpec spec, int pageIndex, string groupKey,
+            PdfFont answerFont, iText.Kernel.Colors.Color bookRed, int idx)
+        {
+            string fieldId = (spec.Kind == FieldKind.Text ? "A_" : "S_")
+                           + $"{pageIndex}_{groupKey}_{idx}";
+            var rect = new Rectangle(spec.X, spec.Y, spec.W, spec.H);
+        
+            var textField = new TextFormFieldBuilder(pdf, fieldId)
+                .SetWidgetRectangle(rect)
+                .CreateText();
+            textField.SetReadOnly(true);
+        
+            foreach (var w in textField.GetWidgets())
+            {
+                w.SetBorder(new PdfArray(new PdfNumber[] { new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
+                w.SetFlags(PdfAnnotation.PRINT);
+        
+                var apStream = new PdfFormXObject(rect);
+                var canvas = new PdfCanvas(apStream, pdf);
+        
+                if (spec.Kind == FieldKind.Text)
+                {
+                    canvas.BeginText();
+                    canvas.SetFontAndSize(answerFont, 11);
+                    canvas.SetTextMatrix(2, 4);
+                    canvas.SetFillColor(bookRed);
+                    canvas.ShowText(spec.Text ?? "");
+                    canvas.EndText();
+                }
+                else
+                {
+                    canvas.SetStrokeColor(bookRed);
+                    canvas.SetLineWidth(1.0f);
+                    DrawSvgPath(canvas, spec.PathD ?? "", spec.X, spec.Y, spec.H);
+                    canvas.Stroke();
+                }
+        
+                canvas.Release();
+                w.SetAppearance(PdfName.N, apStream.GetPdfObject());
+            }
+            form.AddField(textField, pdfPage);
+            return fieldId;
+        }
         private void DrawSvgPath(PdfCanvas canvas, string pathD, float baseX, float baseY, float height)
         {
             try
