@@ -342,11 +342,7 @@ namespace BookViewer.Services
                     for (int f = 0; f < shapesForThisButton.Count; f++)
                     {
                         var shape = shapesForThisButton[f];
-                        var fieldId = isNoteButton ? $"N_{pageIndex}_{linkName}_{f}" : $"A_{pageIndex}_{linkName}_{f}";
-                        // Make SVG field ID unique for notes
-                        if (isNoteButton) fieldId = $"NS_{pageIndex}_{linkName}_{f}";
-                        else fieldId = $"AS_{pageIndex}_{linkName}_{f}";
-
+                        var fieldId = isNoteButton ? $"NS_{pageIndex}_{linkName}_{f}" : $"AS_{pageIndex}_{linkName}_{f}";
                         currentButtonFields.Add(fieldId);
                         if (isNoteButton) allNoteFieldIds.Add(fieldId);
                         else allAnswerFieldIds.Add(fieldId);
