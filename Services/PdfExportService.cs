@@ -35,7 +35,6 @@ namespace BookViewer.Services
 
         private string _debugLogPath = "";
 
-        // Export options (set at the start of ExportBookAsPdfAsync; read in CreateFieldForSpec)
         private bool _optIncludeAnswers;
         private bool _optIncludeNotes;
         private bool _optIncludeStudentAnswers;
@@ -149,9 +148,6 @@ namespace BookViewer.Services
             }
         }
 
-        // =====================================================================
-        //  Field model
-        // =====================================================================
         private enum FieldKind { Text, Shape }
 
         private sealed class FieldSpec
@@ -171,13 +167,11 @@ namespace BookViewer.Services
             var pdfPage = pdf.GetPage(1);
             float pageHeight = pdfPage.GetPageSize().GetHeight();
 
-            // ---------------- FONT ----------------
             PdfFont answerFont = await LoadAnswerFontAsync(html, tempDir, pageIndex);
 
             iText.Kernel.Colors.Color bookRed = new DeviceRgb(228, 4, 119);
             float pxToPt = 0.75f;
 
-            // groupKey (has2_...) -> list of specs (text + shape)
             var groups = new Dictionary<string, List<FieldSpec>>(StringComparer.OrdinalIgnoreCase);
             var noteGroupKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -188,7 +182,6 @@ namespace BookViewer.Services
                 list.Add(spec);
             }
 
-            // ---------------- 1) text divs (tbred / tbnote) ----------------
             var fragmentRegex = new Regex(
                 @"<div\b(?<divtag>[^>]*\bclass=[""'][^""']*\b(?:tbred|tbnote)\b[^""']*[""'][^>]*)>(?<body>[\s\S]*?)</div>",
                 RegexOptions.IgnoreCase);
@@ -235,7 +228,6 @@ namespace BookViewer.Services
                 });
             }
 
-            // ---------------- 2) svg shapes (tbred / tbnote) ----------------
             var svgRegex = new Regex(
                 @"<svg\b(?<tag>[^>]*\bclass=[""'][^""']*\b(?:tbred|tbnote)\b[^""']*[""'][^>]*)>(?<content>[\s\S]*?)</svg>",
                 RegexOptions.IgnoreCase);
@@ -301,7 +293,6 @@ namespace BookViewer.Services
                 });
             }
 
-            // ---------------- 3) buttons ----------------
             var buttonRegex = new Regex(
                 @"<img\b(?=[^>]*\bclass=[""']?[^""']*(?:hsgbtn|has2btn|redbtn)[^""']*[""']?)(?=[^>]*\bid=[""']([^""']+)[""'])(?=[^>]*\b(?:linkname|name)=[""']([^""']+)[""'])[^>]*>",
                 RegexOptions.IgnoreCase);
@@ -328,7 +319,6 @@ namespace BookViewer.Services
 
                 bool linkIsConcreteGroup = groups.ContainsKey(linkName);
 
-                // Synthetic "all" buttons injected by BookService
                 bool isAllAnswersButton =
                     linkName == "__all_answers__"
                     || (!linkIsConcreteGroup && !isNoteButton);
@@ -352,7 +342,6 @@ namespace BookViewer.Services
                 float bx = leftPx * pxToPt;
                 float by = pageHeight - (topPx * pxToPt) - 24f;
 
-                // Create fields for the concrete group this button controls (individual case)
                 var currentButtonFields = new List<string>();
                 if (linkIsConcreteGroup)
                 {
@@ -364,7 +353,6 @@ namespace BookViewer.Services
                     }
                 }
 
-                // Build JS
                 string toggleScript;
 
                 if (isAllAnswersButton || isAllNotesButton)
@@ -418,7 +406,6 @@ namespace BookViewer.Services
                     continue;
                 }
 
-                // Create pushbutton with JS action
                 var buttonRect = new Rectangle(bx, by, 24, 24);
                 var toggleFieldName = $"T_{pageIndex}_{imgId}_{btnCounter++}";
                 var buttonField = new PushButtonFormFieldBuilder(pdf, toggleFieldName)
@@ -445,9 +432,6 @@ namespace BookViewer.Services
             }
         }
 
-        // =====================================================================
-        //  Font loading (skip woff/woff2, prefer ttf/otf, log everything)
-        // =====================================================================
         private async Task<PdfFont> LoadAnswerFontAsync(string html, string tempDir, int pageIndex)
         {
             try
@@ -465,8 +449,8 @@ namespace BookViewer.Services
 
                     DebugLog($"[FONT {pageIndex}] @font-face has {urlMatches.Count} data URLs");
 
-                    string chosenB64 = null;
-                    string chosenExt = null;
+                    string? chosenB64 = null;
+                    string? chosenExt = null;
 
                     foreach (Match um in urlMatches)
                     {
@@ -517,9 +501,6 @@ namespace BookViewer.Services
             return PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
         }
 
-        // =====================================================================
-        //  Field creation
-        // =====================================================================
         private string CreateFieldForSpec(
             PdfDocument pdf, PdfPage pdfPage, PdfAcroForm form,
             FieldSpec spec, int pageIndex, string groupKey,
@@ -528,29 +509,29 @@ namespace BookViewer.Services
             string fieldId = (spec.Kind == FieldKind.Text ? "A_" : "S_")
                            + $"{pageIndex}_{groupKey}_{idx}";
             var rect = new Rectangle(spec.X, spec.Y, spec.W, spec.H);
-        
+
             var textField = new TextFormFieldBuilder(pdf, fieldId)
                 .SetWidgetRectangle(rect)
                 .CreateText();
             textField.SetReadOnly(true);
-        
+
             bool shouldBeVisible =
                 spec.IsNote
                     ? _optIncludeNotes
                     : (_optIncludeAnswers || _optIncludeStudentAnswers);
-        
+
             var fontPdfObj = answerFont.GetPdfObject();
             if (!fontPdfObj.IsIndirect())
                 fontPdfObj = fontPdfObj.MakeIndirect(pdf);
-        
+
             foreach (var w in textField.GetWidgets())
             {
                 w.SetBorder(new PdfArray(new PdfNumber[] { new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
                 w.SetFlags(PdfAnnotation.PRINT);
-        
+
                 var apStream = new PdfFormXObject(rect);
                 var canvas = new PdfCanvas(apStream, pdf);
-        
+
                 if (spec.Kind == FieldKind.Text)
                 {
                     canvas.BeginText();
@@ -559,7 +540,7 @@ namespace BookViewer.Services
                     canvas.SetFillColor(bookRed);
                     canvas.ShowText(spec.Text ?? "");
                     canvas.EndText();
-        
+
                     string fn = "F1";
                     try
                     {
@@ -569,11 +550,13 @@ namespace BookViewer.Services
                         if (mm.Success) fn = mm.Groups[1].Value;
                     }
                     catch { }
-        
+
+                    // Build /Resources from scratch — do NOT call GetResources()
                     var resources = new PdfDictionary();
                     var fontDict = new PdfDictionary();
                     fontDict.Put(new PdfName(fn), fontPdfObj);
                     resources.Put(PdfName.Font, fontDict);
+
                     apStream.GetPdfObject().Put(PdfName.Resources, resources);
                 }
                 else
@@ -583,10 +566,10 @@ namespace BookViewer.Services
                     DrawSvgPath(canvas, spec.PathD ?? "", spec.X, spec.Y, spec.H);
                     canvas.Stroke();
                 }
-        
+
                 canvas.Release();
                 w.SetAppearance(PdfName.N, apStream.GetPdfObject());
-        
+
                 if (!shouldBeVisible)
                     w.SetFlags(w.GetFlags() | PdfAnnotation.HIDDEN);
             }
@@ -594,9 +577,6 @@ namespace BookViewer.Services
             return fieldId;
         }
 
-        // =====================================================================
-        //  SVG path drawing
-        // =====================================================================
         private void DrawSvgPath(PdfCanvas canvas, string pathD, float baseX, float baseY, float height)
         {
             try
@@ -685,9 +665,6 @@ namespace BookViewer.Services
             return Regex.Replace(s, @"[^A-Za-z0-9_\-]", "_");
         }
 
-        // =====================================================================
-        //  CSS + base64 image extraction
-        // =====================================================================
         private string InjectPdfCss(string html)
         {
             var css = @"
