@@ -520,7 +520,9 @@ namespace BookViewer.Services
                     ? _optIncludeNotes
                     : (_optIncludeAnswers || _optIncludeStudentAnswers);
 
-            var fontPdfObj = answerFont.GetPdfObject();
+            // Ensure the font's PdfObject is indirect so it can live in a resources dict.
+            // The declared type MUST be PdfObject, not PdfDictionary.
+            iText.Kernel.Pdf.PdfObject fontPdfObj = answerFont.GetPdfObject();
             if (!fontPdfObj.IsIndirect())
                 fontPdfObj = fontPdfObj.MakeIndirect(pdf);
 
@@ -551,7 +553,7 @@ namespace BookViewer.Services
                     }
                     catch { }
 
-                    // Build /Resources from scratch — do NOT call GetResources()
+                    // Build /Resources from scratch — no GetResources() call.
                     var resources = new PdfDictionary();
                     var fontDict = new PdfDictionary();
                     fontDict.Put(new PdfName(fn), fontPdfObj);
