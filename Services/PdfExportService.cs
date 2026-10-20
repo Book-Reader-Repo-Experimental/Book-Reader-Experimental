@@ -539,8 +539,6 @@ namespace BookViewer.Services
                     ? _optIncludeNotes
                     : (_optIncludeAnswers || _optIncludeStudentAnswers);
         
-            // Ensure the font's PdfObject is indirect so it can be referenced
-            // from the appearance stream's /Resources /Font dictionary.
             var fontPdfObj = answerFont.GetPdfObject();
             if (!fontPdfObj.IsIndirect())
                 fontPdfObj = fontPdfObj.MakeIndirect(pdf);
@@ -562,7 +560,6 @@ namespace BookViewer.Services
                     canvas.ShowText(spec.Text ?? "");
                     canvas.EndText();
         
-                    // ---- Register the font in the appearance stream's /Resources ----
                     string fn = "F1";
                     try
                     {
