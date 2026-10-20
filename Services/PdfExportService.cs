@@ -145,6 +145,7 @@ namespace BookViewer.Services
             var pdfPage = pdf.GetPage(1);
             float pageHeight = pdfPage.GetPageSize().GetHeight();
 
+            // 1. Extract Font
             PdfFont answerFont = null;
             try
             {
@@ -166,6 +167,7 @@ namespace BookViewer.Services
             if (answerFont == null)
                 answerFont = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
 
+            // EXACT BOOK RED (#E40477)
             iText.Kernel.Colors.Color bookRed = new DeviceRgb(228, 4, 119);
 
             // 2. Parse Text Answers
@@ -249,10 +251,11 @@ namespace BookViewer.Services
                 if (widthMatch.Success) widthPx = float.Parse(widthMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
                 if (heightMatch.Success) heightPx = float.Parse(heightMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
 
-                float x = leftPx * 0.75f;
-                float y = pageHeight - ((topPx + heightPx) * 0.75f);
-                float w = widthPx * 0.75f;
-                float h = heightPx * 0.75f;
+                // Padded bounding box to prevent clipping
+                float x = (leftPx - 10) * 0.75f;
+                float y = pageHeight - ((topPx + heightPx + 10) * 0.75f);
+                float w = (widthPx + 20) * 0.75f;
+                float h = (heightPx + 20) * 0.75f;
 
                 if (!svgData.TryGetValue(name, out var list))
                     svgData[name] = list = new List<(string, float, float, float, float)>();
@@ -261,21 +264,27 @@ namespace BookViewer.Services
 
             // 4. Parse Buttons
             var buttonRegex = new Regex(
-                @"<img\b(?=[^>]*\bclass=[""']?[^""']*(?:hsgbtn|has2btn|redbtn)[^""']*[""']?)(?=[^>]*\bid=[""']([^""']+)[""'])(?=[^>]*\b(?:linkname|name)=[""']([^""']+)[""'])[^>]*>",
+                @"<img\b(?<tag>[^>]*\bclass=[""']?[^""']*(?:hsgbtn|has2btn|redbtn)[^""']*[""']?)(?=[^>]*\bid=[""']([^""']+)[""'])(?=[^>]*\b(?:linkname|name)=[""']([^""']+)[""'])(?<rest>[^>]*)>",
                 RegexOptions.IgnoreCase);
             var buttonMatches = buttonRegex.Matches(html);
 
-            var allFieldIds = new List<string>();
+            var allNoteFieldIds = new List<string>();
+            var allAnswerFieldIds = new List<string>();
             int btnCounter = 0;
 
             foreach (Match buttonMatch in buttonMatches)
             {
-                var imgId = SanitizeFieldName(buttonMatch.Groups[1].Value);
-                var linkName = SanitizeFieldName(buttonMatch.Groups[2].Value);
-                bool isNoteButton = noteKeys.Contains(linkName) || buttonMatch.Value.Contains("teacherNotes", StringComparison.OrdinalIgnoreCase);
+                var imgId = SanitizeFieldName(buttonMatch.Groups[2].Value);
+                var linkName = SanitizeFieldName(buttonMatch.Groups[3].Value);
+                var fullTag = buttonMatch.Groups[1].Value + buttonMatch.Groups[4].Value;
+                
+                bool isNoteButton = noteKeys.Contains(linkName) || fullTag.Contains("teacherNotes", StringComparison.OrdinalIgnoreCase);
+                bool isAll = linkName.Contains("all") || imgId.Contains("all") || fullTag.Contains("allanswers") || fullTag.Contains("allnotes");
+                bool isAllNotes = isAll && isNoteButton;
+                bool isAllAnswers = isAll && !isNoteButton;
 
                 float leftPx = 0f, topPx = 0f;
-                var styleMatch = Regex.Match(buttonMatch.Value,
+                var styleMatch = Regex.Match(fullTag,
                     @"style=[""'][^""']*left:\s*([\d\.]+)px[^""']*top:\s*([\d\.]+)px",
                     RegexOptions.IgnoreCase);
                 if (styleMatch.Success)
@@ -294,9 +303,10 @@ namespace BookViewer.Services
                     for (int f = 0; f < answersForThisButton.Count; f++)
                     {
                         var ans = answersForThisButton[f];
-                        var fieldId = $"A_{pageIndex}_{linkName}_{f}";
+                        var fieldId = isNoteButton ? $"N_{pageIndex}_{linkName}_{f}" : $"A_{pageIndex}_{linkName}_{f}";
                         currentButtonFields.Add(fieldId);
-                        allFieldIds.Add(fieldId);
+                        if (isNoteButton) allNoteFieldIds.Add(fieldId);
+                        else allAnswerFieldIds.Add(fieldId);
 
                         var textRect = new Rectangle(ans.x, ans.y, ans.w, 18f);
                         var textField = new TextFormFieldBuilder(pdf, fieldId)
@@ -332,9 +342,14 @@ namespace BookViewer.Services
                     for (int f = 0; f < shapesForThisButton.Count; f++)
                     {
                         var shape = shapesForThisButton[f];
-                        var fieldId = $"S_{pageIndex}_{linkName}_{f}";
+                        var fieldId = isNoteButton ? $"N_{pageIndex}_{linkName}_{f}" : $"A_{pageIndex}_{linkName}_{f}";
+                        // Make SVG field ID unique for notes
+                        if (isNoteButton) fieldId = $"NS_{pageIndex}_{linkName}_{f}";
+                        else fieldId = $"AS_{pageIndex}_{linkName}_{f}";
+
                         currentButtonFields.Add(fieldId);
-                        allFieldIds.Add(fieldId);
+                        if (isNoteButton) allNoteFieldIds.Add(fieldId);
+                        else allAnswerFieldIds.Add(fieldId);
 
                         var shapeRect = new Rectangle(shape.x, shape.y, shape.w, shape.h);
                         
@@ -367,65 +382,84 @@ namespace BookViewer.Services
                 var buttonRect = new Rectangle(bx, by, 24, 24);
                 var toggleFieldName = $"T_{pageIndex}_{imgId}_{btnCounter++}";
                 
-                // THE PROVEN WORKING TRIGGER: PushButton with /A action
-                var buttonField = new PushButtonFormFieldBuilder(pdf, toggleFieldName)
+                var triggerField = new TextFormFieldBuilder(pdf, toggleFieldName)
                     .SetWidgetRectangle(buttonRect)
-                    .SetCaption("")
-                    .CreatePushButton();
+                    .CreateText();
+                triggerField.SetReadOnly(false);
 
                 string toggleScript;
-                if (linkName.Contains("all"))
+                
+                if (isAllNotes)
                 {
-                    // ALL BUTTON: use this.numFields to target the correct prefix
-                    string prefix = isNoteButton ? $"A_{pageIndex}_" : $"A_{pageIndex}_";
-                    // Note: To distinguish notes vs answers, we assume notes contain 'note' in their name
-                    // If they don't, we just toggle all A_ fields for "all" buttons.
                     toggleScript = "var anyVisible = false;\n" +
                                    "for (var i = 0; i < this.numFields; i++) {\n" +
                                    "  var f = this.getField(this.getNthFieldName(i));\n" +
-                                   "  if (f && f.name.indexOf('" + prefix + "') !== -1) {\n" +
-                                   (isNoteButton ? "    if (f.name.indexOf('note') === -1) continue;\n" : "") +
+                                   "  if (f && (f.name.indexOf('N_') === 0 || f.name.indexOf('NS_') === 0)) {\n" +
                                    "    if (f.display === 0) anyVisible = true;\n" +
                                    "  }\n" +
                                    "}\n" +
                                    "var newDisplay = anyVisible ? 1 : 0;\n" +
                                    "for (var i = 0; i < this.numFields; i++) {\n" +
                                    "  var f = this.getField(this.getNthFieldName(i));\n" +
-                                   "  if (f && f.name.indexOf('" + prefix + "') !== -1) {\n" +
-                                   (isNoteButton ? "    if (f.name.indexOf('note') === -1) continue;\n" : "") +
+                                   "  if (f && (f.name.indexOf('N_') === 0 || f.name.indexOf('NS_') === 0)) {\n" +
                                    "    f.display = newDisplay;\n" +
                                    "    var v = f.value; f.value = ''; f.value = v;\n" +
                                    "  }\n" +
                                    "}\n";
                 }
+                else if (isAllAnswers)
+                {
+                    toggleScript = "var anyVisible = false;\n" +
+                                   "for (var i = 0; i < this.numFields; i++) {\n" +
+                                   "  var f = this.getField(this.getNthFieldName(i));\n" +
+                                   "  if (f && (f.name.indexOf('A_') === 0 || f.name.indexOf('AS_') === 0)) {\n" +
+                                   "    if (f.display === 0) anyVisible = true;\n" +
+                                   "  }\n" +
+                                   "}\n" +
+                                   "var newDisplay = anyVisible ? 1 : 0;\n" +
+                                   "for (var i = 0; i < this.numFields; i++) {\n" +
+                                   "  var f = this.getField(this.getNthFieldName(i));\n" +
+                                   "  if (f && (f.name.indexOf('A_') === 0 || f.name.indexOf('AS_') === 0)) {\n" +
+                                   "    f.display = newDisplay;\n" +
+                                   "    var v = f.value; f.value = ''; f.value = v;\n" +
+                                   "  }\n" +
+                                   "}\n";
+                }
+                else if (isNoteButton)
+                {
+                    toggleScript = "";
+                }
                 else
                 {
-                    // INDIVIDUAL BUTTON: toggle only its specific fields
-                    toggleScript = "try {\n";
+                    toggleScript = "try {";
                     foreach (var id in currentButtonFields)
                     {
-                        toggleScript += $"var f = this.getField('{id}'); if (f) {{ f.display = (f.display === 1) ? 0 : 1; var v = f.value; f.value = ''; f.value = v; }}\n";
+                        toggleScript += $"var f = this.getField('{id}'); if (f) {{ f.display = (f.display === 1) ? 0 : 1; var v = f.value; f.value = ''; f.value = v; }}";
                     }
                     toggleScript += "} catch(e) {}";
                 }
 
                 var jsAction = PdfAction.CreateJavaScript(toggleScript);
-                foreach (var w in buttonField.GetWidgets())
+                foreach (var w in triggerField.GetWidgets())
                 {
-                    w.SetBorder(new PdfArray(new PdfNumber[] { new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
-                    w.SetFlags(PdfAnnotation.PRINT);
-                    w.Put(PdfName.A, jsAction.GetPdfObject());
-                    var aaDict = new PdfDictionary();
-                    aaDict.Put(PdfName.U, jsAction.GetPdfObject());
-                    w.Put(PdfName.AA, aaDict);
-                    var mkDict = new PdfDictionary();
-                    mkDict.Put(PdfName.CA, new PdfString(""));
-                    w.GetPdfObject().Put(PdfName.MK, mkDict);
-                    
-                    var ap = new PdfFormXObject(new Rectangle(0, 0, 24, 24));
-                    w.SetAppearance(PdfName.N, ap.GetPdfObject());
+                    if (isNoteButton && !isAllNotes)
+                    {
+                        w.SetFlags(PdfAnnotation.HIDDEN);
+                    }
+                    else
+                    {
+                        w.SetBorder(new PdfArray(new PdfNumber[] { new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
+                        w.SetFlags(PdfAnnotation.PRINT);
+
+                        var aaDict = new PdfDictionary();
+                        aaDict.Put(PdfName.U, jsAction.GetPdfObject());
+                        w.GetPdfObject().Put(PdfName.AA, aaDict);
+
+                        var ap = new PdfFormXObject(new Rectangle(0, 0, 24, 24));
+                        w.SetAppearance(PdfName.N, ap.GetPdfObject());
+                    }
                 }
-                form.AddField(buttonField, pdfPage);
+                form.AddField(triggerField, pdfPage);
             }
         }
 
