@@ -528,31 +528,31 @@ namespace BookViewer.Services
             string fieldId = (spec.Kind == FieldKind.Text ? "A_" : "S_")
                            + $"{pageIndex}_{groupKey}_{idx}";
             var rect = new Rectangle(spec.X, spec.Y, spec.W, spec.H);
-
+        
             var textField = new TextFormFieldBuilder(pdf, fieldId)
                 .SetWidgetRectangle(rect)
                 .CreateText();
             textField.SetReadOnly(true);
-
+        
             bool shouldBeVisible =
                 spec.IsNote
                     ? _optIncludeNotes
                     : (_optIncludeAnswers || _optIncludeStudentAnswers);
-
-            // Ensure the font's PdfObject is indirect so it can be referenced from
-            // the appearance stream's /Resources /Font dictionary.
+        
+            // Ensure the font's PdfObject is indirect so it can be referenced
+            // from the appearance stream's /Resources /Font dictionary.
             var fontPdfObj = answerFont.GetPdfObject();
             if (!fontPdfObj.IsIndirect())
                 fontPdfObj = fontPdfObj.MakeIndirect(pdf);
-
+        
             foreach (var w in textField.GetWidgets())
             {
                 w.SetBorder(new PdfArray(new PdfNumber[] { new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
                 w.SetFlags(PdfAnnotation.PRINT);
-
+        
                 var apStream = new PdfFormXObject(rect);
                 var canvas = new PdfCanvas(apStream, pdf);
-
+        
                 if (spec.Kind == FieldKind.Text)
                 {
                     canvas.BeginText();
@@ -561,10 +561,8 @@ namespace BookViewer.Services
                     canvas.SetFillColor(bookRed);
                     canvas.ShowText(spec.Text ?? "");
                     canvas.EndText();
-
-                    // ---- Register the font in the appearance stream's Resources ----
-                    // Read back the font name iText emitted in the "Tf" operator,
-                    // then put the font into /Resources /Font under that exact name.
+        
+                    // ---- Register the font in the appearance stream's /Resources ----
                     string fn = "F1";
                     try
                     {
@@ -574,7 +572,7 @@ namespace BookViewer.Services
                         if (mm.Success) fn = mm.Groups[1].Value;
                     }
                     catch { }
-
+        
                     var resources = new PdfDictionary();
                     var fontDict = new PdfDictionary();
                     fontDict.Put(new PdfName(fn), fontPdfObj);
@@ -588,12 +586,12 @@ namespace BookViewer.Services
                     DrawSvgPath(canvas, spec.PathD ?? "", spec.X, spec.Y, spec.H);
                     canvas.Stroke();
                 }
-
+        
                 canvas.Release();
                 w.SetAppearance(PdfName.N, apStream.GetPdfObject());
-
+        
                 if (!shouldBeVisible)
-                    w.SetVisibility(PdfFormField.HIDDEN);
+                    w.SetFlags(w.GetFlags() | PdfAnnotation.HIDDEN);
             }
             form.AddField(textField, pdfPage);
             return fieldId;
