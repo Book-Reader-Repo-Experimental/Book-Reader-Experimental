@@ -18,6 +18,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Path = System.IO.Path;
@@ -54,13 +55,14 @@ namespace BookViewer.Services
         public async Task ExportBookAsPdfAsync(string outputPath, bool includeAnswers, bool includeTeacherNotes, bool includeStudentAnswers)
         {
             var tempFiles = new List<string>();
+            string tempDir = "";
             try
             {
                 var totalPages = _bookService.PageFiles.Count;
                 DebugLog($"[MAIN] Total pages = {totalPages}");
                 if (totalPages == 0) { OnError?.Invoke(this, "No pages to export"); return; }
 
-                var tempDir = Path.Combine(Path.GetTempPath(), "BookViewerPdfExport");
+                tempDir = Path.Combine(Path.GetTempPath(), "BookViewerPdfExport");
                 if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
                 Directory.CreateDirectory(tempDir);
 
@@ -134,79 +136,72 @@ namespace BookViewer.Services
                 {
                     try { File.Delete(file); } catch { }
                 }
+                try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true); } catch { }
             }
+        }
+
+        // =====================================================================
+        //  Field model
+        // =====================================================================
+        private enum FieldKind { Text, Shape }
+
+        private sealed class FieldSpec
+        {
+            public FieldKind Kind;
+            public float X, Y, W, H;
+            public string? Text;
+            public string? PathD;
+            public bool IsNote;
         }
 
         private async Task InjectInteractiveElements(PdfDocument pdf, string html, int pageIndex, string tempDir)
         {
             var form = PdfAcroForm.GetAcroForm(pdf, true);
             if (form == null) return;
-        
+
             var pdfPage = pdf.GetPage(1);
             float pageHeight = pdfPage.GetPageSize().GetHeight();
-        
-            // ---- font (unchanged) ----
-            PdfFont answerFont = null;
-            try
-            {
-                var fontFaceMatch = Regex.Match(html, @"@font-face\s*\{[^}]*\}", RegexOptions.IgnoreCase);
-                if (fontFaceMatch.Success)
-                {
-                    var base64Match = Regex.Match(fontFaceMatch.Value, @"base64,([^""']+)\)", RegexOptions.IgnoreCase);
-                    if (base64Match.Success)
-                    {
-                        var fontBytes = Convert.FromBase64String(base64Match.Groups[1].Value);
-                        var fontFile = Path.Combine(tempDir, $"page_{pageIndex}_font.ttf");
-                        await File.WriteAllBytesAsync(fontFile, fontBytes);
-                        answerFont = PdfFontFactory.CreateFont(fontFile, PdfEncodings.IDENTITY_H);
-                    }
-                }
-            }
-            catch { }
-            if (answerFont == null)
-                answerFont = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
-        
+
+            // ---------------- FONT ----------------
+            PdfFont answerFont = await LoadAnswerFontAsync(html, tempDir, pageIndex);
+
             iText.Kernel.Colors.Color bookRed = new DeviceRgb(228, 4, 119);
             float pxToPt = 0.75f;
-        
-            // =====================================================================
-            // A single dictionary: groupKey -> list of field descriptors.
-            // groupKey is the <has2 name="..."> value (e.g. "has2_5_1", "has2_5_2").
-            // Field descriptor carries type (text/shape), rect, payload, isNote.
-            // =====================================================================
+
+            // groupKey (has2_...) -> list of specs (text + shape)
             var groups = new Dictionary<string, List<FieldSpec>>(StringComparer.OrdinalIgnoreCase);
             var noteGroupKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        
+
             void AddSpec(string groupKey, FieldSpec spec)
             {
                 if (!groups.TryGetValue(groupKey, out var list))
                     groups[groupKey] = list = new List<FieldSpec>();
                 list.Add(spec);
             }
-        
-            // ---------- 1) text divs (tbred / tbnote) ----------
+
+            // ---------------- 1) text divs (tbred / tbnote) ----------------
             var fragmentRegex = new Regex(
                 @"<div\b(?<divtag>[^>]*\bclass=[""'][^""']*\b(?:tbred|tbnote)\b[^""']*[""'][^>]*)>(?<body>[\s\S]*?)</div>",
                 RegexOptions.IgnoreCase);
-        
+
             foreach (Match am in fragmentRegex.Matches(html))
             {
                 string divTag = am.Groups["divtag"].Value;
                 string body = am.Groups["body"].Value;
-        
+
                 var keyMatch = Regex.Match(body, @"<has2\b[^>]*\bname=[""']([^""']+)[""']", RegexOptions.IgnoreCase);
                 if (!keyMatch.Success) continue;
                 string groupKey = SanitizeFieldName(keyMatch.Groups[1].Value);
-        
+
                 bool isNote = divTag.Contains("tbnote", StringComparison.OrdinalIgnoreCase)
                            || divTag.Contains("teacherNotes", StringComparison.OrdinalIgnoreCase);
                 if (isNote) noteGroupKeys.Add(groupKey);
-        
+
                 string clean = Regex.Replace(body, "<[^>]+>", " ");
                 clean = System.Net.WebUtility.HtmlDecode(clean);
                 clean = Regex.Replace(clean, @"\s+", " ").Trim();
                 if (string.IsNullOrEmpty(clean)) continue;
-        
+
                 float leftPx = 0f, topPx = 0f, widthPx = 50f;
                 var styleMatch = Regex.Match(divTag,
                     @"style=[""'][^""']*left:\s*([\d\.]+)px[^""']*top:\s*([\d\.]+)px[^""']*width:\s*([\d\.]+)px",
@@ -217,11 +212,11 @@ namespace BookViewer.Services
                     topPx = float.Parse(styleMatch.Groups[2].Value, CultureInfo.InvariantCulture);
                     widthPx = float.Parse(styleMatch.Groups[3].Value, CultureInfo.InvariantCulture);
                 }
-        
+
                 float x = leftPx * pxToPt;
                 float y = pageHeight - (topPx * pxToPt) - 18f;
                 float w = Math.Max(widthPx * pxToPt, 40f);
-        
+
                 AddSpec(groupKey, new FieldSpec
                 {
                     Kind = FieldKind.Text,
@@ -230,45 +225,52 @@ namespace BookViewer.Services
                     IsNote = isNote
                 });
             }
-        
-            // ---------- 2) svg shapes (tbred / tbnote) ----------
+
+            // ---------------- 2) svg shapes (tbred / tbnote) ----------------
             var svgRegex = new Regex(
                 @"<svg\b(?<tag>[^>]*\bclass=[""'][^""']*\b(?:tbred|tbnote)\b[^""']*[""'][^>]*)>(?<content>[\s\S]*?)</svg>",
                 RegexOptions.IgnoreCase);
-        
+
             foreach (Match sm in svgRegex.Matches(html))
             {
                 string tag = sm.Groups["tag"].Value;
                 string content = sm.Groups["content"].Value;
-        
-                // group key: prefer the <has2 name="..."> inside content, else the svg's own name
-                string groupKey = null;
+
+                bool isNote = tag.Contains("tbnote", StringComparison.OrdinalIgnoreCase)
+                           || tag.Contains("teacherNotes", StringComparison.OrdinalIgnoreCase);
+
                 var has2Match = Regex.Match(content, @"<has2\b[^>]*\bname=[""']([^""']+)[""']", RegexOptions.IgnoreCase);
+
+                string groupKey;
                 if (has2Match.Success)
+                {
                     groupKey = SanitizeFieldName(has2Match.Groups[1].Value);
+                }
+                else if (isNote && noteGroupKeys.Count > 0)
+                {
+                    // bare note SVG -> attach to the page's note group
+                    groupKey = noteGroupKeys.First();
+                }
                 else
                 {
                     var nameMatch = Regex.Match(tag, @"\bname=[""']([^""']+)[""']", RegexOptions.IgnoreCase);
-                    if (nameMatch.Success)
-                        groupKey = SanitizeFieldName(nameMatch.Groups[1].Value);
+                    if (!nameMatch.Success) continue;
+                    groupKey = SanitizeFieldName(nameMatch.Groups[1].Value);
                 }
-                if (groupKey == null) continue;
-        
-                bool isNote = tag.Contains("tbnote", StringComparison.OrdinalIgnoreCase)
-                           || tag.Contains("teacherNotes", StringComparison.OrdinalIgnoreCase);
+
                 if (isNote) noteGroupKeys.Add(groupKey);
-        
+
                 var pathMatch = Regex.Match(content, @"<path\b[^>]*\bd=[""']([^""']+)[""']", RegexOptions.IgnoreCase);
                 if (!pathMatch.Success) continue;
                 string pathD = pathMatch.Groups[1].Value;
-        
+
                 float leftPx = 0f, topPx = 0f, widthPx = 82f, heightPx = 32f;
                 var styleMatch = Regex.Match(tag,
                     @"style=[""'][^""']*left:\s*([\d\.]+)px[^""']*top:\s*([\d\.]+)px",
                     RegexOptions.IgnoreCase);
                 var widthMatch = Regex.Match(tag, @"\bwidth=[""'](\d+(?:\.\d+)?)[""']", RegexOptions.IgnoreCase);
                 var heightMatch = Regex.Match(tag, @"\bheight=[""'](\d+(?:\.\d+)?)[""']", RegexOptions.IgnoreCase);
-        
+
                 if (styleMatch.Success)
                 {
                     leftPx = float.Parse(styleMatch.Groups[1].Value, CultureInfo.InvariantCulture);
@@ -276,12 +278,12 @@ namespace BookViewer.Services
                 }
                 if (widthMatch.Success) widthPx = float.Parse(widthMatch.Groups[1].Value, CultureInfo.InvariantCulture);
                 if (heightMatch.Success) heightPx = float.Parse(heightMatch.Groups[1].Value, CultureInfo.InvariantCulture);
-        
+
                 float x = leftPx * pxToPt;
                 float y = pageHeight - ((topPx + heightPx) * pxToPt);
                 float w = widthPx * pxToPt;
                 float h = heightPx * pxToPt;
-        
+
                 AddSpec(groupKey, new FieldSpec
                 {
                     Kind = FieldKind.Shape,
@@ -290,28 +292,46 @@ namespace BookViewer.Services
                     IsNote = isNote
                 });
             }
-        
-            // ---------- 3) buttons ----------
+
+            // ---------------- 3) buttons ----------------
             var buttonRegex = new Regex(
                 @"<img\b(?=[^>]*\bclass=[""']?[^""']*(?:hsgbtn|has2btn|redbtn)[^""']*[""']?)(?=[^>]*\bid=[""']([^""']+)[""'])(?=[^>]*\b(?:linkname|name)=[""']([^""']+)[""'])[^>]*>",
                 RegexOptions.IgnoreCase);
             var buttonMatches = buttonRegex.Matches(html);
-        
+
             int btnCounter = 0;
-        
-            // collect the set of group keys present on this page (for "all" buttons)
-            var allGroupKeys = groups.Keys.ToList();
-            var answerGroupKeys = allGroupKeys.Where(k => !noteGroupKeys.Contains(k)).ToList();
-            var noteGroupKeysList = allGroupKeys.Where(k =>  noteGroupKeys.Contains(k)).ToList();
-        
+
+            var answerGroupKeys = groups.Keys.Where(k => !noteGroupKeys.Contains(k)).ToList();
+            var noteGroupKeysList = groups.Keys.Where(k => noteGroupKeys.Contains(k)).ToList();
+
+            DebugLog($"[PAGE {pageIndex}] groups=[{string.Join(",", groups.Keys)}] " +
+                     $"answerGroups=[{string.Join(",", answerGroupKeys)}] " +
+                     $"noteGroups=[{string.Join(",", noteGroupKeysList)}] " +
+                     $"buttons={buttonMatches.Count}");
+
             foreach (Match buttonMatch in buttonMatches)
             {
                 var imgId = SanitizeFieldName(buttonMatch.Groups[1].Value);
                 var linkName = SanitizeFieldName(buttonMatch.Groups[2].Value);
+
                 bool isNoteButton = noteGroupKeys.Contains(linkName)
                                  || buttonMatch.Value.Contains("teacherNotes", StringComparison.OrdinalIgnoreCase)
                                  || buttonMatch.Value.Contains("tbnote", StringComparison.OrdinalIgnoreCase);
-        
+
+                bool linkIsConcreteGroup = groups.ContainsKey(linkName);
+
+                bool isAllNotesButton =
+                    !linkIsConcreteGroup &&
+                    (isNoteButton
+                     || buttonMatch.Value.IndexOf("teacher", StringComparison.OrdinalIgnoreCase) >= 0
+                     || buttonMatch.Value.IndexOf("note", StringComparison.OrdinalIgnoreCase) >= 0);
+
+                bool isAllAnswersButton = !linkIsConcreteGroup && !isAllNotesButton;
+
+                DebugLog($"[BTN {pageIndex}] id={imgId} linkName={linkName} " +
+                         $"concrete={linkIsConcreteGroup} note={isNoteButton} " +
+                         $"allAns={isAllAnswersButton} allNotes={isAllNotesButton}");
+
                 float leftPx = 0f, topPx = 0f;
                 var styleMatch = Regex.Match(buttonMatch.Value,
                     @"style=[""'][^""']*left:\s*([\d\.]+)px[^""']*top:\s*([\d\.]+)px",
@@ -323,103 +343,81 @@ namespace BookViewer.Services
                 }
                 float bx = leftPx * pxToPt;
                 float by = pageHeight - (topPx * pxToPt) - 24f;
-        
-                // Which groups does this individual button control?
-                var controlledGroups = new List<string>();
-        
-                // direct group match (e.g. linkName == "has2_5_1")
-                if (groups.ContainsKey(linkName))
-                    controlledGroups.Add(linkName);
-        
-                // "all answers" / "all notes" detection:
-                //   linkName contains "all" AND (contains "note"/"teacher" for notes, else answers)
-                bool isAllButton = linkName.IndexOf("all", StringComparison.OrdinalIgnoreCase) >= 0;
-                bool isAllNotes = isAllButton && (
-                    linkName.IndexOf("note", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    linkName.IndexOf("teacher", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    isNoteButton);
-        
-                // Create the fields for every controlled group (individual mode)
+
+                // Create fields for the concrete group this button controls (individual case)
                 var currentButtonFields = new List<string>();
-                foreach (var gk in controlledGroups)
+                if (linkIsConcreteGroup)
                 {
-                    foreach (var spec in groups[gk])
+                    foreach (var spec in groups[linkName])
                     {
-                        var fieldId = CreateFieldForSpec(pdf, pdfPage, form, spec,
-                            pageIndex, gk, answerFont, bookRed, currentButtonFields.Count);
-                        currentButtonFields.Add(fieldId);
+                        var fid = CreateFieldForSpec(pdf, pdfPage, form, spec,
+                            pageIndex, linkName, answerFont, bookRed, currentButtonFields.Count);
+                        currentButtonFields.Add(fid);
                     }
                 }
-        
-                // ---------- build JS ----------
+
+                // Build JS
                 string toggleScript;
-                if (isAllButton)
+
+                if (isAllAnswersButton || isAllNotesButton)
                 {
-                    // Toggle EVERY field belonging to the answer (or note) groups on THIS page.
-                    // Field names are  A_{page}_{group}_{idx}  /  S_{page}_{group}_{idx}
-                    var targetGroups = isAllNotes ? noteGroupKeysList : answerGroupKeys;
+                    var targetGroups = isAllNotesButton ? noteGroupKeysList : answerGroupKeys;
+
                     if (targetGroups.Count == 0)
                     {
-                        toggleScript = "app.alert('No fields to toggle');";
+                        DebugLog($"[BTN {pageIndex}] '{linkName}' is an ALL button but target group list is empty — skipped");
+                        continue;
                     }
-                    else
-                    {
-                        // Build a matcher list: each group key, prefixed and suffixed to avoid partial matches.
-                        var prefixes = targetGroups
-                            .Select(g => $"A_{pageIndex}_{g}_")
-                            .Concat(targetGroups.Select(g => $"S_{pageIndex}_{g}_"))
-                            .ToArray();
-        
-                        var sb = new System.Text.StringBuilder();
-                        sb.Append("try {\n");
-                        sb.Append("  var prefs = [");
-                        sb.Append(string.Join(",", prefixes.Select(p => $"'{p}'")));
-                        sb.Append("];\n");
-                        sb.Append("  var anyVisible = false;\n");
-                        sb.Append("  for (var i = 0; i < this.numFields; i++) {\n");
-                        sb.Append("    var f = this.getField(this.getNthFieldName(i));\n");
-                        sb.Append("    if (!f) continue;\n");
-                        sb.Append("    var hit = false;\n");
-                        sb.Append("    for (var p = 0; p < prefs.length; p++) {\n");
-                        sb.Append("      if (f.name.indexOf(prefs[p]) === 0) { hit = true; break; }\n");
-                        sb.Append("    }\n");
-                        sb.Append("    if (hit && f.display === 0) anyVisible = true;\n");
-                        sb.Append("  }\n");
-                        sb.Append("  var newDisplay = anyVisible ? 1 : 0;\n");
-                        sb.Append("  for (var i = 0; i < this.numFields; i++) {\n");
-                        sb.Append("    var f = this.getField(this.getNthFieldName(i));\n");
-                        sb.Append("    if (!f) continue;\n");
-                        sb.Append("    var hit = false;\n");
-                        sb.Append("    for (var p = 0; p < prefs.length; p++) {\n");
-                        sb.Append("      if (f.name.indexOf(prefs[p]) === 0) { hit = true; break; }\n");
-                        sb.Append("    }\n");
-                        sb.Append("    if (!hit) continue;\n");
-                        sb.Append("    f.display = newDisplay;\n");
-                        sb.Append("    var v = f.value; f.value = ''; f.value = v;\n");
-                        sb.Append("  }\n");
-                        sb.Append("} catch(e) {}\n");
-                        toggleScript = sb.ToString();
-                    }
+
+                    var prefixes = targetGroups
+                        .Select(g => $"A_{pageIndex}_{g}_")
+                        .Concat(targetGroups.Select(g => $"S_{pageIndex}_{g}_"))
+                        .ToArray();
+
+                    var sb = new StringBuilder();
+                    sb.Append("try {\n");
+                    sb.Append("  var prefs = [");
+                    sb.Append(string.Join(",", prefixes.Select(p => $"'{p}'")));
+                    sb.Append("];\n");
+                    sb.Append("  function hits(f){ if(!f) return false; for(var p=0;p<prefs.length;p++){ if(f.name.indexOf(prefs[p])===0) return true; } return false; }\n");
+                    sb.Append("  var anyHidden = false;\n");
+                    sb.Append("  for (var i = 0; i < this.numFields; i++) {\n");
+                    sb.Append("    var f = this.getField(this.getNthFieldName(i));\n");
+                    sb.Append("    if (hits(f) && f.display === 0) { anyHidden = true; break; }\n");
+                    sb.Append("  }\n");
+                    sb.Append("  var newDisplay = anyHidden ? 1 : 0;\n");
+                    sb.Append("  for (var i = 0; i < this.numFields; i++) {\n");
+                    sb.Append("    var f = this.getField(this.getNthFieldName(i));\n");
+                    sb.Append("    if (!hits(f)) continue;\n");
+                    sb.Append("    f.display = newDisplay;\n");
+                    sb.Append("    var v = f.value; f.value = ''; f.value = v;\n");
+                    sb.Append("  }\n");
+                    sb.Append("} catch(e) {}\n");
+                    toggleScript = sb.ToString();
                 }
-                else
+                else if (linkIsConcreteGroup)
                 {
-                    // INDIVIDUAL BUTTON: toggle only its own fields
-                    var sb = new System.Text.StringBuilder();
+                    var sb = new StringBuilder();
                     sb.Append("try {\n");
                     foreach (var id in currentButtonFields)
                         sb.Append($"var f = this.getField('{id}'); if (f) {{ f.display = (f.display === 1) ? 0 : 1; var v = f.value; f.value = ''; f.value = v; }}\n");
                     sb.Append("} catch(e) {}\n");
                     toggleScript = sb.ToString();
                 }
-        
-                // ---------- create pushbutton with JS action ----------
+                else
+                {
+                    DebugLog($"[BTN {pageIndex}] '{linkName}' unknown button — skipped");
+                    continue;
+                }
+
+                // Create pushbutton with JS action
                 var buttonRect = new Rectangle(bx, by, 24, 24);
                 var toggleFieldName = $"T_{pageIndex}_{imgId}_{btnCounter++}";
                 var buttonField = new PushButtonFormFieldBuilder(pdf, toggleFieldName)
                     .SetWidgetRectangle(buttonRect)
                     .SetCaption("")
                     .CreatePushButton();
-        
+
                 var jsAction = PdfAction.CreateJavaScript(toggleScript);
                 foreach (var w in buttonField.GetWidgets())
                 {
@@ -438,20 +436,85 @@ namespace BookViewer.Services
                 form.AddField(buttonField, pdfPage);
             }
         }
-        
-        // ---- helpers -------------------------------------------------------------
-        
-        private enum FieldKind { Text, Shape }
-        
-        private sealed class FieldSpec
+
+        // =====================================================================
+        //  Font loading (skip woff/woff2, prefer ttf/otf, log everything)
+        // =====================================================================
+        private async Task<PdfFont> LoadAnswerFontAsync(string html, string tempDir, int pageIndex)
         {
-            public FieldKind Kind;
-            public float X, Y, W, H;
-            public string? Text;
-            public string? PathD;
-            public bool IsNote;
+            try
+            {
+                var fontFaceMatch = Regex.Match(html, @"@font-face\s*\{[^}]*\}", RegexOptions.IgnoreCase);
+                if (!fontFaceMatch.Success)
+                {
+                    DebugLog($"[FONT {pageIndex}] no @font-face found");
+                }
+                else
+                {
+                    var urlMatches = Regex.Matches(fontFaceMatch.Value,
+                        @"url\(\s*['""]?data:(?:font|application)/(?<sub>[a-z0-9\.\-]+);base64,(?<b64>[^'""\)]+)['""]?\s*\)",
+                        RegexOptions.IgnoreCase);
+
+                    DebugLog($"[FONT {pageIndex}] @font-face has {urlMatches.Count} data URLs");
+
+                    string chosenB64 = null;
+                    string chosenExt = null;
+
+                    foreach (Match um in urlMatches)
+                    {
+                        var sub = um.Groups["sub"].Value.ToLowerInvariant();
+                        DebugLog($"[FONT {pageIndex}]   url subtype='{sub}'");
+                        if (sub.Contains("woff")) continue;
+                        if (sub.Contains("truetype") || sub == "ttf" ||
+                            sub.Contains("opentype") || sub == "otf" || sub.Contains("sfnt"))
+                        {
+                            chosenB64 = um.Groups["b64"].Value;
+                            chosenExt = (sub.Contains("opentype") || sub == "otf") ? "otf" : "ttf";
+                            break;
+                        }
+                    }
+
+                    if (chosenB64 == null)
+                    {
+                        DebugLog($"[FONT {pageIndex}] no usable ttf/otf URL (only woff/woff2 are not supported by iText)");
+                    }
+                    else
+                    {
+                        var fontBytes = Convert.FromBase64String(chosenB64);
+                        var fontFile = Path.Combine(tempDir, $"page_{pageIndex}_font.{chosenExt}");
+                        await File.WriteAllBytesAsync(fontFile, fontBytes);
+                        DebugLog($"[FONT {pageIndex}] loaded {chosenExt}, {fontBytes.Length} bytes");
+                        var font = PdfFontFactory.CreateFont(fontFile, PdfEncodings.IDENTITY_H);
+
+                        // glyph presence check
+                        try
+                        {
+                            var bytes = font.ConvertToBytes("農");
+                            DebugLog($"[FONT {pageIndex}] glyph '農' byte length = {bytes.Length}");
+                            if (bytes.Length == 0)
+                                DebugLog($"[FONT {pageIndex}] WARNING: font contains no glyph for 農 — text will be invisible");
+                        }
+                        catch (Exception gex)
+                        {
+                            DebugLog($"[FONT {pageIndex}] glyph test failed: {gex.Message}");
+                        }
+
+                        return font;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"[FONT {pageIndex}] LOAD FAILED: {ex.Message}");
+            }
+
+            DebugLog($"[FONT {pageIndex}] falling back to Helvetica — CJK text will be INVISIBLE");
+            return PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
         }
-        
+
+        // =====================================================================
+        //  Field creation
+        // =====================================================================
         private string CreateFieldForSpec(
             PdfDocument pdf, PdfPage pdfPage, PdfAcroForm form,
             FieldSpec spec, int pageIndex, string groupKey,
@@ -460,20 +523,20 @@ namespace BookViewer.Services
             string fieldId = (spec.Kind == FieldKind.Text ? "A_" : "S_")
                            + $"{pageIndex}_{groupKey}_{idx}";
             var rect = new Rectangle(spec.X, spec.Y, spec.W, spec.H);
-        
+
             var textField = new TextFormFieldBuilder(pdf, fieldId)
                 .SetWidgetRectangle(rect)
                 .CreateText();
             textField.SetReadOnly(true);
-        
+
             foreach (var w in textField.GetWidgets())
             {
                 w.SetBorder(new PdfArray(new PdfNumber[] { new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
                 w.SetFlags(PdfAnnotation.PRINT);
-        
+
                 var apStream = new PdfFormXObject(rect);
                 var canvas = new PdfCanvas(apStream, pdf);
-        
+
                 if (spec.Kind == FieldKind.Text)
                 {
                     canvas.BeginText();
@@ -490,13 +553,17 @@ namespace BookViewer.Services
                     DrawSvgPath(canvas, spec.PathD ?? "", spec.X, spec.Y, spec.H);
                     canvas.Stroke();
                 }
-        
+
                 canvas.Release();
                 w.SetAppearance(PdfName.N, apStream.GetPdfObject());
             }
             form.AddField(textField, pdfPage);
             return fieldId;
         }
+
+        // =====================================================================
+        //  SVG path drawing
+        // =====================================================================
         private void DrawSvgPath(PdfCanvas canvas, string pathD, float baseX, float baseY, float height)
         {
             try
@@ -533,9 +600,9 @@ namespace BookViewer.Services
                                 if (!hasPoint) { startX = p1; startY = p2; hasPoint = true; }
                                 if (!isRel) { currentX = p1; currentY = p2; }
                                 else { currentX += p1; currentY += p2; }
-                                
+
                                 canvas.MoveTo(baseX + currentX * pt, baseY + height - (currentY * pt));
-                                upperCmd = 'L'; 
+                                upperCmd = 'L';
                             }
                             else if (upperCmd == 'L')
                             {
@@ -549,7 +616,7 @@ namespace BookViewer.Services
                                 float p4 = ParseFloat(matches[++i].Value);
                                 float p5 = ParseFloat(matches[++i].Value);
                                 float p6 = ParseFloat(matches[++i].Value);
-                                
+
                                 float x1 = p1, y1 = p2, x2 = p3, y2 = p4, x3 = p5, y3 = p6;
                                 if (isRel)
                                 {
@@ -557,7 +624,7 @@ namespace BookViewer.Services
                                     x2 += currentX; y2 += currentY;
                                     x3 += currentX; y3 += currentY;
                                 }
-                                
+
                                 canvas.CurveTo(
                                     baseX + x1 * pt, baseY + height - (y1 * pt),
                                     baseX + x2 * pt, baseY + height - (y2 * pt),
@@ -565,7 +632,7 @@ namespace BookViewer.Services
                                 );
                                 currentX = x3; currentY = y3;
                             }
-                            
+
                             if (i + 1 >= matches.Count || char.IsLetter(matches[i + 1].Value[0])) break;
                         }
                     }
@@ -585,6 +652,9 @@ namespace BookViewer.Services
             return Regex.Replace(s, @"[^A-Za-z0-9_\-]", "_");
         }
 
+        // =====================================================================
+        //  CSS + base64 image extraction (unchanged)
+        // =====================================================================
         private string InjectPdfCss(string html)
         {
             var css = @"
@@ -596,7 +666,7 @@ namespace BookViewer.Services
     img.redbtn, img.hsgbtn, img.has2btn { display: inline-block !important; visibility: visible !important; opacity: 1 !important; }
     img { max-width: 100% !important; height: auto !important; }
 
-    div.tbred, div.tbnote, svg.tbred { display: none !important; }
+    div.tbred, div.tbnote, svg.tbred, svg.tbnote { display: none !important; }
 </style>
 ";
             if (html.Contains("<head>"))
