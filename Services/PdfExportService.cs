@@ -35,6 +35,11 @@ namespace BookViewer.Services
 
         private string _debugLogPath = "";
 
+        // Export options (set at the start of ExportBookAsPdfAsync; read in CreateFieldForSpec)
+        private bool _optIncludeAnswers;
+        private bool _optIncludeNotes;
+        private bool _optIncludeStudentAnswers;
+
         public PdfExportService(BookService bookService)
         {
             _bookService = bookService;
@@ -54,6 +59,10 @@ namespace BookViewer.Services
 
         public async Task ExportBookAsPdfAsync(string outputPath, bool includeAnswers, bool includeTeacherNotes, bool includeStudentAnswers)
         {
+            _optIncludeAnswers = includeAnswers;
+            _optIncludeNotes = includeTeacherNotes;
+            _optIncludeStudentAnswers = includeStudentAnswers;
+
             var tempFiles = new List<string>();
             string tempDir = "";
             try
@@ -248,7 +257,6 @@ namespace BookViewer.Services
                 }
                 else if (isNote && noteGroupKeys.Count > 0)
                 {
-                    // bare note SVG -> attach to the page's note group
                     groupKey = noteGroupKeys.First();
                 }
                 else
@@ -320,13 +328,13 @@ namespace BookViewer.Services
 
                 bool linkIsConcreteGroup = groups.ContainsKey(linkName);
 
+                // Synthetic "all" buttons injected by BookService
+                bool isAllAnswersButton =
+                    linkName == "__all_answers__"
+                    || (!linkIsConcreteGroup && !isNoteButton);
                 bool isAllNotesButton =
-                    !linkIsConcreteGroup &&
-                    (isNoteButton
-                     || buttonMatch.Value.IndexOf("teacher", StringComparison.OrdinalIgnoreCase) >= 0
-                     || buttonMatch.Value.IndexOf("note", StringComparison.OrdinalIgnoreCase) >= 0);
-
-                bool isAllAnswersButton = !linkIsConcreteGroup && !isAllNotesButton;
+                    linkName == "__all_notes__"
+                    || (!linkIsConcreteGroup && isNoteButton);
 
                 DebugLog($"[BTN {pageIndex}] id={imgId} linkName={linkName} " +
                          $"concrete={linkIsConcreteGroup} note={isNoteButton} " +
@@ -476,7 +484,7 @@ namespace BookViewer.Services
 
                     if (chosenB64 == null)
                     {
-                        DebugLog($"[FONT {pageIndex}] no usable ttf/otf URL (only woff/woff2 are not supported by iText)");
+                        DebugLog($"[FONT {pageIndex}] no usable ttf/otf URL");
                     }
                     else
                     {
@@ -486,13 +494,10 @@ namespace BookViewer.Services
                         DebugLog($"[FONT {pageIndex}] loaded {chosenExt}, {fontBytes.Length} bytes");
                         var font = PdfFontFactory.CreateFont(fontFile, PdfEncodings.IDENTITY_H);
 
-                        // glyph presence check
                         try
                         {
                             var bytes = font.ConvertToBytes("農");
                             DebugLog($"[FONT {pageIndex}] glyph '農' byte length = {bytes.Length}");
-                            if (bytes.Length == 0)
-                                DebugLog($"[FONT {pageIndex}] WARNING: font contains no glyph for 農 — text will be invisible");
                         }
                         catch (Exception gex)
                         {
@@ -529,6 +534,17 @@ namespace BookViewer.Services
                 .CreateText();
             textField.SetReadOnly(true);
 
+            bool shouldBeVisible =
+                spec.IsNote
+                    ? _optIncludeNotes
+                    : (_optIncludeAnswers || _optIncludeStudentAnswers);
+
+            // Ensure the font's PdfObject is indirect so it can be referenced from
+            // the appearance stream's /Resources /Font dictionary.
+            var fontPdfObj = answerFont.GetPdfObject();
+            if (!fontPdfObj.IsIndirect())
+                fontPdfObj = fontPdfObj.MakeIndirect(pdf);
+
             foreach (var w in textField.GetWidgets())
             {
                 w.SetBorder(new PdfArray(new PdfNumber[] { new PdfNumber(0), new PdfNumber(0), new PdfNumber(0) }));
@@ -545,6 +561,25 @@ namespace BookViewer.Services
                     canvas.SetFillColor(bookRed);
                     canvas.ShowText(spec.Text ?? "");
                     canvas.EndText();
+
+                    // ---- Register the font in the appearance stream's Resources ----
+                    // Read back the font name iText emitted in the "Tf" operator,
+                    // then put the font into /Resources /Font under that exact name.
+                    string fn = "F1";
+                    try
+                    {
+                        var bytes = canvas.GetContentStream().GetBytes();
+                        var txt = System.Text.Encoding.ASCII.GetString(bytes);
+                        var mm = Regex.Match(txt, @"/([A-Za-z0-9]+)\s+11\s+Tf");
+                        if (mm.Success) fn = mm.Groups[1].Value;
+                    }
+                    catch { }
+
+                    var resources = new PdfDictionary();
+                    var fontDict = new PdfDictionary();
+                    fontDict.Put(new PdfName(fn), fontPdfObj);
+                    resources.Put(PdfName.Font, fontDict);
+                    apStream.GetPdfObject().Put(PdfName.Resources, resources);
                 }
                 else
                 {
@@ -556,6 +591,9 @@ namespace BookViewer.Services
 
                 canvas.Release();
                 w.SetAppearance(PdfName.N, apStream.GetPdfObject());
+
+                if (!shouldBeVisible)
+                    w.SetVisibility(PdfFormField.HIDDEN);
             }
             form.AddField(textField, pdfPage);
             return fieldId;
@@ -653,7 +691,7 @@ namespace BookViewer.Services
         }
 
         // =====================================================================
-        //  CSS + base64 image extraction (unchanged)
+        //  CSS + base64 image extraction
         // =====================================================================
         private string InjectPdfCss(string html)
         {
